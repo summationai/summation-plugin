@@ -43,7 +43,8 @@ Render a short card:
 If user-scope `summation` has an `Authorization` header (old device-login bridge):
 
 1. Explain the plugin uses headerless OAuth.
-2. `codex mcp remove summation 2>/dev/null || true`
+2. `codex mcp logout summation 2>/dev/null || true
+codex mcp remove summation 2>/dev/null || true`
 3. `$addison-signin` (internal will re-ask env).
 
 ## Interpreting failures

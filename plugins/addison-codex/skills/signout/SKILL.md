@@ -9,13 +9,12 @@ Auth lives in Codex’s MCP client. Sign-out clears that session so the next Sum
 
 ## Flow
 
-1. **Disconnect** using the host control, or:
+1. **Disconnect** using the host control when available (`/mcp` → disconnect / re-authenticate for **summation**), or clear the user-scope registration:
 
 ```bash
+codex mcp logout summation 2>/dev/null || true
 codex mcp remove summation 2>/dev/null || true
 ```
-
-   Also run `codex mcp logout summation` if a session remains after remove. Prefer the host’s “disconnect / re-authenticate” when available.
 
 2. **Confirm** tools no longer work without re-auth (optional: do not call tools that would immediately re-prompt unless the user wants to stay signed out).
 

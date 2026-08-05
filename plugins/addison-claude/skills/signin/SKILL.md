@@ -78,17 +78,15 @@ If they need a specific tenant now, pause until they’ve switched org on the we
 
 ### I3. Point `summation` at the chosen env (headerless)
 
-User-scope override so the chosen env wins over the plugin default (no Authorization header):
+User-scope override so the chosen env wins over the plugin default. Do **not** set an `Authorization` header or any bearer token — host OAuth owns the credential.
 
 ```bash
 # replace URL with the allowlisted URL for the chosen env
-claude mcp remove summation -s user 2>/dev/null || true
-claude mcp add --transport http summation '<ENV_MCP_URL>' -s user
+claude mcp remove -s user summation 2>/dev/null || true
+claude mcp add -s user --transport http summation '<ENV_MCP_URL>'
 ```
 
-Never pass `--header` / Bearer tokens.
-
-If `claude mcp add` is unavailable (e.g. Desktop-only), tell them to set the Summation MCP URL to the chosen env’s allowlisted host in `/mcp` (still no headers), or re-auth after an admin points the plugin default.
+If `claude mcp add` is unavailable (e.g. Desktop-only), tell them to set the Summation MCP URL to the chosen env’s allowlisted host in `/mcp` (still no `Authorization` header), or re-auth after an admin points the plugin default.
 
 ### I4. Authenticate
 

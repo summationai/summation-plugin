@@ -1,12 +1,12 @@
 # Auth Reference (MCP-native)
 
-Codex authenticates to the hosted Summation MCP server. The plugin does not mint or store customer credentials for the happy path.
+The host (Codex, Codex, or Codex) authenticates to the hosted Summation MCP server. The plugin does not mint or store customer credentials for the happy path.
 
 ## Two experiences
 
 | | External (default) | Internal |
 |---|---|---|
-| Gate | (none) | Shell: `ADDISON_PLUGIN_INTERNAL=1` (or `true` / `yes` / `on`) when launching Codex |
+| Gate | (none) | Shell: `ADDISON_PLUGIN_INTERNAL=1` (or `true` / `yes` / `on`) when launching the host CLI |
 | Environments | One — plugin `.mcp.json` URL | User picks **prod** / **staging** / **sandbox** at sign-in |
 | Tenant | Org approved in browser | Same; skill tells user to switch org on the web app first if needed |
 | MCP URL | Bundled headerless entry | User-scope headerless `summation` pointed at the chosen env’s allowlisted URL |
@@ -32,12 +32,12 @@ Never accept free-form hosts. Internal sign-in re-points with:
 codex mcp add summation --url 'https://…'
 ```
 
-No `--header`, no Bearer injection.
+Do **not** pass `--header`, an `Authorization` header, or any bearer token — the host’s OAuth flow owns the credential.
 
 ## Happy path (both)
 
 1. Plugin loads headerless `.mcp.json` (default env for external).
-2. First tool call / explicit authenticate → MCP OAuth → browser → Codex stores token.
+2. First tool call / explicit authenticate → MCP OAuth → browser → host stores token.
 3. Tools run; identity/tenant from server-side claims.
 
 **Dogfood:** bundled default is sandbox until prod OAuth is deployed, then flip `.mcp.json` to prod.
@@ -53,16 +53,17 @@ No `--header`, no Bearer injection.
 ## What skills must not do
 
 - Device-login poll as primary auth
-- Writing `sm_dls_…` into `~/.summation/*` for Codex sessions
-- `codex mcp add … --header Authorization: …`
+- Writing `sm_dls_…` into `~/.summation/*` for host sessions
+- Registering MCP with an `Authorization` header (for example `--header Authorization: …`)
 - Asking for tokens in chat
 - Offering free-form base URLs
 
 ## Legacy bridge
 
-Old user-scope entries with `Authorization: Bearer sm_dls_…` fight OAuth:
+Old user-scope entries that inject an `Authorization` header (device-login `sm_dls_…` style) fight OAuth:
 
 ```bash
+codex mcp logout summation 2>/dev/null || true
 codex mcp remove summation 2>/dev/null || true
 ```
 
@@ -76,4 +77,4 @@ Then `$addison-signin`.
 | 401 | `$addison-signin` |
 | Wrong env (internal) | Sign out; sign in; pick env again |
 | Wrong tenant | Switch org on web app; sign out; sign in |
-| Stale Bearer header | Remove user-scope header entry |
+| Stale `Authorization` header on the MCP entry | Remove user-scope override; re-auth headerless |
