@@ -2,7 +2,7 @@
 
 Plugin marketplace for Summation. One plugin, `addison`, brings Addison to Claude Code, Claude Desktop, and OpenAI Codex: data questions over the hosted Summation MCP server, report generation and export (PDF/DOCX/Markdown), catalog discovery, bounded SQL.
 
-**Architecture:** skills orchestrate the **summation MCP server**. Auth is Claude’s MCP OAuth (browser) — the plugin ships a headerless `.mcp.json` and does not mint or inject bearer tokens for the happy path.
+**Architecture:** skills orchestrate the **summation MCP server**. Auth is **host-managed MCP OAuth** (browser) on Claude Code, Claude Desktop, and Codex — the plugin ships a headerless `.mcp.json` and does not mint or inject bearer tokens for the happy path.
 
 **External vs internal**
 
@@ -74,7 +74,7 @@ ADDISON_PLUGIN_INTERNAL=1 codex
 | `connect` | `/addison:connect` | add a data source (secrets via webapp; MCP for test/attach) |
 | `schedule` | `/addison:schedule` | recurring playbook runs + email (confirm recipients) |
 
-Credentials are **not** stored by the plugin for the happy path. Claude’s MCP client holds the session token. Do not commit config or tokens; `.summation-config*` stays gitignored for any legacy local files.
+Credentials are **not** stored by the plugin for the happy path. The host MCP client holds the session token. Do not commit config or tokens; `.summation-config*` stays gitignored for any legacy local files.
 
 ## Org announcement template
 
@@ -119,8 +119,8 @@ claude --plugin-dir ./plugins/addison-claude
 # Internal dogfood (sign-in asks env + tenant guidance)
 ADDISON_PLUGIN_INTERNAL=1 claude --plugin-dir ./plugins/addison-claude
 
-# If you still have an old user-scope header entry, remove it so OAuth can win:
-claude mcp remove summation -s user
+# If you still have an old user-scope Authorization header entry, remove it so OAuth can win:
+claude mcp remove -s user summation
 
 claude plugin validate ./plugins/addison-claude
 ./build-codex.sh

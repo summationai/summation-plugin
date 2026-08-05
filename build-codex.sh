@@ -62,9 +62,23 @@ def strip_skill_frontmatter(text: str) -> str:
 
 def codex_text(text: str) -> str:
     # Host MCP CLI first (before generic Claude → Codex).
+    # Logout BEFORE remove so Codex can still resolve the server name and clear OAuth cache.
+    text = re.sub(
+        r"claude mcp remove -s user summation(?:\s+2>/dev/null\s*\|\|\s*true)?",
+        "codex mcp logout summation 2>/dev/null || true\n"
+        "codex mcp remove summation 2>/dev/null || true",
+        text,
+    )
+    # Legacy order (if any remain)
     text = re.sub(
         r"claude mcp remove summation -s user(?:\s+2>/dev/null\s*\|\|\s*true)?",
+        "codex mcp logout summation 2>/dev/null || true\n"
         "codex mcp remove summation 2>/dev/null || true",
+        text,
+    )
+    text = re.sub(
+        r"claude mcp add -s user --transport http summation '([^']+)'",
+        r"codex mcp add summation --url '\1'",
         text,
     )
     text = re.sub(
@@ -82,8 +96,8 @@ def codex_text(text: str) -> str:
         "Prefer `codex mcp login summation` (or the host Authenticate control) if tools are not yet authed.",
     )
     text = text.replace(
-        "Also clear auth / disconnect **summation** in `/mcp` if the host keeps a session after remove.",
-        "Also run `codex mcp logout summation` if a session remains after remove.",
+        "Also clear auth / disconnect **summation** in `/mcp` if the host keeps a session after remove. Prefer the host’s “disconnect / re-authenticate” when available.",
+        "Run `codex mcp logout summation` **before** remove so the OAuth session is cleared while the server name still resolves.",
     )
     for before, after in (
         ("/addison:", "$addison-"),
