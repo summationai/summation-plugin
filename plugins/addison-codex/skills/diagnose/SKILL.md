@@ -1,38 +1,55 @@
 ---
 name: diagnose
-description: Diagnose Summation (sum-api) connectivity and auth. Use when Summation calls fail, credentials seem stale, or the user asks whether Summation is set up correctly.
+description: Diagnose Summation MCP connectivity and auth. Use when Summation tools fail, auth seems stale, or the user asks whether Summation is set up correctly.
 ---
 
-# Summation Doctor
+# Summation Diagnose
 
-Run the bundled diagnostic from the sibling `api` skill (resolve relative to this skill's base directory):
+Auth and data plane are the hosted **`summation` MCP server**. Diagnose with MCP tools, not OpenAPI scripts.
 
-```bash
-python3 ../api/scripts/sum_api.py doctor
-```
-
-`doctor` reports: mode (`internal` true/false) and environment, base URL, config file path and mode, OpenAPI reachability (title/version/path count), and whether a credential is present. External is always production; internal reports the selected environment.
-
-If the user reports Summation MCP tools failing with auth errors while `doctor` passes: the MCP registration carries its own bearer header — re-run `$addison-signin` (steps 1-4) to mint a fresh credential and re-register the server via `mcp-connect`.
-
-For the full **preflight** (authenticated environment summary — identity, org, projects, tables, views, connections, all counted and named):
+## 0. Mode
 
 ```bash
-python3 ../api/scripts/sum_api.py preflight
+printf '%s' "${ADDISON_PLUGIN_INTERNAL:-}"
 ```
 
-Render preflight as a short environment card: who you are (tenant, scopes), what's connected, what's reachable, plus 2–3 sample questions that would work against the real table names found.
+- Internal if `1` / `true` / `yes` / `on` → expect env selection at sign-in; report which env URL is configured if you can see it (`claude mcp get summation`, redact secrets).
+- Otherwise **external** → single plugin default; no env questions.
 
-To trace recent API activity (every call logs one line with `request_id` to `~/.summation/audit.jsonl`):
+## 1. Auth + identity
 
-```bash
-python3 ../api/scripts/sum_api.py audit --tail 20
-```
+Call **`whoami`** on **`summation`**.
 
-## Interpreting results
+| Result | Meaning |
+|---|---|
+| Identity + org + scopes | Auth OK. Continue. |
+| Needs authentication / 401 | `$addison-signin`. |
+| Server not found | Plugin MCP not loaded — enable **addison**, restart; internal may need the env URL re-registered. |
 
-- OpenAPI unreachable → network problem, not auth (the base URL is always an allowlisted Summation environment).
-- No credential found → hand off to the `signin` skill.
-- 401 on the list call → credential invalid or expired; re-run `login`.
-- 403 → scope problem; report the `request_id` and the granted scopes.
-- Always include `request_id` from any failing response — it joins client failures to server-side traces.
+## 2. Environment card (when `whoami` works)
+
+Call as available: `get_org`, `list_projects`, `get_default_project`, `list_data_connections`, `search_tables`.
+
+Render a short card:
+
+- **Mode:** external | internal  
+- **Env:** (internal) prod / staging / sandbox if known from MCP URL; (external) plugin default  
+- **Tenant/org:** from `whoami` / `get_org`  
+- Projects, connections, sample tables  
+- 2–3 sample questions against real names  
+
+## 3. Auth mismatch (legacy install)
+
+If user-scope `summation` has an `Authorization` header (old device-login bridge):
+
+1. Explain the plugin uses headerless OAuth.
+2. `claude mcp remove summation -s user`
+3. `$addison-signin` (internal will re-ask env).
+
+## Interpreting failures
+
+- **401** → `$addison-signin` (internal: confirm env + web-app org first).
+- **403** → wrong org/role for this env; switch org on web app and re-auth, or pick another env (internal).
+- **Empty connections** → auth fine; `$addison-connect` or `$addison-start`.
+- Long tools (`ask_analyst`, reports): wait ~120s before declaring failure.
+- Surface any `request_id` from tool errors.

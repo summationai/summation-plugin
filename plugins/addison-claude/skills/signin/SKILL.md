@@ -1,101 +1,109 @@
 ---
 name: signin
-description: Sign in to Summation. Use when the user needs to connect Addison, fix credentials, or when any Summation call fails with 401/403 and no valid config exists.
+description: Connect Claude to Summation via the hosted MCP server. Use when the user needs to connect Addison, when Summation tools are missing or unauthenticated, or when any Summation MCP call fails with 401/403.
 ---
 
-# Addison Login
+# Addison Sign-in
 
-One browser sign-in connects everything: the sum-api credential AND the hosted Summation MCP server. The helper is the sibling `api` skill: `<plugin>/skills/api/scripts/sum_api.py` (resolve relative to this skill's base directory: `../api/scripts/sum_api.py`).
-
-**The one rule that matters:** the user's only job is to open a link in their browser and approve. That link must appear in a message *you write to the user* — never left buried in command output — and you must show it **before** you poll.
+Auth is owned by Claude Code’s MCP client. You never mint, poll, store, or inject a credential. **External** and **internal** flows differ — detect mode first.
 
 ## 0. Detect mode (do this first)
 
 ```bash
-python3 ../api/scripts/sum_api.py mode
+printf '%s' "${ADDISON_PLUGIN_INTERNAL:-}"
 ```
 
-- `"internal": false` → **production only.** There is exactly one environment and one tenant — do **not** ask the user about environments or tenants. Skip to step 1 with no `--env`.
-- `"internal": true` → internal Summation user. Ask which environment they want from the returned `environments` list (prod / staging / sandbox) and pass it as `--env` in step 1. See "Internal notes" for tenant behavior.
+Treat as **internal** only if the value is `1`, `true`, `yes`, or `on` (case-insensitive). Anything else (including empty) is **external**.
 
-## 1. Mint the approval link
+| Mode | Who | Experience |
+|---|---|---|
+| **External** (default) | Customers | One environment (plugin MCP URL). No env or tenant questions. |
+| **Internal** | Summation employees (`ADDISON_PLUGIN_INTERNAL=1` in the shell that launched Claude) | Ask **environment**, then **tenant** guidance, then auth. |
+
+## Fixed environments (allowlist — never free-form hosts)
+
+| Env | MCP URL |
+|---|---|
+| `prod` | `https://mcp.summation.com/mcp` |
+| `staging` | `https://staging-mcp.summation.com/mcp` |
+| `sandbox` | `https://sandbox-mcp.summation.com/mcp` |
+
+**Dogfood note:** the plugin’s bundled `.mcp.json` currently points `summation` at **sandbox**. External users use that as-is. After prod OAuth is live, the bundled default becomes prod; internals still pick via this skill.
+
+---
+
+## External flow (default)
+
+Do **not** ask about environments or tenants. There is one host and one org session.
+
+### E1. Check auth
+
+Call MCP **`whoami`** on server **`summation`**.
+
+| Outcome | Action |
+|---|---|
+| Identity returned | Report who they are; done (or hand off to `start`). |
+| Needs authentication | Continue to E2. |
+| Server missing | Enable/reload the **addison** plugin; do not hand-register alternate URLs. |
+
+### E2. Authenticate
+
+> Summation needs a one-time browser sign-in. When Claude prompts you to authenticate **summation**, approve it in the browser (same account/SSO as the web app). No password or token is pasted into this chat.
+
+Invoke **`whoami`** again. Prefer `/mcp` → Authenticate if the host shows that control.
+
+### E3. Confirm
+
+`get_default_project` or `list_projects`. Report identity + org. Ready.
+
+---
+
+## Internal flow (`ADDISON_PLUGIN_INTERNAL=1`)
+
+### I1. Choose environment
+
+Ask which environment they want: **prod**, **staging**, or **sandbox** (only these three). Default suggestion: **sandbox** for dogfood, **prod** for customer-shaped testing once prod OAuth is up.
+
+Do not accept arbitrary URLs or hosts.
+
+### I2. Tenant (org)
+
+Explain clearly:
+
+> MCP auth binds to the **org you approve in the browser** (your active org on the Summation web app for that environment).  
+> To use a different tenant: switch org on that env’s web app first, then we re-authenticate.  
+> Env and tenant both change only by signing out and signing in again.
+
+If they need a specific tenant now, pause until they’ve switched org on the web app, then continue.
+
+### I3. Point `summation` at the chosen env (headerless)
+
+User-scope override so the chosen env wins over the plugin default (no Authorization header):
 
 ```bash
-python3 ../api/scripts/sum_api.py login --surface <claude-code|claude-desktop>
-# internal only: add --env <prod|staging|sandbox>
+# replace URL with the allowlisted URL for the chosen env
+claude mcp remove summation -s user 2>/dev/null || true
+claude mcp add --transport http summation '<ENV_MCP_URL>' -s user
 ```
 
-Always pass `--surface`: `claude-code` in Claude Code, `claude-desktop` in Claude Desktop. Do not rely on a helper default.
+Never pass `--header` / Bearer tokens.
 
-## 2. Show the link — then STOP, do not run anything else this turn
+If `claude mcp add` is unavailable (e.g. Desktop-only), tell them to set the Summation MCP URL to the chosen env’s allowlisted host in `/mcp` (still no headers), or re-auth after an admin points the plugin default.
 
-Read `verification_uri_complete` and `user_code` from the JSON and post them **copied character-for-character** (never retype, shorten, or reformat the URL — one wrong character yields a "Link invalid or expired" page):
+### I4. Authenticate
 
-> **Open this link in your browser and approve to connect Claude to Summation** — it expires in 10 minutes.
->
-> 👉 <verification_uri_complete>
->
-> Verification code: **<user_code>**
->
-> You approve in the browser; no password or secret is shared in this chat.
+Same browser prompt as external, for server **`summation`**. Then **`whoami`**.
 
-Do **not** run `login-poll` in the same turn as `login` — the user must first see this link. Show only `verification_uri_complete` and `user_code`; never print `device_code` or raw polling JSON, and never ask the user for a password, token, or secret in chat.
+### I5. Confirm
 
-## 3. Poll for approval (loop until it resolves)
+Report: **environment**, identity, **org/tenant**, scopes. Note that switching either env or tenant requires `/addison:signout` then this flow again.
 
-Each `login-poll` checks for up to ~45s and returns on its own — it does not hang the turn:
+---
 
-```bash
-python3 ../api/scripts/sum_api.py login-poll
-```
+## Rules (both modes)
 
-Act on `status`:
-
-- `approved` — done. The credential was stored locally (mode `0600`). Go to step 4.
-- `pending` — not approved yet; this is normal, not an error. Briefly tell the user you're still waiting, **re-post the same link and code from step 2**, then run `login-poll` again. Keep looping.
-- `denied` — the user rejected it in the browser. No credential stored. Offer to start over from step 1.
-- `expired` — the 10-minute link lapsed. No credential stored. Offer to start over from step 1.
-
-## 4. Connect the Summation MCP server (Claude Code only; skip on Claude Desktop)
-
-```bash
-python3 ../api/scripts/sum_api.py mcp-connect
-```
-
-Registers the hosted MCP server for the signed-in environment with the stored credential as a bearer header — passed process-to-process, never in chat. Tell the user to restart Claude Code (or run `/mcp`) to load the Summation tools.
-
-## 5. Verify
-
-```bash
-python3 ../api/scripts/sum_api.py doctor
-python3 ../api/scripts/sum_api.py call GET /v1/me
-```
-
-## 6. Report
-
-Report the signed-in identity, the environment (internal only), whether the MCP server was registered, and `request_id` on any failure.
-
-## Internal notes (only when `mode` reports `"internal": true`)
-
-- **Environment** is chosen with `--env prod|staging|sandbox` at login and pinned; the MCP server and every call follow it. There is no free-form URL — only these three Summation environments.
-- **Tenant** binds to the org the user approves in on the web app; it is not selected in the plugin. To connect to a different tenant, the user switches org on the Summation web app first, then re-signs in.
-- **Env and tenant are pinned at login. To change either, sign out and sign in again.**
-- If device login is unavailable and the user already has machine credentials, `configure` (M2M) is available in internal mode: `configure --env <env> --client-id <ID> --client-secret <SECRET> [--profile <NAME> --activate]`.
-
-## Logout
-
-Revoke the device-login session, remove the local credential, and deregister the MCP server:
-
-```bash
-python3 ../api/scripts/sum_api.py logout
-python3 ../api/scripts/sum_api.py mcp-disconnect
-```
-
-Always run both — `mcp-disconnect` removes the bearer header that `mcp-connect` stored in the Claude Code MCP registration.
-
-## Rules
-
-- External (the default): production only — never prompt for an environment or tenant.
-- Never print, log, or commit the device-login credential or any token.
-- The helper stores temporary polling state locally after `login`; do not surface `device_code`, `interval`, or `expires_in` in chat.
-- If a Summation MCP call later fails with an auth error, the stored bearer was likely revoked or expired: re-run this flow to mint a fresh credential and re-register the server.
+- Never print, log, or commit tokens.
+- Never ask the user to paste client secrets, device codes, or bearers into chat.
+- Never use `sum_api.py login` / `login-poll` / `mcp-connect` for Claude auth.
+- On later 401/403: re-run this skill (re-auth), do not improvise REST auth.
+- Prefer the plugin/server named **`summation`** when multiple Summation-related MCP entries exist (unless the user explicitly wants another).

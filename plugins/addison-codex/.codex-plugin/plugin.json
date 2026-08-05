@@ -1,6 +1,6 @@
 {
   "name": "addison",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Addison, Summation's AI data analyst, in Codex: ask data questions, search the catalog, run bounded SQL, generate and validate reports, and export artifacts.",
   "author": {
     "name": "Summation",
@@ -22,7 +22,7 @@
   "interface": {
     "displayName": "Addison",
     "shortDescription": "Ask Addison data questions from Codex.",
-    "longDescription": "Addison brings Summation's AI data analyst into Codex for governed data questions, catalog discovery, SQL, reports, validation, and scheduling. One browser approval stores a local credential and connects the hosted Summation MCP server.",
+    "longDescription": "Addison brings Summation's AI data analyst into Codex for governed data questions, catalog discovery, SQL, reports, validation, and scheduling. Skills orchestrate the hosted Summation MCP server; auth is browser OAuth on first use.",
     "developerName": "Summation",
     "category": "Data",
     "capabilities": [

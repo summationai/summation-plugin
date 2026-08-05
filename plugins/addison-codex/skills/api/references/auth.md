@@ -1,82 +1,79 @@
-# Auth Reference
+# Auth Reference (MCP-native)
 
-The skill must use public `sum-api` authentication only. **External** (the default) is production-only: every request is pinned to `https://api.summation.com`, device-login only, no M2M. **Internal** (`ADDISON_PLUGIN_INTERNAL=1`) additionally allows environment selection (`--env prod|staging|sandbox`, a fixed Summation allowlist — never a free-form host), M2M credentials (`SUM_API_CLIENT_ID` / `SUM_API_CLIENT_SECRET` / `SUM_API_M2M_SCOPE`), and named tenant profiles; its config lives in `~/.summation/summation-config-internal`. Either way the credential can only ever reach an allowlisted Summation host.
+Codex authenticates to the hosted Summation MCP server. The plugin does not mint or store customer credentials for the happy path.
 
-## Supported Runtime Inputs
+## Two experiences
 
-Device-login credential (stored by the `signin` flow):
+| | External (default) | Internal |
+|---|---|---|
+| Gate | (none) | Shell: `ADDISON_PLUGIN_INTERNAL=1` (or `true` / `yes` / `on`) when launching Codex |
+| Environments | One — plugin `.mcp.json` URL | User picks **prod** / **staging** / **sandbox** at sign-in |
+| Tenant | Org approved in browser | Same; skill tells user to switch org on the web app first if needed |
+| MCP URL | Bundled headerless entry | User-scope headerless `summation` pointed at the chosen env’s allowlisted URL |
+| Skill prompts | Never ask env or tenant | Ask env; explain tenant binding |
 
-```bash
-SUM_API_DEVICE_LOGIN_CREDENTIAL=sm_dls_...
-```
-
-Bearer token (honored if already present):
-
-```bash
-SUM_API_ACCESS_TOKEN=...
-```
-
-Local config file:
-
-```text
-~/.summation/summation-config
-```
-
-The file uses environment-style lines:
+Detect mode in skills:
 
 ```bash
-SUM_API_DEVICE_LOGIN_CREDENTIAL=sm_dls_...
+printf '%s' "${ADDISON_PLUGIN_INTERNAL:-}"
 ```
 
-Set `SUM_API_CONFIG_FILE` or `SUMMATION_CONFIG` to point the helper at a specific config file.
+## Allowlisted MCP URLs only
 
-The helper reads settings in this order:
+| Env | URL |
+|---|---|
+| prod | `https://mcp.summation.com/mcp` |
+| staging | `https://staging-mcp.summation.com/mcp` |
+| sandbox | `https://sandbox-mcp.summation.com/mcp` |
 
-1. Environment variables.
-2. `SUM_API_CONFIG_FILE`.
-3. Current directory `.summation-config`.
-4. `~/.summation/summation-config` (canonical).
-5. Installed skill directory `.summation-config` (legacy).
-6. Home directory `.summation-config` (legacy).
+Never accept free-form hosts. Internal sign-in re-points with:
 
-A config found only in a legacy location is copied to `~/.summation/summation-config` on first use; the legacy file is left in place and the canonical path wins afterward.
+```bash
+claude mcp add --transport http summation 'https://…' -s user
+```
 
-Use file mode `0600` for files that contain secrets.
+No `--header`, no Bearer injection.
 
-Base URL overrides (`SUM_API_BASE_URL`, `--base-url`) are refused unless they equal the production URL — the helper exits with a pin error rather than silently ignoring them. Sandbox/staging/per-tenant environments are an internal-edition capability.
+## Happy path (both)
 
-## Auth Precedence
+1. Plugin loads headerless `.mcp.json` (default env for external).
+2. First tool call / explicit authenticate → MCP OAuth → browser → Codex stores token.
+3. Tools run; identity/tenant from server-side claims.
 
-The helper resolves auth in this order:
+**Dogfood:** bundled default is sandbox until prod OAuth is deployed, then flip `.mcp.json` to prod.
 
-1. `SUM_API_DEVICE_LOGIN_CREDENTIAL`
-2. `SUM_API_ACCESS_TOKEN`
+## Sign-in / sign-out
 
-With neither present, authenticated commands exit with "Not signed in to Summation. Run $addison-signin to connect."
+| Action | Skill |
+|---|---|
+| Connect | `signin` (mode-aware) |
+| Disconnect / switch env or tenant | `signout` then `signin` |
+| Diagnose | `diagnose` (reports mode + env + org) |
 
-## Device Login Flow
+## What skills must not do
 
-Device login is the only interactive auth path.
+- Device-login poll as primary auth
+- Writing `sm_dls_…` into `~/.summation/*` for Codex sessions
+- `claude mcp add … --header Authorization: …`
+- Asking for tokens in chat
+- Offering free-form base URLs
 
-Use the sibling `signin` skill for the step-by-step interactive flow. The helper starts login with `login`, stores temporary local polling state (`0600`), completes approval with `login-poll`, registers the hosted MCP server with `mcp-connect`, and revokes the device-login session plus removes the local credential with `logout` (pair with `mcp-disconnect`).
+## Legacy bridge
 
-On approval, the helper stores `SUM_API_DEVICE_LOGIN_CREDENTIAL` in `~/.summation/summation-config`. Do not print or quote `device_code` in chat; the helper keeps it only in temporary local polling state until `login-poll` finishes.
+Old user-scope entries with `Authorization: Bearer sm_dls_…` fight OAuth:
 
-## MCP Registration
+```bash
+claude mcp remove summation -s user
+```
 
-`mcp-connect` registers `https://mcp.summation.com/mcp` with Codex (user scope), passing the stored credential as a bearer header via subprocess argv — never through chat, stdout, or a shell string. `mcp-disconnect` removes the registration. A revoked/expired credential surfaces as MCP auth errors; re-run the login flow to fix.
-
-## Identity Rules
-
-- The service principal identity is resolved by `sum-api` and auth-service.
-- Organization identity must come from trusted token claims and auth-service resolution.
-- Do not accept caller-provided `x-org-id`, `x-user-id`, `x-tenant-id`, or similar headers as trusted identity.
-- If an operation targets an org or project, verify it is consistent with the authenticated principal by relying on the API response or error.
+Then `$addison-signin`.
 
 ## Troubleshooting
 
-- `401` usually means missing, expired, or invalid credentials.
-- `403` usually means the token is valid but the principal lacks permission.
-- `404` can mean the resource does not exist or is not visible to the principal.
-- `429` means retry with jitter and respect any retry headers.
-- On macOS, `certificate verify failed` usually means Python cannot find a CA bundle. Set `SSL_CERT_FILE` to a CA bundle path or install `certifi` in the Python environment running the skill helper.
+| Symptom | Fix |
+|---|---|
+| Tools missing | Enable addison; restart |
+| 401 | `$addison-signin` |
+| Wrong env (internal) | Sign out; sign in; pick env again |
+| Wrong tenant | Switch org on web app; sign out; sign in |
+| Stale Bearer header | Remove user-scope header entry |

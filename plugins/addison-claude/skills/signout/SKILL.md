@@ -1,27 +1,37 @@
 ---
 name: signout
-description: Disconnect Claude from Summation - revoke the stored device-login session, remove the local credential, and deregister the Summation MCP server. Use when the user wants to disconnect, sign in as a different Summation user, or clear a stale session.
+description: Disconnect Claude from Summation — clear the hosted MCP session so the next use re-authenticates. Use when the user wants to disconnect, switch Summation user/org/environment, or clear a stale MCP session.
 ---
 
-# Addison Logout
+# Addison Sign-out
 
-Revoke the stored device-login session, remove `SUM_API_DEVICE_LOGIN_CREDENTIAL`, and deregister the Summation MCP server from Claude Code. The helper lives in the sibling `api` skill: `<plugin>/skills/api/scripts/sum_api.py` (resolve relative to this skill's base directory: `../api/scripts/sum_api.py`).
+Auth lives in Claude Code’s MCP client. Sign-out clears that session so the next Summation tool call re-prompts browser auth.
 
 ## Flow
 
-1. Run logout, then deregister the MCP server:
+1. **Disconnect** using the host control, or:
 
 ```bash
-python3 ../api/scripts/sum_api.py logout
-python3 ../api/scripts/sum_api.py mcp-disconnect
+claude mcp remove summation -s user 2>/dev/null || true
 ```
 
-2. Interpret the results:
-   - `logout` → `{"status":"logged_out", ...}` — the device-login session was revoked and the credential removed. `{"status":"already_logged_out", ...}` — no credential was present.
-   - `mcp-disconnect` → `{"status":"disconnected"}` — the MCP registration (which carried a bearer header) was removed. `{"status":"not_registered"}` — nothing to remove.
+   Also clear auth / disconnect **summation** in `/mcp` if the host keeps a session after remove. Prefer the host’s “disconnect / re-authenticate” when available.
+
+2. **Confirm** tools no longer work without re-auth (optional: do not call tools that would immediately re-prompt unless the user wants to stay signed out).
+
+3. Report: disconnected. Next `/addison:signin` re-runs the connect flow.
+
+## Internal vs external
+
+| | After sign-out |
+|---|---|
+| **External** | Next sign-in is production/plugin default only — no env picker. |
+| **Internal** (`ADDISON_PLUGIN_INTERNAL=1`) | Next sign-in asks **environment** again and re-applies the allowlisted MCP URL; **tenant** is whatever org they approve in the browser (switch org on the web app first if needed). |
+
+Env and tenant are both pinned at sign-in. Changing either always means sign out → sign in.
 
 ## Rules
 
-- Always run both commands: a revoked session must not leave a stale bearer header in the Claude Code MCP registration.
-- Report both outcomes to the user.
-- Internal users change environment or tenant by signing out and signing back in (both are pinned at login) — after logout, re-run `/addison:signin` and pick the new environment, switching org on the Summation web app first if they need a different tenant.
+- Do not use `sum_api.py logout` as the primary path (legacy device-login).
+- If `claude mcp get summation` still shows an `Authorization` header, remove that user-scope entry so headerless OAuth can work.
+- Never print tokens while inspecting MCP config.

@@ -1,0 +1,6 @@
+{
+  "summation": {
+    "type": "http",
+    "url": "https://sandbox-mcp.summation.com/mcp"
+  }
+}
