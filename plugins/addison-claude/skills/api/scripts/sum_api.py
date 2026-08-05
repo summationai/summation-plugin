@@ -1437,8 +1437,16 @@ def command_configure(args: argparse.Namespace) -> None:
         or setting("SUM_API_CLIENT_SECRET"),
         secret=True,
     )
+    # --env must win over a stored SUM_API_BASE_URL so configure can switch a profile's
+    # environment (and remediate a now-disallowed stored host) without hand-editing the file.
+    if ENV_OVERRIDE:
+        configured_base = base_url()
+    elif target_values.get("SUM_API_BASE_URL"):
+        configured_base = ALLOWED_ENVIRONMENTS[_env_for_url(target_values["SUM_API_BASE_URL"])]["api"]
+    else:
+        configured_base = base_url()
     values = {
-        "SUM_API_BASE_URL": target_values.get("SUM_API_BASE_URL") or base_url(),
+        "SUM_API_BASE_URL": configured_base,
         "SUM_API_CLIENT_ID": client_id or "",
         "SUM_API_CLIENT_SECRET": client_secret or "",
     }
