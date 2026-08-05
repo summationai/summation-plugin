@@ -5,42 +5,105 @@ description: Connect Codex to Summation via the hosted MCP server. Use when the 
 
 # Addison Sign-in
 
-Auth is owned by the MCP client, not by this plugin. Register the hosted Summation MCP server **without** an Authorization header and complete browser auth when the host prompts.
+Auth is owned by Codex’s MCP client. You never mint, poll, store, or inject a credential. **External** and **internal** flows differ — detect mode first.
 
-**Dogfood target today:** sandbox (`https://sandbox-mcp.summation.com/mcp`). Production URL flips when prod OAuth is deployed.
+## 0. Detect mode (do this first)
 
-## Flow
+```bash
+printf '%s' "${ADDISON_PLUGIN_INTERNAL:-}"
+```
 
-### 1. Check whether Summation MCP tools are available
+Treat as **internal** only if the value is `1`, `true`, `yes`, or `on` (case-insensitive). Anything else (including empty) is **external**.
 
-Call the MCP tool **whoami** (server name `summation`).
+| Mode | Who | Experience |
+|---|---|---|
+| **External** (default) | Customers | One environment (plugin MCP URL). No env or tenant questions. |
+| **Internal** | Summation employees (`ADDISON_PLUGIN_INTERNAL=1` in the shell that launched Codex) | Ask **environment**, then **tenant** guidance, then auth. |
+
+## Fixed environments (allowlist — never free-form hosts)
+
+| Env | MCP URL |
+|---|---|
+| `prod` | `https://mcp.summation.com/mcp` |
+| `staging` | `https://staging-mcp.summation.com/mcp` |
+| `sandbox` | `https://sandbox-mcp.summation.com/mcp` |
+
+**Dogfood note:** the plugin’s bundled `.mcp.json` currently points `summation` at **sandbox**. External users use that as-is. After prod OAuth is live, the bundled default becomes prod; internals still pick via this skill.
+
+---
+
+## External flow (default)
+
+Do **not** ask about environments or tenants. There is one host and one org session.
+
+### E1. Check auth
+
+Call MCP **`whoami`** on server **`summation`**.
 
 | Outcome | Action |
 |---|---|
-| Returns identity | Already connected. Report who they are and stop. |
-| Auth challenge / not connected | Continue to step 2. |
-| Server missing | Ensure the plugin is installed and the MCP URL is registered (step 2). |
+| Identity returned | Report who they are; done (or hand off to `start`). |
+| Needs authentication | Continue to E2. |
+| Server missing | Enable/reload the **addison** plugin; do not hand-register alternate URLs. |
 
-### 2. Ensure a headerless MCP entry, then authenticate
+### E2. Authenticate
 
-If `summation` is not configured, add it to Codex MCP config as HTTP:
+> Summation needs a one-time browser sign-in. When Codex prompts you to authenticate **summation**, approve it in the browser (same account/SSO as the web app). No password or token is pasted into this chat.
 
-- URL: `https://sandbox-mcp.summation.com/mcp` (dogfood)
-- **No** Authorization header — host OAuth owns the token
+Invoke **`whoami`** again. Prefer `/mcp` → Authenticate if the host shows that control.
 
-Tell the user:
+### E3. Confirm
 
-> Summation needs a one-time browser sign-in. When Codex prompts you to authenticate the **summation** MCP server, approve it in the browser. No password or token is pasted into this chat.
+`get_default_project` or `list_projects`. Report identity + org. Ready.
 
-Then call **whoami** again. Do **not** run device-login scripts or write bearer headers into config for the happy path.
+---
 
-### 3. Confirm
+## Internal flow (`ADDISON_PLUGIN_INTERNAL=1`)
 
-After a successful `whoami`, call `get_default_project` or `list_projects`, report identity/org, and hand off to `$addison-start` if they wanted onboarding.
+### I1. Choose environment
 
-## Rules
+Ask which environment they want: **prod**, **staging**, or **sandbox** (only these three). Default suggestion: **sandbox** for dogfood, **prod** for customer-shaped testing once prod OAuth is up.
+
+Do not accept arbitrary URLs or hosts.
+
+### I2. Tenant (org)
+
+Explain clearly:
+
+> MCP auth binds to the **org you approve in the browser** (your active org on the Summation web app for that environment).  
+> To use a different tenant: switch org on that env’s web app first, then we re-authenticate.  
+> Env and tenant both change only by signing out and signing in again.
+
+If they need a specific tenant now, pause until they’ve switched org on the web app, then continue.
+
+### I3. Point `summation` at the chosen env (headerless)
+
+User-scope override so the chosen env wins over the plugin default (no Authorization header):
+
+```bash
+# replace URL with the allowlisted URL for the chosen env
+claude mcp remove summation -s user 2>/dev/null || true
+claude mcp add --transport http summation '<ENV_MCP_URL>' -s user
+```
+
+Never pass `--header` / Bearer tokens.
+
+If `claude mcp add` is unavailable (e.g. Desktop-only), tell them to set the Summation MCP URL to the chosen env’s allowlisted host in `/mcp` (still no headers), or re-auth after an admin points the plugin default.
+
+### I4. Authenticate
+
+Same browser prompt as external, for server **`summation`**. Then **`whoami`**.
+
+### I5. Confirm
+
+Report: **environment**, identity, **org/tenant**, scopes. Note that switching either env or tenant requires `$addison-signout` then this flow again.
+
+---
+
+## Rules (both modes)
 
 - Never print, log, or commit tokens.
-- Never ask the user to paste client secrets or bearers into chat.
-- On later 401/403 from Summation tools: re-run this skill (re-auth), do not improvise REST auth.
-- Tenant is the org approved in the browser; switch org on the web app, then re-auth to change tenant.
+- Never ask the user to paste client secrets, device codes, or bearers into chat.
+- Never use `sum_api.py login` / `login-poll` / `mcp-connect` for Codex auth.
+- On later 401/403: re-run this skill (re-auth), do not improvise REST auth.
+- Prefer the plugin/server named **`summation`** when multiple Summation-related MCP entries exist (unless the user explicitly wants another).

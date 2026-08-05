@@ -1,20 +1,37 @@
 ---
 name: signout
-description: Disconnect Codex from Summation — clear the hosted MCP session so the next use re-authenticates. Use to disconnect, switch Summation user/org, or clear a stale MCP session.
+description: Disconnect Codex from Summation — clear the hosted MCP session so the next use re-authenticates. Use when the user wants to disconnect, switch Summation user/org/environment, or clear a stale MCP session.
 ---
 
 # Addison Sign-out
 
-Auth lives in the MCP client. Sign-out means removing or clearing the `summation` MCP server entry so the next tool call re-prompts browser auth.
+Auth lives in Codex’s MCP client. Sign-out clears that session so the next Summation tool call re-prompts browser auth.
 
 ## Flow
 
-1. Remove the Summation MCP server from Codex config (delete the `summation` / MCP server block for `https://sandbox-mcp.summation.com/mcp` or the prod URL, including any legacy Authorization header).
-2. Confirm Summation tools no longer work without re-auth.
-3. Report: disconnected; next `$addison-signin` or tool use will re-authenticate.
+1. **Disconnect** using the host control, or:
+
+```bash
+claude mcp remove summation -s user 2>/dev/null || true
+```
+
+   Also clear auth / disconnect **summation** in `/mcp` if the host keeps a session after remove. Prefer the host’s “disconnect / re-authenticate” when available.
+
+2. **Confirm** tools no longer work without re-auth (optional: do not call tools that would immediately re-prompt unless the user wants to stay signed out).
+
+3. Report: disconnected. Next `$addison-signin` re-runs the connect flow.
+
+## Internal vs external
+
+| | After sign-out |
+|---|---|
+| **External** | Next sign-in is production/plugin default only — no env picker. |
+| **Internal** (`ADDISON_PLUGIN_INTERNAL=1`) | Next sign-in asks **environment** again and re-applies the allowlisted MCP URL; **tenant** is whatever org they approve in the browser (switch org on the web app first if needed). |
+
+Env and tenant are both pinned at sign-in. Changing either always means sign out → sign in.
 
 ## Rules
 
-- Prefer clearing MCP config over legacy helper logout unless a device-login credential file is still present and the user wants it gone too.
-- To switch org/tenant: switch org on the Summation web app, then sign out and sign in again.
-- Never print tokens while inspecting config.
+- Do not use `sum_api.py logout` as the primary path (legacy device-login).
+- If `claude mcp get summation` still shows an `Authorization` header, remove that user-scope entry so headerless OAuth can work.
+- Never print tokens while inspecting MCP config.

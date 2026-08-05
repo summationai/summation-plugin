@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Assemble plugins/addison-codex from plugins/addison-claude (the source of truth).
 # plugins/addison-codex is GENERATED — edit plugins/addison-claude or this builder, never plugins/addison-codex.
-# Codex differs from Claude by: $addison- mention syntax, a signin/signout overlay tuned for
-# Codex MCP config, and the Codex manifest. Auth is MCP-native (headerless URL + host auth).
+# Codex differs from Claude by: $addison- mention syntax and the Codex manifest.
+# Auth is MCP-native (headerless URL + host auth); signin/signout are shared (rewritten in place).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -76,79 +76,6 @@ for path in dst.rglob("*"):
         # Only the mention syntax changes in the helper; Claude/Codex logic is shared.
         path.write_text(path.read_text(encoding="utf-8").replace("/addison:", "$addison-"), encoding="utf-8")
 
-
-signin_skill = """---
-name: signin
-description: Connect Codex to Summation via the hosted MCP server. Use when the user needs to connect Addison, when Summation tools are missing or unauthenticated, or when any Summation MCP call fails with 401/403.
----
-
-# Addison Sign-in
-
-Auth is owned by the MCP client, not by this plugin. Register the hosted Summation MCP server **without** an Authorization header and complete browser auth when the host prompts.
-
-**Dogfood target today:** sandbox (`https://sandbox-mcp.summation.com/mcp`). Production URL flips when prod OAuth is deployed.
-
-## Flow
-
-### 1. Check whether Summation MCP tools are available
-
-Call the MCP tool **whoami** (server name `summation`).
-
-| Outcome | Action |
-|---|---|
-| Returns identity | Already connected. Report who they are and stop. |
-| Auth challenge / not connected | Continue to step 2. |
-| Server missing | Ensure the plugin is installed and the MCP URL is registered (step 2). |
-
-### 2. Ensure a headerless MCP entry, then authenticate
-
-If `summation` is not configured, add it to Codex MCP config as HTTP:
-
-- URL: `https://sandbox-mcp.summation.com/mcp` (dogfood)
-- **No** Authorization header — host OAuth owns the token
-
-Tell the user:
-
-> Summation needs a one-time browser sign-in. When Codex prompts you to authenticate the **summation** MCP server, approve it in the browser. No password or token is pasted into this chat.
-
-Then call **whoami** again. Do **not** run device-login scripts or write bearer headers into config for the happy path.
-
-### 3. Confirm
-
-After a successful `whoami`, call `get_default_project` or `list_projects`, report identity/org, and hand off to `$addison-start` if they wanted onboarding.
-
-## Rules
-
-- Never print, log, or commit tokens.
-- Never ask the user to paste client secrets or bearers into chat.
-- On later 401/403 from Summation tools: re-run this skill (re-auth), do not improvise REST auth.
-- Tenant is the org approved in the browser; switch org on the web app, then re-auth to change tenant.
-"""
-
-signout_skill = """---
-name: signout
-description: Disconnect Codex from Summation — clear the hosted MCP session so the next use re-authenticates. Use to disconnect, switch Summation user/org, or clear a stale MCP session.
----
-
-# Addison Sign-out
-
-Auth lives in the MCP client. Sign-out means removing or clearing the `summation` MCP server entry so the next tool call re-prompts browser auth.
-
-## Flow
-
-1. Remove the Summation MCP server from Codex config (delete the `summation` / MCP server block for `https://sandbox-mcp.summation.com/mcp` or the prod URL, including any legacy Authorization header).
-2. Confirm Summation tools no longer work without re-auth.
-3. Report: disconnected; next `$addison-signin` or tool use will re-authenticate.
-
-## Rules
-
-- Prefer clearing MCP config over legacy helper logout unless a device-login credential file is still present and the user wants it gone too.
-- To switch org/tenant: switch org on the Summation web app, then sign out and sign in again.
-- Never print tokens while inspecting config.
-"""
-
-(dst / "skills" / "signin" / "SKILL.md").write_text(signin_skill, encoding="utf-8")
-(dst / "skills" / "signout" / "SKILL.md").write_text(signout_skill, encoding="utf-8")
 
 plugin_json = {
     "name": "addison",
