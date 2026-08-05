@@ -29,7 +29,7 @@ printf '%s' "${ADDISON_PLUGIN_INTERNAL:-}"
 Never accept free-form hosts. Internal sign-in re-points with:
 
 ```bash
-claude mcp add --transport http summation 'https://…' -s user
+codex mcp add summation --url 'https://…'
 ```
 
 No `--header`, no Bearer injection.
@@ -54,7 +54,7 @@ No `--header`, no Bearer injection.
 
 - Device-login poll as primary auth
 - Writing `sm_dls_…` into `~/.summation/*` for Codex sessions
-- `claude mcp add … --header Authorization: …`
+- `codex mcp add … --header Authorization: …`
 - Asking for tokens in chat
 - Offering free-form base URLs
 
@@ -63,7 +63,7 @@ No `--header`, no Bearer injection.
 Old user-scope entries with `Authorization: Bearer sm_dls_…` fight OAuth:
 
 ```bash
-claude mcp remove summation -s user
+codex mcp remove summation 2>/dev/null || true
 ```
 
 Then `$addison-signin`.

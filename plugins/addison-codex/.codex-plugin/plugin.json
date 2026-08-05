@@ -19,10 +19,11 @@
     "sum-api"
   ],
   "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Addison",
     "shortDescription": "Ask Addison data questions from Codex.",
-    "longDescription": "Addison brings Summation's AI data analyst into Codex for governed data questions, catalog discovery, SQL, reports, validation, and scheduling. Skills orchestrate the hosted Summation MCP server; auth is browser OAuth on first use.",
+    "longDescription": "Addison brings Summation's AI data analyst into Codex for governed data questions, catalog discovery, SQL, reports, validation, and scheduling. Skills orchestrate the hosted Summation MCP server; auth is browser OAuth on first use (same product as Claude).",
     "developerName": "Summation",
     "category": "Data",
     "capabilities": [
