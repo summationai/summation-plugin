@@ -12,10 +12,10 @@ Auth lives in Codex’s MCP client. Sign-out clears that session so the next Sum
 1. **Disconnect** using the host control, or:
 
 ```bash
-claude mcp remove summation -s user 2>/dev/null || true
+codex mcp remove summation 2>/dev/null || true
 ```
 
-   Also clear auth / disconnect **summation** in `/mcp` if the host keeps a session after remove. Prefer the host’s “disconnect / re-authenticate” when available.
+   Also run `codex mcp logout summation` if a session remains after remove. Prefer the host’s “disconnect / re-authenticate” when available.
 
 2. **Confirm** tools no longer work without re-auth (optional: do not call tools that would immediately re-prompt unless the user wants to stay signed out).
 
@@ -33,5 +33,5 @@ Env and tenant are both pinned at sign-in. Changing either always means sign out
 ## Rules
 
 - Do not use `sum_api.py logout` as the primary path (legacy device-login).
-- If `claude mcp get summation` still shows an `Authorization` header, remove that user-scope entry so headerless OAuth can work.
+- If `codex mcp get summation` still shows an `Authorization` header, remove that user-scope entry so headerless OAuth can work.
 - Never print tokens while inspecting MCP config.

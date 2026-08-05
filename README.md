@@ -41,14 +41,22 @@ https://github.com/summationai/addison-plugin/releases/latest/download/addison-p
 
 Members then install from the org library. Desktop is MCP-native: same headerless server + host auth.
 
-**Codex:**
+**Codex** (same repo — `plugins/addison-codex` is **generated** from Claude via `./build-codex.sh`):
 
 ```
 codex plugin marketplace add summationai/addison-plugin
 codex plugin install addison
 ```
 
-Then `$addison-signin`. Skills use `$addison-…` mentions.
+Then `$addison-signin` or any data ask. Skills use `$addison-…` mentions. MCP is packaged in the plugin (headerless sandbox URL while dogfooding); auth is `codex mcp login summation` / host browser OAuth — same model as Claude, not a second setup step.
+
+```bash
+# local dogfood from this checkout
+codex plugin marketplace add ./   # or path to this repo
+codex plugin install addison
+# internal env picker (same flag as Claude Code):
+ADDISON_PLUGIN_INTERNAL=1 codex
+```
 
 ## Contents
 
@@ -90,13 +98,17 @@ user approval before publishing anywhere.
 - **skills/** — product workflows over curated MCP tools
 - **`sum_api.py`** — legacy/local escape hatch only (not used by domain skills)
 
-The **Codex** surface is **generated** from Claude:
+The **Codex** surface is **generated** from Claude (one product, two packages):
+
+| Shared | Claude-only | Codex-only (builder) |
+|---|---|---|
+| Skills, MCP URL, auth model, external/internal | `.claude-plugin/`, SessionStart hook | `$addison-` mentions, Codex `.mcp.json` shape, `codex mcp …` CLI, `.codex-plugin/` |
 
 ```bash
-./build-codex.sh   # regenerates plugins/addison-codex + Codex marketplace
+./build-codex.sh   # regenerates plugins/addison-codex + .agents/plugins/marketplace.json
 ```
 
-CI (`Check generated Codex edition`) fails if Codex drifts from source.
+CI (`Check generated Codex edition`) fails if Codex drifts from source. **Never hand-edit** `plugins/addison-codex`.
 
 ## Dev loop
 

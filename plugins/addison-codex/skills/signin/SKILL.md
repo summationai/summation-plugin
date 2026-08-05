@@ -50,7 +50,7 @@ Call MCP **`whoami`** on server **`summation`**.
 
 > Summation needs a one-time browser sign-in. When Codex prompts you to authenticate **summation**, approve it in the browser (same account/SSO as the web app). No password or token is pasted into this chat.
 
-Invoke **`whoami`** again. Prefer `/mcp` → Authenticate if the host shows that control.
+Invoke **`whoami`** again. Prefer `codex mcp login summation` (or the host Authenticate control) if tools are not yet authed.
 
 ### E3. Confirm
 
@@ -82,13 +82,13 @@ User-scope override so the chosen env wins over the plugin default (no Authoriza
 
 ```bash
 # replace URL with the allowlisted URL for the chosen env
-claude mcp remove summation -s user 2>/dev/null || true
-claude mcp add --transport http summation '<ENV_MCP_URL>' -s user
+codex mcp remove summation 2>/dev/null || true
+codex mcp add summation --url '<ENV_MCP_URL>'
 ```
 
 Never pass `--header` / Bearer tokens.
 
-If `claude mcp add` is unavailable (e.g. Desktop-only), tell them to set the Summation MCP URL to the chosen env’s allowlisted host in `/mcp` (still no headers), or re-auth after an admin points the plugin default.
+If `codex mcp add` is unavailable (e.g. Desktop-only), tell them to set the Summation MCP URL to the chosen env’s allowlisted host in `/mcp` (still no headers), or re-auth after an admin points the plugin default.
 
 ### I4. Authenticate
 

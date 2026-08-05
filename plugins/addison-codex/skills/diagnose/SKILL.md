@@ -13,7 +13,7 @@ Auth and data plane are the hosted **`summation` MCP server**. Diagnose with MCP
 printf '%s' "${ADDISON_PLUGIN_INTERNAL:-}"
 ```
 
-- Internal if `1` / `true` / `yes` / `on` → expect env selection at sign-in; report which env URL is configured if you can see it (`claude mcp get summation`, redact secrets).
+- Internal if `1` / `true` / `yes` / `on` → expect env selection at sign-in; report which env URL is configured if you can see it (`codex mcp get summation`, redact secrets).
 - Otherwise **external** → single plugin default; no env questions.
 
 ## 1. Auth + identity
@@ -43,7 +43,7 @@ Render a short card:
 If user-scope `summation` has an `Authorization` header (old device-login bridge):
 
 1. Explain the plugin uses headerless OAuth.
-2. `claude mcp remove summation -s user`
+2. `codex mcp remove summation 2>/dev/null || true`
 3. `$addison-signin` (internal will re-ask env).
 
 ## Interpreting failures

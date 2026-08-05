@@ -1,6 +1,9 @@
 {
-  "summation": {
-    "type": "http",
-    "url": "https://sandbox-mcp.summation.com/mcp"
+  "mcpServers": {
+    "summation": {
+      "type": "http",
+      "url": "https://sandbox-mcp.summation.com/mcp",
+      "oauth_resource": "https://sandbox-mcp.summation.com"
+    }
   }
 }
