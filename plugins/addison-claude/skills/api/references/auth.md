@@ -1,6 +1,6 @@
 # Auth Reference
 
-The skill must use public `sum-api` authentication only. This build is production-only: every request is pinned to `https://api.summation.com`, and there is no M2M path.
+The skill must use public `sum-api` authentication only. **External** (the default) is production-only: every request is pinned to `https://api.summation.com`, device-login only, no M2M. **Internal** (`ADDISON_PLUGIN_INTERNAL=1`) additionally allows environment selection (`--env prod|staging|sandbox`, a fixed Summation allowlist — never a free-form host), M2M credentials (`SUM_API_CLIENT_ID` / `SUM_API_CLIENT_SECRET` / `SUM_API_M2M_SCOPE`), and named tenant profiles; its config lives in `~/.summation/summation-config-internal`. Either way the credential can only ever reach an allowlisted Summation host.
 
 ## Supported Runtime Inputs
 

@@ -24,3 +24,4 @@ python3 ../api/scripts/sum_api.py mcp-disconnect
 
 - Always run both commands: a revoked session must not leave a stale bearer header in the Claude Code MCP registration.
 - Report both outcomes to the user.
+- Internal users change environment or tenant by signing out and signing back in (both are pinned at login) — after logout, re-run `/addison:signin` and pick the new environment, switching org on the Summation web app first if they need a different tenant.

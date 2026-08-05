@@ -86,17 +86,26 @@ description: Sign in to Summation from Codex. Use when the user needs to connect
 
 One browser sign-in connects everything: the sum-api credential and the hosted Summation MCP server. The helper lives in the sibling `api` skill: `../api/scripts/sum_api.py`.
 
-There is exactly one environment: production. Do not ask the user to choose an environment or a profile.
+**The one rule that matters:** the user's only job is to open a link and approve — show it in a message you write, never buried in command output, and always before you poll.
+
+First, detect mode (this decides whether to offer an environment):
+
+```bash
+python3 ../api/scripts/sum_api.py mode
+```
+
+- `"internal": false` -> production only. Do not ask about environments or tenants.
+- `"internal": true` -> internal user. Ask which environment from the returned `environments` list (prod / staging / sandbox) and pass it as `--env` below. Tenant binds to the org they approve in on the web app; to change environment or tenant, sign out and sign in again.
 
 ## Flow
 
-1. Start device login:
+1. Start device login (internal: add `--env <prod|staging|sandbox>`):
 
 ```bash
 python3 ../api/scripts/sum_api.py login --surface codex
 ```
 
-2. Present only the returned `verification_uri_complete` and `user_code` to the user:
+2. Show the link to the user, then STOP — do not run anything else this turn. Read `verification_uri_complete` and `user_code` from the JSON and post them **copied character-for-character** (never retype or shorten the URL — one wrong character yields a "Link invalid or expired" page):
 
 > Open this link and approve to connect Codex to Summation — it expires in 10 minutes.
 > **<verification_uri_complete>**
@@ -104,17 +113,18 @@ python3 ../api/scripts/sum_api.py login --surface codex
 >
 > You'll approve in your browser; no password or secret is shared in this chat.
 
-Do not print or quote `device_code`, and do not paste raw helper JSON containing internal polling state into chat.
+Do **not** run `login-poll` in the same turn as `login` — the user must see this link first. Do not print `device_code` or raw polling JSON.
 
-3. Poll immediately until the login reaches a terminal state:
+3. Poll for approval — each `login-poll` checks for up to ~45s and returns on its own (it does not hang):
 
 ```bash
 python3 ../api/scripts/sum_api.py login-poll
 ```
 
-Terminal outcomes:
+Act on `status`, looping until it resolves:
 
 - `{"status":"approved", ...}`: approval succeeded. The helper stored `SUM_API_DEVICE_LOGIN_CREDENTIAL` in `~/.summation/summation-config` (mode `0600`). Continue.
+- `{"status":"pending", ...}`: not approved yet — normal, not an error. Briefly tell the user you're still waiting, re-post the same link and code, then run `login-poll` again. Keep looping.
 - `{"status":"denied"}`: the user rejected the browser approval. No credential was stored. Offer to start over.
 - `{"status":"expired"}`: the approval link expired. No credential was stored. Offer to start over.
 
@@ -137,7 +147,7 @@ python3 ../api/scripts/sum_api.py call GET /v1/me
 
 ## Rules
 
-- Production only; there is no environment or profile selection. Sandbox/staging is a Summation internal-edition capability.
+- External (the default): production only — never prompt for an environment or tenant. Internal mode (`ADDISON_PLUGIN_INTERNAL=1`) unlocks `--env` selection among prod/staging/sandbox and tenant switching (sign out, switch org on the web app, sign in).
 - Never print, log, or commit the device-login credential or any token.
 - The helper stores temporary polling state locally after `login`; do not surface `device_code`, `interval`, or `expires_in` in chat.
 - If a Summation MCP call later fails with an auth error, the stored bearer was likely revoked or expired: re-run this sign-in flow to mint a fresh credential and re-register the server.

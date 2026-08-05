@@ -16,7 +16,6 @@ import urllib.request
 from typing import Any
 
 
-DEFAULT_BASE_URL = "https://sandbox-api.summation.com"
 CONFIG_FILE_NAME = ".summation-config"
 DEVICE_LOGIN_STATE_FILE_NAME = ".device-login-state.json"
 ACTIVE_PROFILE_KEY = "SUM_API_ACTIVE_PROFILE"
@@ -37,13 +36,30 @@ DEVICE_LOGIN_SURFACE_ALIASES = {
 }
 PROFILE_OVERRIDE: str | None = None
 BASE_URL_OVERRIDE: str | None = None
+ENV_OVERRIDE: str | None = None
 
-# Baked at build time by build-editions.sh. "external" (public marketplace build) pins all
-# requests to production and disables M2M/profile surfaces; "internal" unlocks them.
-EDITION = "external"
-PRODUCTION_BASE_URL = "https://api.summation.com"
-PRODUCTION_MCP_URL = "https://mcp.summation.com/mcp"
 MCP_SERVER_NAME = "summation"
+
+# One artifact for everyone. Internal features (environment selection, M2M, profiles) unlock at
+# runtime via the ADDISON_PLUGIN_INTERNAL shell env var — NOT a build flag. This is only safe
+# because the environment allowlist below is enforced unconditionally in resolve_request_url():
+# the flag can widen what UX is offered, never the set of hosts the bearer credential can reach.
+ADDISON_INTERNAL_ENV = "ADDISON_PLUGIN_INTERNAL"
+
+# Every Summation environment the credential may reach. There is no free-form host anywhere.
+ALLOWED_ENVIRONMENTS: dict[str, dict[str, str]] = {
+    "prod":    {"api": "https://api.summation.com",         "mcp": "https://mcp.summation.com/mcp"},
+    "staging": {"api": "https://staging-api.summation.com", "mcp": "https://staging-mcp.summation.com/mcp"},
+    "sandbox": {"api": "https://sandbox-api.summation.com", "mcp": "https://sandbox-mcp.summation.com/mcp"},
+}
+PRODUCTION_BASE_URL = ALLOWED_ENVIRONMENTS["prod"]["api"]
+PRODUCTION_MCP_URL = ALLOWED_ENVIRONMENTS["prod"]["mcp"]
+ALLOWED_BASE_URLS = {env["api"] for env in ALLOWED_ENVIRONMENTS.values()}
+
+
+def is_internal() -> bool:
+    """Internal edition, unlocked by the ADDISON_PLUGIN_INTERNAL shell env var (1/true/yes/on)."""
+    return os.environ.get(ADDISON_INTERNAL_ENV, "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def skill_root() -> pathlib.Path:
@@ -51,10 +67,10 @@ def skill_root() -> pathlib.Path:
 
 
 def home_config_path() -> pathlib.Path:
-    # Per-edition canonical config so external (prod-pinned, device-login-only) and internal
-    # (multi-env, M2M, profiles) never share a file — and neither collides with the generic
-    # ~/.summation/config used by sumcli and legacy internal tooling.
-    name = "summation-config" if EDITION == "external" else "summation-config-internal"
+    # Internal (multi-env, M2M, profiles) and external (prod-pinned, device-login-only) keep
+    # separate files so a sandbox/staging credential never lands where the prod-only path reads
+    # it — and neither collides with the generic ~/.summation/config used by sumcli.
+    name = "summation-config-internal" if is_internal() else "summation-config"
     return pathlib.Path.home() / ".summation" / name
 
 
@@ -64,9 +80,9 @@ def device_login_state_path() -> pathlib.Path:
 
 def legacy_config_paths() -> list[pathlib.Path]:
     paths = [skill_root() / CONFIG_FILE_NAME, pathlib.Path.home() / CONFIG_FILE_NAME]
-    if EDITION == "internal":
+    if is_internal():
         # Pre-edition installs stored config here; only internal inherits it (it may hold
-        # sandbox base URLs / M2M values the external build must not pick up).
+        # sandbox base URLs / M2M values the external path must not pick up).
         paths.insert(0, pathlib.Path.home() / ".summation" / "skill-config")
     return paths
 
@@ -227,20 +243,40 @@ def setting(name: str, default: str | None = None) -> str | None:
     return default
 
 
-def base_url() -> str:
-    if EDITION == "external":
-        # Single environment: production only. Fail loudly on a conflicting override
-        # rather than silently ignoring it.
-        for label, override in (("--base-url", BASE_URL_OVERRIDE), ("SUM_API_BASE_URL", setting("SUM_API_BASE_URL"))):
-            if override and override.rstrip("/") != PRODUCTION_BASE_URL:
-                raise SystemExit(
-                    f"{label}={override} is not supported in this build: "
-                    f"requests are pinned to {PRODUCTION_BASE_URL}"
-                )
-        return PRODUCTION_BASE_URL
+def _env_for_url(url: str) -> str:
+    """Map an allowlisted api URL back to its environment name; reject anything else."""
+    normalized = url.rstrip("/")
+    for name, urls in ALLOWED_ENVIRONMENTS.items():
+        if urls["api"] == normalized:
+            return name
+    raise SystemExit(
+        f"{url} is not an allowed Summation environment "
+        f"(choose from {', '.join(sorted(ALLOWED_ENVIRONMENTS))})"
+    )
+
+
+def selected_env() -> str:
+    """The pinned environment name. External is always prod; internal resolves the selection:
+    --env, then the host the current device-login is polling, then stored config, then prod."""
+    if not is_internal():
+        return "prod"
+    if ENV_OVERRIDE:
+        return ENV_OVERRIDE
     if BASE_URL_OVERRIDE:
-        return BASE_URL_OVERRIDE.rstrip("/")
-    return setting("SUM_API_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+        return _env_for_url(BASE_URL_OVERRIDE)
+    stored = setting("SUM_API_BASE_URL")
+    if stored:
+        return _env_for_url(stored)
+    return "prod"
+
+
+def base_url() -> str:
+    if not is_internal() and ENV_OVERRIDE and ENV_OVERRIDE != "prod":
+        raise SystemExit(
+            f"--env {ENV_OVERRIDE} needs {ADDISON_INTERNAL_ENV}=1 "
+            f"(the plugin is production-only unless internal mode is enabled)"
+        )
+    return ALLOWED_ENVIRONMENTS[selected_env()]["api"]
 
 
 def normalize_device_login_credential(value: str | None) -> str | None:
@@ -467,8 +503,7 @@ def resolve_request_url(path_or_url: str) -> str:
     """Resolve a path (or absolute URL) against base_url(), refusing any other host.
 
     Every request carries the caller's bearer credential, so the destination is pinned to
-    the configured base host and credential-bearing requests must use HTTPS (internal
-    builds may target http://localhost for development).
+    the configured base host — always an allowlisted Summation environment — and must use HTTPS.
     """
     base = urllib.parse.urlsplit(base_url())
     if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
@@ -483,9 +518,8 @@ def resolve_request_url(path_or_url: str) -> str:
         path = path_or_url if path_or_url.startswith("/") else f"/{path_or_url}"
         url = f"{base_url()}{path}"
     if base.scheme != "https":
-        local_dev = EDITION != "external" and base.hostname in ("localhost", "127.0.0.1", "::1")
-        if not local_dev:
-            raise SystemExit(f"refusing non-HTTPS base URL {base.scheme}://{base.netloc}: credentials require HTTPS")
+        # base_url() only ever returns an allowlisted https host; this is defense-in-depth.
+        raise SystemExit(f"refusing non-HTTPS base URL {base.scheme}://{base.netloc}: credentials require HTTPS")
     return url
 
 
@@ -602,7 +636,7 @@ def auth_headers(required: bool = True) -> dict[str, str]:
     if not token:
         token = setting("SUM_API_ACCESS_TOKEN")
     if not token and required:
-        if EDITION == "external":
+        if not is_internal():
             raise SystemExit("Not signed in to Summation. Run /addison:signin to connect.")
         token = exchange_m2m_token()
     if not token:
@@ -1040,6 +1074,9 @@ def command_login(args: argparse.Namespace) -> None:
     print(json_dumps(result))
 
 
+DEFAULT_LOGIN_POLL_WINDOW_SECONDS = 45
+
+
 def command_login_poll(args: argparse.Namespace) -> None:
     profile_name = args.profile or selected_profile_name()
     _, pending_state = load_pending_device_login(profile_name)
@@ -1066,28 +1103,23 @@ def command_login_poll(args: argparse.Namespace) -> None:
     global BASE_URL_OVERRIDE
     BASE_URL_OVERRIDE = pending_state_base_url.rstrip("/")
 
-    deadline = time.monotonic() + expires_in
+    # Bounded poll: check for up to `--timeout` seconds, then return control so the caller
+    # (the signin skill / model) stays responsive and can re-surface the approval link. A
+    # "pending" return means "not approved yet — poll again"; it is NOT device-login expiry.
+    # The old unbounded `while True` blocked the whole turn for up to 10 minutes, which buried
+    # the approval link and could hit the shell timeout.
+    poll_window = max(1, min(args.timeout, expires_in))
+    deadline = time.monotonic() + poll_window
     while True:
         response = _poll_device_login(device_code)
         status = response["status"].lower()
-
-        if status == "pending":
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                if pending_state_base_url:
-                    clear_pending_device_login(profile_name, pending_state_base_url)
-                print(json_dumps({"status": "expired"}))
-                return
-            time.sleep(min(interval, remaining))
-            continue
 
         if status == "approved":
             credential = response.get("credential")
             if not isinstance(credential, str) or not credential:
                 raise SystemExit("Device-login poll failed: approved response missing credential")
             path = store_device_login_credential(credential, profile_name)
-            if pending_state_base_url:
-                clear_pending_device_login(profile_name, pending_state_base_url)
+            clear_pending_device_login(profile_name, pending_state_base_url)
             print(json_dumps({
                 "status": "approved",
                 "config_file": str(path),
@@ -1097,12 +1129,30 @@ def command_login_poll(args: argparse.Namespace) -> None:
             return
 
         if status in {"denied", "expired"}:
-            if pending_state_base_url:
-                clear_pending_device_login(profile_name, pending_state_base_url)
+            clear_pending_device_login(profile_name, pending_state_base_url)
             print(json_dumps({"status": status}))
             return
 
-    raise SystemExit(f"Device-login poll failed: unexpected status '{response['status']}'")
+        if status != "pending":
+            raise SystemExit(f"Device-login poll failed: unexpected status '{response['status']}'")
+
+        # Still pending. If the device login itself has expired, report that and stop.
+        if time.time() >= expires_at:
+            clear_pending_device_login(profile_name, pending_state_base_url)
+            print(json_dumps({"status": "expired"}))
+            return
+
+        # This bounded window is used up but the login is still valid: hand back a
+        # non-terminal "pending" so the caller polls again without hanging the turn.
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            print(json_dumps({
+                "status": "pending",
+                "expires_in": max(0, int(expires_at - time.time())),
+            }))
+            return
+
+        time.sleep(min(interval, remaining))
 
 
 def command_logout(args: argparse.Namespace) -> None:
@@ -1176,9 +1226,8 @@ def write_config_file(
 
 
 def mcp_url() -> str:
-    if EDITION == "external":
-        return PRODUCTION_MCP_URL
-    return setting("SUM_MCP_URL", PRODUCTION_MCP_URL).rstrip("/")
+    # MCP host tracks the selected environment; allowlisted by construction.
+    return ALLOWED_ENVIRONMENTS[selected_env()]["mcp"]
 
 
 def _claude_binary() -> str:
@@ -1388,12 +1437,16 @@ def command_configure(args: argparse.Namespace) -> None:
         or setting("SUM_API_CLIENT_SECRET"),
         secret=True,
     )
+    # --env must win over a stored SUM_API_BASE_URL so configure can switch a profile's
+    # environment (and remediate a now-disallowed stored host) without hand-editing the file.
+    if ENV_OVERRIDE:
+        configured_base = base_url()
+    elif target_values.get("SUM_API_BASE_URL"):
+        configured_base = ALLOWED_ENVIRONMENTS[_env_for_url(target_values["SUM_API_BASE_URL"])]["api"]
+    else:
+        configured_base = base_url()
     values = {
-        "SUM_API_BASE_URL": (
-            args.base_url
-            or target_values.get("SUM_API_BASE_URL")
-            or setting("SUM_API_BASE_URL", DEFAULT_BASE_URL)
-        ),
+        "SUM_API_BASE_URL": configured_base,
         "SUM_API_CLIENT_ID": client_id or "",
         "SUM_API_CLIENT_SECRET": client_secret or "",
     }
@@ -1428,10 +1481,26 @@ def command_configure(args: argparse.Namespace) -> None:
     }))
 
 
+def command_mode(_: argparse.Namespace) -> None:
+    """Fast, auth-free: report whether internal features are unlocked and which environments are
+    selectable. The signin skill branches on this so external users are never asked about an
+    environment or tenant (there is only production for them)."""
+    internal = is_internal()
+    print(json_dumps({
+        "internal": internal,
+        "environments": list(ALLOWED_ENVIRONMENTS) if internal else ["prod"],
+        "selected_env": selected_env(),
+        "base_url": base_url(),
+        "mcp_url": mcp_url(),
+    }))
+
+
 def command_doctor(_: argparse.Namespace) -> None:
     spec = fetch_openapi()
     config_path = active_config_path()
     result = {
+        "internal": is_internal(),
+        "environment": selected_env(),
         "base_url": base_url(),
         "profile": selected_profile_name(),
         "config_file": str(config_path) if config_path else None,
@@ -1516,8 +1585,12 @@ def add_profile_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--profile", help="Named profile from .summation-config")
 
 
-def add_base_url_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--base-url", dest="base_url", help="sum-api base URL")
+def add_env_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--env",
+        choices=tuple(ALLOWED_ENVIRONMENTS),
+        help=f"Summation environment (internal only; production unless {ADDISON_INTERNAL_ENV}=1)",
+    )
 
 
 def _extract_items(payload: Any) -> list[Any]:
@@ -1728,7 +1801,7 @@ def main() -> int:
     schema_parser.add_argument("name")
     schema_parser.set_defaults(func=command_schema)
 
-    if EDITION == "internal":
+    if is_internal():
         token_parser = subparsers.add_parser("token", help="Exchange M2M credentials for an access token")
         add_profile_argument(token_parser)
         token_parser.set_defaults(func=command_token)
@@ -1738,7 +1811,7 @@ def main() -> int:
         help="Start device login and print the browser approval instructions",
     )
     add_profile_argument(login_parser)
-    add_base_url_argument(login_parser)
+    add_env_argument(login_parser)
     login_parser.add_argument(
         "--surface",
         required=True,
@@ -1752,6 +1825,13 @@ def main() -> int:
         help="Poll the current device login and store the credential on completion",
     )
     add_profile_argument(login_poll_parser)
+    login_poll_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_LOGIN_POLL_WINDOW_SECONDS,
+        help="Max seconds to poll in one invocation before returning status 'pending' "
+             "so the caller can re-check without hanging the turn (default: %(default)s)",
+    )
     login_poll_parser.set_defaults(func=command_login_poll)
 
     logout_parser = subparsers.add_parser(
@@ -1782,7 +1862,7 @@ def main() -> int:
     )
     mcp_disconnect_parser.set_defaults(func=command_mcp_disconnect)
 
-    if EDITION == "internal":
+    if is_internal():
         configure_parser = subparsers.add_parser("configure", help="Write a local Summation config file")
         configure_parser.add_argument("--profile", help="Profile name to create or update")
         configure_parser.add_argument(
@@ -1790,7 +1870,7 @@ def main() -> int:
             action="store_true",
             help="Make the written profile active",
         )
-        configure_parser.add_argument("--base-url", dest="base_url", help="sum-api base URL")
+        add_env_argument(configure_parser)
         configure_parser.add_argument("--client-id", dest="client_id", help="M2M client ID")
         configure_parser.add_argument("--client-secret", dest="client_secret", help="M2M client secret")
         configure_parser.add_argument("--scope", help="M2M token scope")
@@ -1807,11 +1887,16 @@ def main() -> int:
     audit_parser.add_argument("--tail", type=int, default=20, help="Number of trailing lines to print")
     audit_parser.set_defaults(func=command_audit)
 
+    mode_parser = subparsers.add_parser(
+        "mode", help="Report internal/external mode and selectable environments (auth-free)"
+    )
+    mode_parser.set_defaults(func=command_mode)
+
     doctor_parser = subparsers.add_parser("doctor", help="Check OpenAPI reachability and local auth inputs")
     add_profile_argument(doctor_parser)
     doctor_parser.set_defaults(func=command_doctor)
 
-    if EDITION == "internal":
+    if is_internal():
         profiles_parser = subparsers.add_parser("profiles", help="List configured profiles")
         profiles_parser.set_defaults(func=command_profiles)
 
@@ -1821,9 +1906,9 @@ def main() -> int:
         use_profile_parser.set_defaults(func=command_use_profile)
 
     args = parser.parse_args()
-    global PROFILE_OVERRIDE, BASE_URL_OVERRIDE
+    global PROFILE_OVERRIDE, ENV_OVERRIDE
     PROFILE_OVERRIDE = getattr(args, "profile", None)
-    BASE_URL_OVERRIDE = getattr(args, "base_url", None)
+    ENV_OVERRIDE = getattr(args, "env", None)
     args.func(args)
     return 0
 

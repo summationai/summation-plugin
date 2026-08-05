@@ -11,7 +11,7 @@ Run the bundled diagnostic from the sibling `api` skill (resolve relative to thi
 python3 ../api/scripts/sum_api.py doctor
 ```
 
-`doctor` reports: base URL (always production in this build), config file path and mode, OpenAPI reachability (title/version/path count), and whether a credential is present.
+`doctor` reports: mode (`internal` true/false) and environment, base URL, config file path and mode, OpenAPI reachability (title/version/path count), and whether a credential is present. External is always production; internal reports the selected environment.
 
 If the user reports Summation MCP tools failing with auth errors while `doctor` passes: the MCP registration carries its own bearer header — re-run `/addison:signin` (steps 1-4) to mint a fresh credential and re-register the server via `mcp-connect`.
 
@@ -31,7 +31,7 @@ python3 ../api/scripts/sum_api.py audit --tail 20
 
 ## Interpreting results
 
-- OpenAPI unreachable → network problem, not auth (the base URL is pinned to production).
+- OpenAPI unreachable → network problem, not auth (the base URL is always an allowlisted Summation environment).
 - No credential found → hand off to the `signin` skill.
 - 401 on the list call → credential invalid or expired; re-run `login`.
 - 403 → scope problem; report the `request_id` and the granted scopes.

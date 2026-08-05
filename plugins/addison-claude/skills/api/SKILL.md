@@ -49,9 +49,10 @@ python3 $SKILL/scripts/sum_api.py operation list_agent_projects_v1_projects_get
 - `operations [search]` — list operations; filter by method, path, tag, operationId, or summary.
 - `describe <operationId>` — print one operation's resolved schema (parameters, request body, responses) **without calling it**. Use this before mutating endpoints.
 - `schema <Name>` — print a component schema with `$ref`s resolved. Substring match if no exact hit (errors if ambiguous).
-- `call <METHOD> <path>` — call any path directly (pinned to the production host). Flags: `--query`, `--body`, `--stream`.
+- `call <METHOD> <path>` — call any path directly (pinned to the selected Summation environment; production by default). Flags: `--query`, `--body`, `--stream`.
 - `operation <operationId>` — call a discovered operation. Flags: `--params`, `--body`, `--stream`.
-- `login` — start device login, store temporary local polling state (`0600`), and return chat-safe fields (`verification_uri_complete`, `user_code`, `expires_in`).
+- `mode` — report internal/external mode and selectable environments (auth-free; the `signin` skill branches on it).
+- `login` — start device login (internal: add `--env prod|staging|sandbox`), store temporary local polling state (`0600`), and return chat-safe fields (`verification_uri_complete`, `user_code`, `expires_in`).
 - `login-poll` — poll the locally pending device login to terminal state; on `approved` it stores the device-login credential locally and clears the temporary polling state.
 - `logout` — revoke the stored device-login session and remove its local credential.
 - `mcp-connect` — register the hosted Summation MCP server with Claude Code using the stored credential (run after login; credential moves process-to-process, never through chat).
@@ -81,7 +82,9 @@ python3 $SKILL/scripts/sum_api.py call --stream \
 
 ## Auth
 
-Device login only. The stored credential (`SUM_API_DEVICE_LOGIN_CREDENTIAL` in `~/.summation/summation-config`, file mode `0600`) authenticates every call; `SUM_API_ACCESS_TOKEN` is honored if present. There is no M2M path in this build.
+Device login is the default. The stored credential (`SUM_API_DEVICE_LOGIN_CREDENTIAL`, file mode `0600`) authenticates every call; `SUM_API_ACCESS_TOKEN` is honored if present.
+
+Run `python3 $SKILL/scripts/sum_api.py mode` to see whether internal features are unlocked (the `ADDISON_PLUGIN_INTERNAL=1` shell env var). **External** (the default) is production-only and device-login-only — no M2M, no environment choice. **Internal** additionally allows selecting an environment (`--env prod|staging|sandbox`, from a fixed Summation allowlist — never a free-form host), configuring M2M credentials (`configure`), and switching tenant profiles (`profiles` / `use-profile`); its config lives in `~/.summation/summation-config-internal`.
 
 For interactive user login, use the sibling `signin` skill. It owns the device-login flow, what to show the user, polling behavior, MCP registration, and sign-out guidance. If no credential is stored, the helper exits with "Not signed in to Summation. Run /addison:signin to connect." — do that, don't improvise auth.
 

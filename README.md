@@ -68,29 +68,32 @@ run /addison:validate before any report is shared externally. Drafts need explic
 user approval before publishing anywhere.
 ```
 
-## Editions
+## One plugin, two surfaces
 
-`plugins/addison-claude` (external, source of truth) ships to the public marketplace: production-pinned, device-login only, host-pinned HTTPS requests. Two editions are **generated** from it — never edit them directly:
+`plugins/addison-claude` is the single source of truth: production-pinned by default, device-login only, every request host-pinned to an allowlisted Summation environment. There is **one** plugin for everyone — no separate internal/external builds.
 
-- `plugins/addison-claude-internal` — `./build-editions.sh` bakes `EDITION="internal"` (any environment, M2M, profiles) plus the overlays in `internal/overlay/`.
+**Internal mode** (Summation employees) unlocks at runtime via the `ADDISON_PLUGIN_INTERNAL=1` shell env var: environment selection (`--env prod|staging|sandbox`, a fixed allowlist — never a free-form host) and tenant switching (sign out / sign in). It is a runtime flag rather than a build constant because the security boundary is the host allowlist in `resolve_request_url()`, enforced unconditionally — not the flag. The credential can only ever reach a Summation host, so the flag widens UX but can never exfiltrate a token.
+
+The **Codex** surface is **generated** from the Claude plugin — never edit it directly:
+
 - `plugins/addison-codex` — `./build-codex.sh` rewrites `/addison:` → `$addison-`, swaps in a `signin`/`signout` overlay that registers the MCP server in `~/.codex/config.toml` (`mcp-connect --client codex`), and writes `.codex-plugin/plugin.json` + `.agents/plugins/marketplace.json`.
 
-The `Check generated editions` CI regenerates both and **fails the build if they drift from source** — so there is exactly one place to edit (`plugins/addison-claude`), and the generated dirs can never fall out of sync. The edition is a build-time constant, not an env var, so the external artifact contains no unlock path.
+The `Check generated Codex edition` CI regenerates it and **fails the build if it drifts from source** — so there is exactly one place to edit (`plugins/addison-claude`).
 
 ## Dev loop
 
 ```bash
-claude --plugin-dir ./plugins/addison-claude        # load external for one session
+claude --plugin-dir ./plugins/addison-claude        # load the plugin for one session
+ADDISON_PLUGIN_INTERNAL=1 claude --plugin-dir ./plugins/addison-claude   # ...with internal mode on
 claude plugin validate ./plugins/addison-claude     # validate manifest
-./build-editions.sh                          # regenerate plugins/addison-claude-internal
 ./build-codex.sh                             # regenerate plugins/addison-codex + Codex marketplace
 ./build-zip.sh                               # rebuild dist/addison-plugin.zip for org upload
 ```
 
 ## Release
 
-1. Bump `version` in `plugins/addison-claude/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, and `.claude-plugin/marketplace.internal.json` (marketplace users only receive updates on a version bump).
-2. Run `./build-editions.sh` and `./build-codex.sh` to regenerate the internal and Codex editions, and commit (the drift-guard CI enforces this). Merge to `main`.
+1. Bump `version` in `plugins/addison-claude/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` (marketplace users only receive updates on a version bump).
+2. Run `./build-codex.sh` to regenerate the Codex edition, and commit (the drift-guard CI enforces this). Merge to `main`.
 3. Tag the release and push the tag:
    ```bash
    git tag v0.8.2 && git push origin v0.8.2
