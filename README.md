@@ -4,6 +4,20 @@ Plugin marketplace for Summation. One plugin, `addison`, brings Addison to Claud
 
 **Architecture:** skills orchestrate the **summation MCP server**. Auth is Claude’s MCP OAuth (browser) — the plugin ships a headerless `.mcp.json` and does not mint or inject bearer tokens for the happy path.
 
+**External vs internal**
+
+| | External (default) | Internal |
+|---|---|---|
+| Who | Customers | Summation employees |
+| Enable | (nothing) | Launch Claude with `ADDISON_PLUGIN_INTERNAL=1` |
+| Environment | Single plugin default | `/addison:signin` asks prod / staging / sandbox |
+| Tenant | Org approved in browser | Same; skill tells you to switch org on the web app, then re-auth |
+
+```bash
+# Internal dogfood (env picker + tenant guidance at sign-in)
+ADDISON_PLUGIN_INTERNAL=1 claude --plugin-dir ./plugins/addison-claude
+```
+
 ## Install
 
 **Claude Code (CLI/IDE):**
@@ -87,10 +101,13 @@ CI (`Check generated Codex edition`) fails if Codex drifts from source.
 ## Dev loop
 
 ```bash
-# Dogfood against sandbox MCP (current .mcp.json)
+# External-shaped dogfood (plugin default MCP URL — currently sandbox)
 claude --plugin-dir ./plugins/addison-claude
 
-# If you still have an old user-scope header entry, remove it so the plugin config wins:
+# Internal dogfood (sign-in asks env + tenant guidance)
+ADDISON_PLUGIN_INTERNAL=1 claude --plugin-dir ./plugins/addison-claude
+
+# If you still have an old user-scope header entry, remove it so OAuth can win:
 claude mcp remove summation -s user
 
 claude plugin validate ./plugins/addison-claude

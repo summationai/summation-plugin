@@ -46,7 +46,9 @@ See the sibling `signin` / `signout` skills and `references/auth.md`. Summary:
 
 - Plugin ships headerless `.mcp.json` for `summation`.
 - Codex stores the OAuth/session token; skills never read or write `sm_dls_…` files for the happy path.
-- Do not register a user-scope MCP entry with an `Authorization` header — that fights the plugin config.
+- **External** (default): one env, no env/tenant prompts.
+- **Internal** (`ADDISON_PLUGIN_INTERNAL=1` in the launch shell): signin asks **environment** (prod/staging/sandbox allowlist) and **tenant** guidance (web-app org + re-auth).
+- Do not register a user-scope MCP entry with an `Authorization` header — that fights OAuth.
 
 ## Safety rules
 

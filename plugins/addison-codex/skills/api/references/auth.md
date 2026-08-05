@@ -2,68 +2,78 @@
 
 Codex authenticates to the hosted Summation MCP server. The plugin does not mint or store customer credentials for the happy path.
 
-## Happy path
+## Two experiences
 
-1. Plugin loads `.mcp.json` with a **headerless** HTTP MCP entry:
+| | External (default) | Internal |
+|---|---|---|
+| Gate | (none) | Shell: `ADDISON_PLUGIN_INTERNAL=1` (or `true` / `yes` / `on`) when launching Codex |
+| Environments | One — plugin `.mcp.json` URL | User picks **prod** / **staging** / **sandbox** at sign-in |
+| Tenant | Org approved in browser | Same; skill tells user to switch org on the web app first if needed |
+| MCP URL | Bundled headerless entry | User-scope headerless `summation` pointed at the chosen env’s allowlisted URL |
+| Skill prompts | Never ask env or tenant | Ask env; explain tenant binding |
 
-   ```json
-   {
-     "summation": {
-       "type": "http",
-       "url": "https://sandbox-mcp.summation.com/mcp"
-     }
-   }
-   ```
+Detect mode in skills:
 
-2. First tool call (or explicit authenticate) triggers MCP OAuth discovery:
-   - `401` + `WWW-Authenticate` → protected-resource metadata
-   - `authorization_servers` → AS metadata (register / authorize / token)
-   - Browser opens Summation activate / SSO
-   - Codex stores the bearer and retries
+```bash
+printf '%s' "${ADDISON_PLUGIN_INTERNAL:-}"
+```
 
-3. MCP tools run with that bearer. Identity/tenant come from the token claims server-side.
+## Allowlisted MCP URLs only
 
-**Dogfood:** sandbox MCP URL above. **Production:** flip URL to `https://mcp.summation.com/mcp` once prod OAuth is deployed (same shape, no headers).
+| Env | URL |
+|---|---|
+| prod | `https://mcp.summation.com/mcp` |
+| staging | `https://staging-mcp.summation.com/mcp` |
+| sandbox | `https://sandbox-mcp.summation.com/mcp` |
 
-## What skills must not do
+Never accept free-form hosts. Internal sign-in re-points with:
 
-- Device-login poll loops (`login` / `login-poll`) as primary auth
-- Writing `SUM_API_DEVICE_LOGIN_CREDENTIAL` into `~/.summation/*` for Codex sessions
-- `claude mcp add … --header Authorization: Bearer …` (fights headerless plugin config)
-- Asking the user to paste tokens, client secrets, or device codes into chat
+```bash
+claude mcp add --transport http summation 'https://…' -s user
+```
+
+No `--header`, no Bearer injection.
+
+## Happy path (both)
+
+1. Plugin loads headerless `.mcp.json` (default env for external).
+2. First tool call / explicit authenticate → MCP OAuth → browser → Codex stores token.
+3. Tools run; identity/tenant from server-side claims.
+
+**Dogfood:** bundled default is sandbox until prod OAuth is deployed, then flip `.mcp.json` to prod.
 
 ## Sign-in / sign-out
 
-| Action | Skill | Mechanism |
-|---|---|---|
-| Connect | `signin` | `whoami`; if needed, host browser auth; re-check `whoami` |
-| Disconnect | `signout` | Host MCP remove / re-auth clear for `summation` |
-| Diagnose | `diagnose` | `whoami` + environment MCP tools |
+| Action | Skill |
+|---|---|
+| Connect | `signin` (mode-aware) |
+| Disconnect / switch env or tenant | `signout` then `signin` |
+| Diagnose | `diagnose` (reports mode + env + org) |
 
-## Legacy bridge (remove if present)
+## What skills must not do
 
-Older installs may still have a **user-scope** `summation` entry with an `Authorization: Bearer sm_dls_…` header from the old `mcp-connect` helper. That bypasses OAuth and can go stale independently of Codex’s token store.
+- Device-login poll as primary auth
+- Writing `sm_dls_…` into `~/.summation/*` for Codex sessions
+- `claude mcp add … --header Authorization: …`
+- Asking for tokens in chat
+- Offering free-form base URLs
+
+## Legacy bridge
+
+Old user-scope entries with `Authorization: Bearer sm_dls_…` fight OAuth:
 
 ```bash
-claude mcp get summation
-# if Headers include Authorization → remove the override:
 claude mcp remove summation -s user
 ```
 
-Then reload and use `$addison-signin`.
-
-## Identity rules
-
-- Org/user/tenant come from the authenticated principal on the server.
-- Do not accept caller-provided `x-org-id`, `x-user-id`, or similar as trusted identity.
-- Switching org: change active org on the Summation web app, then re-authenticate MCP.
+Then `$addison-signin`.
 
 ## Troubleshooting
 
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| Tools missing | Plugin not enabled / MCP not loaded | Enable addison; restart; check `/mcp` |
-| 401 on tools | Session expired or never auth’d | `$addison-signin` |
-| 403 | Valid user, missing role/scope | Different org or admin grant |
-| Auth works on webapp, not MCP | Stale header override | Remove user-scope header entry |
-| Sandbox vs prod confusion | Wrong MCP URL in `.mcp.json` | Match URL to intended environment |
+| Symptom | Fix |
+|---|---|
+| Tools missing | Enable addison; restart |
+| 401 | `$addison-signin` |
+| Wrong env (internal) | Sign out; sign in; pick env again |
+| Wrong tenant | Switch org on web app; sign out; sign in |
+| Stale Bearer header | Remove user-scope header entry |

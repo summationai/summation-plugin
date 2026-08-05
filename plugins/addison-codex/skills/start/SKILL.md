@@ -5,7 +5,7 @@ description: Summation onboarding — connect via MCP auth, map data sources, me
 
 # Summation Start
 
-Walk a brand-new user from zero to their first report in chat. **No HTML artifacts, steppers, or welcome visuals** — stay in the conversation. **All data plane = summation MCP tools.** Auth = host OAuth via the `signin` skill.
+Walk a brand-new user from zero to their first report in chat. **No HTML artifacts, steppers, or welcome visuals** — stay in the conversation. **All data plane = summation MCP tools.** Auth = host OAuth via the `signin` skill (external vs internal).
 
 ## The four steps
 
@@ -17,11 +17,12 @@ Optionally show a one-line markdown checklist of these four steps; update it in 
 
 ### Step 1 — Connect
 
-Call **`whoami`** immediately (or run the `signin` skill). Prefer the plugin’s **`summation`** MCP server when multiple Summation-related servers exist.
+Run the **`signin` skill** (it detects external vs internal via `ADDISON_PLUGIN_INTERNAL`). Do not invent a parallel auth path.
 
-- Identity returned → show user/org/scopes briefly; continue.
-- Needs auth → run **`signin`** (browser OAuth; no device-login scripts).
-- Tools missing → enable/reload the **addison** plugin so `.mcp.json` loads, then retry.
+- **External:** no env/tenant questions; `whoami` → browser auth if needed.
+- **Internal:** signin asks **environment** (prod/staging/sandbox) and **tenant** guidance (web-app org), then auth.
+
+After signin succeeds, show identity (and env if internal) briefly and continue.
 
 ### Step 2 — Discover (GATE: connections AND attached datasets)
 
