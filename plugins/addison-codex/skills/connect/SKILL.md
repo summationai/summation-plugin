@@ -1,52 +1,30 @@
 ---
 name: connect
-description: Connect a data source (Postgres, Snowflake, etc.) to Summation from this conversation — collects non-secret settings in chat, takes the secret through a local file so it never enters the conversation, then creates and tests the connection. Use when the user wants to add, fix, or test a data connection.
+description: Connect a data source (Postgres, Snowflake, etc.) to Summation — non-secret settings in chat, secrets never in MCP tool args or the conversation when avoidable; then test and attach datasets via MCP.
 ---
 
 # Summation Connect
 
-Create a data connection via `POST /v1/connections/data` (`{name, type, config, secrets, description}` — secrets are stored server-side as secret refs). Helper: `../api/scripts/sum_api.py`. Always `describe create_data_connection` first for the current type-specific config shape. The `/v1/connections/data...` paths here are illustrative — these routes have moved before, so if a call 404s, rediscover via `operations connections` / `operation <operationId>` (the contract is the source of truth).
+**Secrets must never pass through MCP tool arguments or (when avoidable) chat.** Connection **create with password** is not on the curated MCP surface for that reason.
 
-Connection **creation stays on the REST path** even when the `summation` MCP server is connected — the secret must travel via the local-file handoff below, never through a tool argument that lands in the transcript. Browsing/inspecting sources afterwards can use the MCP source-discovery tools.
+## Preferred paths (in order)
 
-## The secret rule (read first)
+1. **Webapp end-to-end (default):** workspace → **Connections** → Add connection. Dictate non-secret fields so the user only types secrets in the browser. Then return here for MCP browse/attach/test.
+2. **After a connection exists:** use MCP only — `list_data_connections`, `test_data_connection`, `browse_connection_resources`, `attach_connection_datasets`, `list_connection_datasets`.
+3. **Pasted-secret salvage:** if the user already pasted a secret, do not bounce them — guide webapp create with that value and advise **rotating** the credential; teach webapp/file habits next time.
 
-**Never ask for a password/secret in chat.** Offer the paths in this order:
+## Flow (MCP after the pipe exists)
 
-- **File handoff (default in-flow path — Codex, Cowork, any surface with a user filesystem):** the secret goes into a local file the user creates in their own terminal; it never appears in the conversation, argv, or transcripts. The connection is created in ONE call with config + secrets together.
-- **Webapp end-to-end (default on Desktop chat, where there is no user filesystem):** workspace → Connections → Add connection. Offer to dictate the exact non-secret values to enter so the user only has to type and not think.
-- **Pasted-secret salvage (the user already pasted it):** do NOT refuse and bounce them — the exposure already happened, and retyping punishes intent. Proceed: create the connection with the pasted secret (TLS to sum-api, stored as a secret ref), then firmly advise rotating that credential at the source since it transited chat history. Teach the file handoff for next time.
-
-**Never create a connection without its secrets.** The API accepts a secretless `create_data_connection`, but the product cannot complete it — a connection cannot be saved/finished in the webapp without its password, so a secretless create strands an orphan the user cannot fix. Create only when the secret is in hand (file or salvage); if an orphan ever gets created, delete it (`DELETE /v1/connections/data/<id>?confirm=true`).
-
-## Flow
-
-1. Collect **non-secret** settings in chat: type, a connection name, and the type-specific config (host/account, port, database/warehouse, user, …) per the described schema. Echo them back for a yes before anything is created.
-2. Secret via file handoff, then create in one call:
-
-```bash
-# user runs (or you instruct them precisely):
-#   mkdir -p ~/.summation && printf '%s' 'THE_SECRET' > ~/.summation/pending-secret && chmod 600 ~/.summation/pending-secret
-# then you assemble the body WITHOUT echoing the secret:
-python3 -c "
-import json, pathlib
-secret = pathlib.Path.home().joinpath('.summation/pending-secret').read_text().strip()
-body = {'name': '<NAME>', 'type': '<TYPE>', 'config': {<NON_SECRET_CONFIG>}, 'secrets': {'<SECRET_KEY>': secret}}
-out = pathlib.Path.home().joinpath('.summation/pending-connection.json')
-out.write_text(json.dumps(body)); out.chmod(0o600)
-"
-python3 ../api/scripts/sum_api.py call POST /v1/connections/data --body-file ~/.summation/pending-connection.json
-rm -f ~/.summation/pending-secret ~/.summation/pending-connection.json
-```
-
-3. **Always clean up the temp files immediately** (the `rm -f`), success or failure.
-4. **Test it**: `call POST /v1/connections/data/<NEW_ID>/tests` — report pass/fail with `request_id`. Optionally `call POST /v1/connections/data/<NEW_ID>/resources` to show what's now browsable.
-5. **A live connection is not the finish line — datasets are.** After the test passes, list attached datasets (`call GET /v1/connections/data/<ID>/datasets`). If none: browse what's attachable (`call POST /v1/connections/data/<ID>/resources --body '{"max_results": 200}'`), show the tree as a preview, then attach the chosen datasets via `call POST /v1/connections/data/<ID>/datasets` (run `describe attach_data_connection_datasets` first for the body) — or send the user to the workspace **Connections** page if they prefer. Only after `preflight` shows `connections.datasets_total > 0` is the data usable.
-6. Hand back: if this ran inside `$addison-start`, return to its Step 2 gate (re-run `preflight` — both gates should now pass).
+1. Collect **non-secret** settings in chat; echo them back for a yes.
+2. User creates the connection in the **webapp** (or already has one).
+3. **`list_data_connections`** → find the new id; **`test_data_connection`**.
+4. **Datasets gate:** `list_connection_datasets`. If empty, `browse_connection_resources` (label as attachable preview, not “already data”), then **`attach_connection_datasets`** for chosen tables — or send them to Connections in the webapp.
+5. Confirm with `list_connection_datasets` / a light `search_tables`. Hand back to `$addison-start` step 2 if that was the parent flow.
 
 ## Rules
 
-- **User-facing voice**: narrate outcomes, never endpoints, schemas, or capability doubts — API discovery is silent. Dataset attachment has a public API (`POST /v1/connections/data/<id>/datasets`); `/v1/table-imports` is a separate CSV/file-upload path, not connection attachment — never conflate the two.
-- Secret values never appear in: chat messages you write, command argv, logs, or the audit trail (the helper never logs bodies).
-- Echo back everything EXCEPT secrets before creating (name, type, config) and get a yes — creating a connection is a tenant-level change.
-- On create/test failure, surface the `request_id` and the non-secret config for debugging; never print the secret or ask the user to re-paste it into chat.
+- Narrate outcomes, not protocol internals.
+- Never put passwords into MCP tool JSON.
+- Never create a secretless orphan connection and leave it.
+- A live connection is not the finish line — **attached datasets** are.
+- Auth for MCP tools: `$addison-signin` if `whoami` fails.

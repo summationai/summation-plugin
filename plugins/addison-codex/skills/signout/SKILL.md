@@ -1,27 +1,20 @@
 ---
 name: signout
-description: Disconnect Codex from Summation — revoke the stored device-login session, remove the local credential, and deregister the Summation MCP server. Use to disconnect, sign in as a different Summation user, or clear a stale session.
+description: Disconnect Codex from Summation — clear the hosted MCP session so the next use re-authenticates. Use to disconnect, switch Summation user/org, or clear a stale MCP session.
 ---
 
 # Addison Sign-out
 
-Revoke the stored device-login session, remove `SUM_API_DEVICE_LOGIN_CREDENTIAL`, and deregister the Summation MCP server from Codex. The helper lives in the sibling `api` skill: `../api/scripts/sum_api.py`.
+Auth lives in the MCP client. Sign-out means removing or clearing the `summation` MCP server entry so the next tool call re-prompts browser auth.
 
 ## Flow
 
-1. Revoke the session, then deregister the server:
-
-```bash
-python3 ../api/scripts/sum_api.py logout
-python3 ../api/scripts/sum_api.py mcp-disconnect --client codex
-```
-
-2. Interpret the results:
-
-- `logout` -> `{"status":"logged_out", ...}` — the session was revoked and the credential removed. `{"status":"already_logged_out", ...}` — nothing was present.
-- `mcp-disconnect --client codex` -> `{"status":"disconnected"}` — the server block (and its bearer header) was removed from `~/.codex/config.toml`. `{"status":"not_registered"}` — nothing was present.
+1. Remove the Summation MCP server from Codex config (delete the `summation` / MCP server block for `https://sandbox-mcp.summation.com/mcp` or the prod URL, including any legacy Authorization header).
+2. Confirm Summation tools no longer work without re-auth.
+3. Report: disconnected; next `$addison-signin` or tool use will re-authenticate.
 
 ## Rules
 
-- Always run both: a revoked session must not leave a stale bearer header in Codex config.
-- Report both outcomes to the user.
+- Prefer clearing MCP config over legacy helper logout unless a device-login credential file is still present and the user wants it gone too.
+- To switch org/tenant: switch org on the Summation web app, then sign out and sign in again.
+- Never print tokens while inspecting config.

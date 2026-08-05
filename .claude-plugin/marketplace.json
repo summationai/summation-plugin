@@ -7,8 +7,8 @@
     {
       "name": "addison",
       "source": "./plugins/addison-claude",
-      "description": "Addison, Summation's AI data analyst, in Claude Code: ask data questions, search the catalog, run bounded SQL, generate + validate reports, export PDF/DOCX/Markdown.",
-      "version": "0.9.0",
+      "description": "Addison, Summation's AI data analyst, in Claude Code: ask data questions, search the catalog, run bounded SQL, generate + validate reports. MCP-native.",
+      "version": "0.10.0",
       "author": {
         "name": "Summation"
       },

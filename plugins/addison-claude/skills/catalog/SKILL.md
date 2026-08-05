@@ -6,21 +6,19 @@ argument-hint: "[search term]"
 
 # Summation Catalog
 
-Discover what data exists before touching it.
-
-**MCP-first**: when the `summation` MCP server is connected, use its source-discovery and table/view tools (search, describe, previews, lineage) instead of the REST calls below. Caveat: `get_view`/`preview_view_data` can 404 on ids from `search_views` (known bug) — fall back to the tables path. Helper fallback: `../api/scripts/sum_api.py`. The `/v1/...` paths below are illustrative — if a call returns 404, the route may have moved — rediscover via `operations`/`operation` (the contract is the source of truth).
+Discover what data exists before touching it. **MCP tools only.**
 
 ## Flow
 
-1. **Inventory**: `call GET /v1/tables` and `call GET /v1/views` (paginated — note `total` vs shown). Filter client-side by the user's search term across names.
-2. **Detail**: for a specific table/view:
-   - `call GET /v1/tables/<TABLE_ID>` — definition
-   - `call GET /v1/tables/<TABLE_ID>/catalog` — catalog metadata (descriptions, semantics)
-   - `call GET /v1/tables/<TABLE_ID>/data --query '{"limit": 5}'` — peek at sample rows (small limits only)
-3. Render compact schema cards: name, id, column names/types if available, one-line description. Group tables vs views.
+1. **Search:** `search_tables` (and `search_views` if relevant) with the user’s term.
+2. **Detail:** for a chosen table — `get_table_schema`, optional `preview_table_data` (limit ≤ 5), optional `get_table_lineage`. For views — `get_view` / `preview_view_data` (see caveat).
+3. **Project catalog:** `list_catalog_entries` when the question is “what’s in this project?”
+4. Render compact schema cards: name, id, columns/types, one-line description. Group tables vs views.
 
 ## Rules
 
-- With 500+ tables, never dump the full list — show matches plus the total count, and ask to narrow.
-- Sample-row peeks stay at `limit ≤ 5`; this is discovery, not analysis (`/addison:query` is for that).
-- Suggest next steps: a `/addison:query` against a found table, or `/addison:report` for a full analysis.
+- With huge inventories, never dump everything — show matches + totals and ask to narrow.
+- Sample peeks stay small (`limit` ≤ 5); analysis is `/addison:query` or `ask_analyst`.
+- **Caveat:** `get_view` / `preview_view_data` can 404 on ids from `search_views` — fall back to tables tools.
+- Suggest next steps: `/addison:query` or `/addison:report`.
+- No REST helper for this skill.
