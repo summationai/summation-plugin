@@ -36,20 +36,20 @@ Tables / views / query: `search_tables`, `get_table_schema`, `preview_table_data
 
 Files: `list_files`, `download_file`, `upload_file`, `request_file_upload`, `finalize_file_upload`, `import_file_to_table`
 
-Catalog / reports / playbooks / schedules: `list_catalog_entries`, `attach_catalog_entry`, `start_report`, `list_reports`, `get_report_status`, `export_report`, `validate_report`, `list_playbooks`, `get_playbook`, `list_schedules`, `get_schedule`, `list_schedule_runs`, `create_schedule`
+Catalog / reports / playbooks / schedules: `list_catalog_entries`, `attach_catalog_entry`, `start_report`, `list_reports`, `get_report_status`, `export_report`, `validate_report`, `list_playbooks`, `get_playbook`, `list_schedules`, `get_schedule`, `list_schedule_runs`, `create_schedule` — plus any create/update/detach tools the live server exposes (use them when present).
 
-Prefer the live server’s tool list if names drift slightly.
+Prefer the **live server’s tool list** over this doc if names differ.
 
 ## Client behaviors (required)
 
-- **Long tools** (`ask_analyst`, `start_report`, `validate_report`, `import_file_to_table`): tell the user you’re working; **reports can take several minutes** — give brief progress every ~30–45s while waiting; do not declare failure at 120s if status is still running (wait up to ~7–10 minutes or until status is terminal).  
+- **Long tools** (`ask_analyst`, `start_report`, `validate_report`, `import_file_to_table`): tell the user you’re working; **reports can take a few minutes** — brief progress every ~30–45s until status is terminal.  
 - **Auth errors** → signin.  
 - **Views** may 404 on ids from search — fall back to tables.  
-- **`create_schedule`** emails people — confirm recipients + cadence (with timezone) first.  
-- **Secrets:** never in tool args; **connect** skill + web app.  
+- **Schedules** that email people — confirm recipients + cadence (with timezone) first.  
+- **Secrets:** never in tool args or chat; **connect** skill + web app for passwords.  
 - **Attach datasets:** always set human-readable **`name`** (table name). Never leave auto `*_dataset_N` names.  
-- **Success:** verify with list/test tools before telling the user it’s done. Never trust intermediate “Added…” stream text alone.  
-- **User chat:** no OpenAPI dumps, path lists, or key-guessing experiments.
+- **Success:** verify with list/test/export before telling the user it’s done.  
+- **User chat:** product language only — no OpenAPI dumps, path lists, or key-guessing experiments.
 
 ## Auth summary
 

@@ -36,12 +36,12 @@ Overview: https://docs.summation.com/features/connectors.md
 
 | Need | How in this plugin |
 |---|---|
-| Ask a business question | `ask_analyst` / `$addison-query` |
-| Explore tables | `$addison-catalog`, `search_tables`, previews |
+| Ask a business question | Addison (`ask_analyst`) / `$addison-query` |
+| Explore tables | `$addison-catalog` |
 | Full write-up for leadership | `$addison-report` → export markdown/PDF/DOCX |
 | Check a report before sharing | `$addison-validate` |
-| Add a warehouse/database | `$addison-connect` → **Summation web app** for passwords |
-| Recurring emailed analysis | Playbooks in the web app (today) + `$addison-schedule` for cadence |
+| Add a warehouse/database | `$addison-connect` (passwords in the Summation **Connections** UI) |
+| Recurring emailed analysis | Playbooks + `$addison-schedule` |
 | Who am I / is it working? | `$addison-signin`, `$addison-diagnose` |
 
 ## Product docs index

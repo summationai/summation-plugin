@@ -13,41 +13,40 @@ Walk a new user from zero to a first useful answer **in plain language**. No HTM
 
 ### Step 1 — Connect (sign in)
 
-Run the **`signin` skill**. Show who they are (name/email, org) in ordinary words. Do not invent a second auth path.
+Run the **`signin` skill**. Show who they are (name/email, org) in ordinary words.
 
 ### Step 2 — Discover (hard gate)
 
 MCP: `list_data_connections`, `list_connection_datasets`, `list_projects`, `search_tables` as needed.
 
-**No connections → stop.** Do not invent reports. Say clearly there is no business source yet. Offer:
+**No connections → stop.** Offer:
 
-1. **Connect a database/warehouse** → `$addison-connect` (web app for passwords; Postgres/Snowflake/etc. are supported — see product.md)  
-2. **They already connected in the web app** → re-list connections and continue  
+1. **Connect a database/warehouse** → `$addison-connect` (Postgres, Snowflake, BigQuery, and more are supported — see product.md)  
+2. **Import files** if they already have files in a project → file import tools, then confirm tables exist  
+3. **They already connected in the web app** → re-list and continue  
 
-**Connection exists but no attached datasets → stop.** A connection is only a pipe. Browse what can be attached; attach with **friendly names** (table names). Never leave auto `*_dataset_N` names. Or send them to **Connections** in the web app to attach, then re-check.
+**Connection exists but no attached datasets → stop.** Browse and attach with **friendly names** (table names). Never leave auto `*_dataset_N` names.
 
-**CSV / file import** if it fails: use the friendly failure text from the **connect** skill — do not thrash failed import tools or name internal platform tools.
-
-**Gate open** when there is at least one real connection with attached, named datasets. Show a short source map: system names + readable table names.
+**Gate open** when there is at least one real connection (or imported tables) with clear, analyzable names. Short source map for the user.
 
 ### Step 3 — Meet Addison
 
-1. Ensure a project (`list_projects` / `get_default_project` / create only with consent).  
-2. Project catalog: attach agreed business tables if empty (`attach_catalog_entry`).  
-3. `ask_analyst`: introduce what you can see + 3 concrete report ideas from **real** table names. Tell the user Addison is working; long answers are normal.
+1. Ensure a project (`list_projects` / `get_default_project` / create with consent).  
+2. Project catalog: attach agreed business tables if empty.  
+3. `ask_analyst`: introduce what you see + 3 concrete report ideas from **real** table names. Tell the user Addison is working.
 
 ### Step 4 — First report
 
-Numbered ideas in chat. On yes → **report** skill (markdown) → offer **validate**. Next steps in plain language (ask another question, catalog, report).
+Numbered ideas. On yes → **report** skill (markdown) → offer **validate**. Next steps in plain language.
 
 ## Voice
 
-- Outcomes only for the user: no endpoints, OpenAPI, or raw tool-id dumps.  
+- Outcomes only: no endpoints, OpenAPI, or raw tool-id dumps.  
 - Never claim “added” / “imported” without a final list/check.  
 - No HTML welcome visuals.
 
 ## Rules
 
-- Analyzable data = **attached datasets with clear names**, not system tables alone and not “browsable but unattached.”  
-- Passwords never in chat; **connect** skill owns that path.  
+- Analyzable data = **named datasets / tables**, not system tables alone and not “browsable but unattached.”  
+- Passwords never in chat; **connect** skill owns secrets.  
 - Keep momentum: short steps, clear waits on long tools.
