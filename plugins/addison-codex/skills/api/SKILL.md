@@ -7,7 +7,7 @@ description: Use Summation through the hosted summation MCP server and Addison s
 
 All data operations go through the hosted **`summation` MCP server**. Auth is Codex OAuth against that server (browser sign-in). Do **not** call sum-api with a local helper for day-to-day work, and do **not** invent REST paths in chat.
 
-**Dogfood MCP URL:** `https://sandbox-mcp.summation.com/mcp` (plugin `.mcp.json`). Flip to prod when OAuth is live there.
+**Default MCP URL:** `https://mcp.summation.com/mcp` (plugin `.mcp.json`).
 
 ## Core workflow
 

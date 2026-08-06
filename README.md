@@ -4,17 +4,19 @@ Plugin marketplace for Summation. One plugin, `addison`, brings Addison to Claud
 
 **Architecture:** skills orchestrate the **summation MCP server**. Auth is **host-managed MCP OAuth** (browser) on Claude Code, Claude Desktop, and Codex — the plugin ships a headerless `.mcp.json` and does not mint or inject bearer tokens for the happy path.
 
+**Default MCP URL:** `https://mcp.summation.com/mcp` (production).
+
 **External vs internal**
 
 | | External (default) | Internal |
 |---|---|---|
 | Who | Customers | Summation employees |
 | Enable | (nothing) | Launch Claude with `ADDISON_PLUGIN_INTERNAL=1` |
-| Environment | Single plugin default | `/addison:signin` asks prod / staging / sandbox |
+| Environment | Production | `/addison:signin` asks prod / staging / sandbox |
 | Tenant | Org approved in browser | Same; skill tells you to switch org on the web app, then re-auth |
 
 ```bash
-# Internal dogfood (env picker + tenant guidance at sign-in)
+# Internal (env picker + tenant guidance at sign-in)
 ADDISON_PLUGIN_INTERNAL=1 claude --plugin-dir ./plugins/addison-claude
 ```
 
@@ -28,10 +30,6 @@ ADDISON_PLUGIN_INTERNAL=1 claude --plugin-dir ./plugins/addison-claude
 ```
 
 Then `/addison:signin` — Claude authenticates the **summation** MCP server in the browser. Or just invoke a Summation tool / `/addison:start` and complete the auth prompt when it appears.
-
-**Dogfood note (this branch / 0.10.0):** `.mcp.json` points at **sandbox**  
-`https://sandbox-mcp.summation.com/mcp`  
-so you can test-drive OAuth before prod is deployed. Flip the URL to `https://mcp.summation.com/mcp` when prod OAuth is live.
 
 **claude.ai / Claude Desktop (org admins):** Admin console → Plugins → Add plugins → *Sync from GitHub* (this repo) or *Upload a file* using the release zip:
 
@@ -48,10 +46,10 @@ codex plugin marketplace add summationai/addison-plugin
 codex plugin install addison
 ```
 
-Then `$addison-signin` or any data ask. Skills use `$addison-…` mentions. MCP is packaged in the plugin (headerless sandbox URL while dogfooding); auth is `codex mcp login summation` / host browser OAuth — same model as Claude, not a second setup step.
+Then `$addison-signin` or any data ask. Skills use `$addison-…` mentions. MCP is packaged in the plugin (production URL); auth is `codex mcp login summation` / host browser OAuth — same model as Claude, not a second setup step.
 
 ```bash
-# local dogfood from this checkout
+# local checkout
 codex plugin marketplace add ./   # or path to this repo
 codex plugin install addison
 # internal env picker (same flag as Claude Code):
@@ -94,7 +92,7 @@ user approval before publishing anywhere.
 
 `plugins/addison-claude` is the source of truth:
 
-- **`.mcp.json`** — remote Summation MCP, **no headers** (OAuth on first use)
+- **`.mcp.json`** — production Summation MCP, **no headers** (OAuth on first use)
 - **skills/** — product workflows over curated MCP tools
 - **`sum_api.py`** — legacy/local escape hatch only (not used by domain skills)
 
@@ -113,10 +111,10 @@ CI (`Check generated Codex edition`) fails if Codex drifts from source. **Never 
 ## Dev loop
 
 ```bash
-# External-shaped dogfood (plugin default MCP URL — currently sandbox)
+# External (production MCP default)
 claude --plugin-dir ./plugins/addison-claude
 
-# Internal dogfood (sign-in asks env + tenant guidance)
+# Internal (sign-in asks env + tenant guidance)
 ADDISON_PLUGIN_INTERNAL=1 claude --plugin-dir ./plugins/addison-claude
 
 # If you still have an old user-scope Authorization header entry, remove it so OAuth can win:
@@ -130,11 +128,10 @@ claude plugin validate ./plugins/addison-claude
 ## Release
 
 1. Bump `version` in `plugins/addison-claude/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
-2. When leaving sandbox dogfood, set `.mcp.json` URL to `https://mcp.summation.com/mcp`.
-3. Run `./build-codex.sh`, commit, merge to `main`.
-4. Tag matching the version:
+2. Run `./build-codex.sh`, commit, merge to `main`.
+3. Tag matching the version:
    ```bash
-   git tag v0.10.0 && git push origin v0.10.0
+   git tag v0.10.1 && git push origin v0.10.1
    ```
    The release workflow publishes `addison-plugin.zip` as **Latest**.
 

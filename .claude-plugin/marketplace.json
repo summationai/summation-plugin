@@ -8,7 +8,7 @@
       "name": "addison",
       "source": "./plugins/addison-claude",
       "description": "Addison, Summation's AI data analyst, in Claude Code: ask data questions, search the catalog, run bounded SQL, generate + validate reports. MCP-native.",
-      "version": "0.10.0",
+      "version": "0.10.1",
       "author": {
         "name": "Summation"
       },
