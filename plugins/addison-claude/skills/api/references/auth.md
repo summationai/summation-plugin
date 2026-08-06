@@ -40,7 +40,7 @@ Do **not** pass `--header`, an `Authorization` header, or any bearer token — t
 2. First tool call / explicit authenticate → MCP OAuth → browser → host stores token.
 3. Tools run; identity/tenant from server-side claims.
 
-**Dogfood:** bundled default is sandbox until prod OAuth is deployed, then flip `.mcp.json` to prod.
+**Default:** bundled `.mcp.json` points at production (`https://mcp.summation.com/mcp`).
 
 ## Sign-in / sign-out
 

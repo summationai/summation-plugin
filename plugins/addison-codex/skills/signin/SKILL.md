@@ -28,7 +28,7 @@ Treat as **internal** only if the value is `1`, `true`, `yes`, or `on` (case-ins
 | `staging` | `https://staging-mcp.summation.com/mcp` |
 | `sandbox` | `https://sandbox-mcp.summation.com/mcp` |
 
-**Dogfood note:** the plugin’s bundled `.mcp.json` currently points `summation` at **sandbox**. External users use that as-is. After prod OAuth is live, the bundled default becomes prod; internals still pick via this skill.
+The plugin’s bundled `.mcp.json` points `summation` at **production** (`https://mcp.summation.com/mcp`). Internal users can switch env at sign-in.
 
 ---
 
@@ -62,7 +62,7 @@ Invoke **`whoami`** again. Prefer `codex mcp login summation` (or the host Authe
 
 ### I1. Choose environment
 
-Ask which environment they want: **prod**, **staging**, or **sandbox** (only these three). Default suggestion: **sandbox** for dogfood, **prod** for customer-shaped testing once prod OAuth is up.
+Ask which environment they want: **prod**, **staging**, or **sandbox** (only these three). Default suggestion: **prod** (matches the plugin default).
 
 Do not accept arbitrary URLs or hosts.
 
