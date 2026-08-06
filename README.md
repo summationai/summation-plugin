@@ -1,23 +1,11 @@
 # Addison — Summation's AI analyst in Claude Code and Codex
 
-Plugin marketplace for Summation. One plugin, `addison`, brings Addison to Claude Code, Claude Desktop, and OpenAI Codex: data questions over the hosted Summation MCP server, report generation and export (PDF/DOCX/Markdown), catalog discovery, bounded SQL.
+Plugin marketplace for Summation. One plugin, `addison`, brings Addison to Claude Code, Claude Desktop, and OpenAI Codex: data questions over the hosted Summation MCP server, report generation and export (PDF/DOCX/Markdown), catalog discovery, and bounded SQL.
 
-**Architecture:** skills orchestrate the **summation MCP server**. Auth is **host-managed MCP OAuth** (browser) on Claude Code, Claude Desktop, and Codex — the plugin ships a headerless `.mcp.json` and does not mint or inject bearer tokens for the happy path.
+Install the plugin, approve Summation in the browser once, then ask in plain English. No API keys and no secrets pasted into chat. Auth is host-managed MCP OAuth; the plugin ships a headerless connection to production:
 
-**Default MCP URL:** `https://mcp.summation.com/mcp` (production).
-
-**External vs internal**
-
-| | External (default) | Internal |
-|---|---|---|
-| Who | Customers | Summation employees |
-| Enable | (nothing) | Launch Claude with `ADDISON_PLUGIN_INTERNAL=1` |
-| Environment | Production | `/addison:signin` asks prod / staging / sandbox |
-| Tenant | Org approved in browser | Same; skill tells you to switch org on the web app, then re-auth |
-
-```bash
-# Internal (env picker + tenant guidance at sign-in)
-ADDISON_PLUGIN_INTERNAL=1 claude --plugin-dir ./plugins/addison-claude
+```text
+https://mcp.summation.com/mcp
 ```
 
 ## Install
@@ -29,54 +17,46 @@ ADDISON_PLUGIN_INTERNAL=1 claude --plugin-dir ./plugins/addison-claude
 /plugin install addison@summation
 ```
 
-Then `/addison:signin` — Claude authenticates the **summation** MCP server in the browser. Or just invoke a Summation tool / `/addison:start` and complete the auth prompt when it appears.
+Then `/addison:signin` — or run `/addison:start` / ask a data question and complete the browser sign-in when Claude prompts you.
 
-**claude.ai / Claude Desktop (org admins):** Admin console → Plugins → Add plugins → *Sync from GitHub* (this repo) or *Upload a file* using the release zip:
+**claude.ai / Claude Desktop (org admins):** Admin console → Plugins → Add plugins → *Sync from GitHub* (this repo) or *Upload a file* using the latest release zip:
 
 ```
 https://github.com/summationai/addison-plugin/releases/latest/download/addison-plugin.zip
 ```
 
-Members then install from the org library. Desktop is MCP-native: same headerless server + host auth.
+Members then install from the org library.
 
-**Codex** (same repo — `plugins/addison-codex` is **generated** from Claude via `./build-codex.sh`):
+**Codex:**
 
 ```
 codex plugin marketplace add summationai/addison-plugin
 codex plugin install addison
 ```
 
-Then `$addison-signin` or any data ask. Skills use `$addison-…` mentions. MCP is packaged in the plugin (production URL); auth is `codex mcp login summation` / host browser OAuth — same model as Claude, not a second setup step.
-
-```bash
-# local checkout
-codex plugin marketplace add ./   # or path to this repo
-codex plugin install addison
-# internal env picker (same flag as Claude Code):
-ADDISON_PLUGIN_INTERNAL=1 codex
-```
+Then `$addison-signin` or any data ask. Skills use `$addison-…` mentions. MCP is packaged with the plugin; auth is the same browser flow (`codex mcp login summation` if needed).
 
 ## Contents
 
 | Skill | Invoke | Does |
 |---|---|---|
-| `start` | `/addison:start` | guided onboarding: connect → source map → meet Addison → first report |
-| `api` | model-invoked | MCP tool map + safety rules (domain skills are preferred) |
-| `signin` | `/addison:signin` | ensure MCP auth (host browser OAuth via `whoami`) |
-| `signout` | `/addison:signout` | clear Summation MCP session |
-| `diagnose` | `/addison:diagnose` | MCP connectivity/auth + environment card |
-| `report` | `/addison:report` | generate report → export markdown/PDF/DOCX |
-| `validate` | `/addison:validate` | report verification before external share |
-| `query` | `/addison:query` | bounded read-only SQL or `ask_analyst` |
-| `catalog` | `/addison:catalog` | search/describe tables, views, catalog |
-| `connect` | `/addison:connect` | add a data source (secrets via webapp; MCP for test/attach) |
-| `schedule` | `/addison:schedule` | recurring playbook runs + email (confirm recipients) |
+| `start` | `/addison:start` | guided onboarding: connect → map data → meet Addison → first report |
+| `api` | model-invoked | MCP tool map + safety rules |
+| `signin` | `/addison:signin` | connect or re-authenticate Summation |
+| `signout` | `/addison:signout` | disconnect Summation |
+| `diagnose` | `/addison:diagnose` | check connectivity and what data is visible |
+| `report` | `/addison:report` | generate a report → export markdown/PDF/DOCX |
+| `validate` | `/addison:validate` | verify a report before sharing |
+| `query` | `/addison:query` | read-only query or open-ended analysis |
+| `catalog` | `/addison:catalog` | search tables, views, catalog |
+| `connect` | `/addison:connect` | add a data source (secrets stay in the Summation web app) |
+| `schedule` | `/addison:schedule` | recurring playbook runs with email delivery |
 
-Credentials are **not** stored by the plugin for the happy path. The host MCP client holds the session token. Do not commit config or tokens; `.summation-config*` stays gitignored for any legacy local files.
+Credentials for the happy path live in the host MCP client, not in this repo. Do not commit config files or tokens.
 
 ## Org announcement template
 
-> **Summation is now in Claude.** Open a new chat and type **/addison:start** — it walks you through connecting (browser auth), shows a map of your data, introduces Addison, and runs your first report. Already connected? Just ask data questions, or use /addison:report, /addison:query, /addison:catalog, /addison:validate.
+> **Summation is now in Claude.** Open a new chat and type **/addison:start** — it walks you through connecting, shows a map of your data, introduces Addison, and runs your first report. Already connected? Just ask data questions, or use /addison:report, /addison:query, /addison:catalog, /addison:validate.
 
 ## For agent harnesses (customer `AGENTS.md` snippet)
 
@@ -88,51 +68,23 @@ run /addison:validate before any report is shared externally. Drafts need explic
 user approval before publishing anywhere.
 ```
 
-## One plugin, two surfaces
+## Development
 
-`plugins/addison-claude` is the source of truth:
-
-- **`.mcp.json`** — production Summation MCP, **no headers** (OAuth on first use)
-- **skills/** — product workflows over curated MCP tools
-- **`sum_api.py`** — legacy/local escape hatch only (not used by domain skills)
-
-The **Codex** surface is **generated** from Claude (one product, two packages):
-
-| Shared | Claude-only | Codex-only (builder) |
-|---|---|---|
-| Skills, MCP URL, auth model, external/internal | `.claude-plugin/`, SessionStart hook | `$addison-` mentions, Codex `.mcp.json` shape, `codex mcp …` CLI, `.codex-plugin/` |
+`plugins/addison-claude` is the source of truth. The Codex package is generated:
 
 ```bash
-./build-codex.sh   # regenerates plugins/addison-codex + .agents/plugins/marketplace.json
-```
-
-CI (`Check generated Codex edition`) fails if Codex drifts from source. **Never hand-edit** `plugins/addison-codex`.
-
-## Dev loop
-
-```bash
-# External (production MCP default)
 claude --plugin-dir ./plugins/addison-claude
-
-# Internal (sign-in asks env + tenant guidance)
-ADDISON_PLUGIN_INTERNAL=1 claude --plugin-dir ./plugins/addison-claude
-
-# If you still have an old user-scope Authorization header entry, remove it so OAuth can win:
-claude mcp remove -s user summation
-
 claude plugin validate ./plugins/addison-claude
-./build-codex.sh
-./build-zip.sh
+./build-codex.sh          # regenerates plugins/addison-codex
+./build-zip.sh            # dist/addison-plugin.zip for Desktop upload
 ```
+
+CI fails if the generated Codex edition drifts from source. Never hand-edit `plugins/addison-codex`.
 
 ## Release
 
 1. Bump `version` in `plugins/addison-claude/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
 2. Run `./build-codex.sh`, commit, merge to `main`.
-3. Tag matching the version:
-   ```bash
-   git tag v0.10.1 && git push origin v0.10.1
-   ```
-   The release workflow publishes `addison-plugin.zip` as **Latest**.
+3. Tag matching the version (for example `v0.10.1`) and push the tag. The release workflow publishes `addison-plugin.zip` as **Latest**.
 
 `https://github.com/summationai/addison-plugin/releases/latest/download/addison-plugin.zip`
