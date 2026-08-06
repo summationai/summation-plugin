@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Assemble plugins/addison-codex from plugins/addison-claude (the source of truth).
-# plugins/addison-codex is GENERATED — edit plugins/addison-claude or this builder, never plugins/addison-codex.
+# Assemble plugins/addison-codex from shared skills/ + Claude packaging (version, MCP URL).
+# plugins/addison-codex is GENERATED — edit skills/ or this builder, never plugins/addison-codex.
 #
-# Shared: skills, .mcp.json URL, auth model (headerless OAuth), external vs internal.
+# Shared source of truth: skills/
 # Codex-only transforms:
 #   - $addison- mention syntax
 #   - .mcp.json → Codex shape ({"mcpServers": {...}, oauth_resource})
@@ -11,34 +11,37 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-SRC=plugins/addison-claude
+# Keep Claude skills in sync first (same canonical skills/).
+./build-claude.sh
+
+SKILLS=skills
+CLAUDE=plugins/addison-claude
 DST=plugins/addison-codex
 MARKETPLACE=.agents/plugins/marketplace.json
 
-if find "$SRC" -name ".summation-config*" | grep -q .; then
-  echo "refusing to build: credential file inside $SRC" >&2
+if find "$SKILLS" -name ".summation-config*" | grep -q .; then
+  echo "refusing to build: credential file inside $SKILLS" >&2
   exit 1
 fi
 
 rm -rf "$DST"
-mkdir -p "$(dirname "$DST")" "$(dirname "$MARKETPLACE")"
-cp -R "$SRC" "$DST"
-rm -rf "$DST/.claude-plugin"   # Codex uses .codex-plugin/plugin.json (written below)
-rm -rf "$DST/hooks"            # version-check hook is Claude-specific
-find "$DST" -name "__pycache__" -type d -prune -exec rm -rf {} +
+mkdir -p "$DST" "$(dirname "$MARKETPLACE")"
+cp -R "$SKILLS" "$DST/skills"
+cp "$CLAUDE/.mcp.json" "$DST/.mcp.json"
+find "$DST" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
-python3 - "$SRC" "$DST" "$MARKETPLACE" <<'PY'
+python3 - "$CLAUDE" "$DST" "$MARKETPLACE" <<'PY'
 import json
 import pathlib
 import re
 import sys
 from urllib.parse import urlsplit
 
-src = pathlib.Path(sys.argv[1])
+claude = pathlib.Path(sys.argv[1])
 dst = pathlib.Path(sys.argv[2])
 marketplace_path = pathlib.Path(sys.argv[3])
 
-src_manifest = json.loads((src / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+src_manifest = json.loads((claude / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
 version = src_manifest["version"]
 
 
@@ -61,15 +64,12 @@ def strip_skill_frontmatter(text: str) -> str:
 
 
 def codex_text(text: str) -> str:
-    # Host MCP CLI first (before generic Claude → Codex).
-    # Logout BEFORE remove so Codex can still resolve the server name and clear OAuth cache.
     text = re.sub(
         r"claude mcp remove -s user summation(?:\s+2>/dev/null\s*\|\|\s*true)?",
         "codex mcp logout summation 2>/dev/null || true\n"
         "codex mcp remove summation 2>/dev/null || true",
         text,
     )
-    # Legacy order (if any remain)
     text = re.sub(
         r"claude mcp remove summation -s user(?:\s+2>/dev/null\s*\|\|\s*true)?",
         "codex mcp logout summation 2>/dev/null || true\n"
@@ -90,7 +90,6 @@ def codex_text(text: str) -> str:
     text = text.replace("claude mcp list", "codex mcp list")
     text = text.replace("claude mcp remove", "codex mcp remove")
     text = text.replace("claude mcp add", "codex mcp add")
-    # Prefer codex's OAuth login helper where we mention host authenticate UI.
     text = text.replace(
         "Prefer `/mcp` → Authenticate if the host shows that control.",
         "Prefer `codex mcp login summation` (or the host Authenticate control) if tools are not yet authed.",
@@ -110,7 +109,6 @@ def codex_text(text: str) -> str:
 
 
 def to_codex_mcp(payload: dict) -> dict:
-    """Claude ships flat {name: {type,url}}; Codex wants {mcpServers: {name: {…, oauth_resource}}}."""
     servers = payload.get("mcpServers", payload)
     out: dict[str, dict] = {}
     for name, cfg in servers.items():
@@ -120,7 +118,6 @@ def to_codex_mcp(payload: dict) -> dict:
         entry: dict = {"type": cfg.get("type") or "http", "url": url}
         parts = urlsplit(url)
         if parts.scheme and parts.netloc:
-            # PRM resource id is origin (no /mcp path), matching sum-api-mcp RESOURCE_URL.
             entry["oauth_resource"] = f"{parts.scheme}://{parts.netloc}"
         out[name] = entry
     return {"mcpServers": out}
@@ -137,11 +134,20 @@ for path in dst.rglob("*"):
     elif path.suffix == ".py":
         path.write_text(path.read_text(encoding="utf-8").replace("/addison:", "$addison-"), encoding="utf-8")
 
-# Rewrite .mcp.json into Codex plugin shape (Linear/Notion style).
 mcp_path = dst / ".mcp.json"
 if mcp_path.exists():
     claude_mcp = json.loads(mcp_path.read_text(encoding="utf-8"))
     write_json(mcp_path, to_codex_mcp(claude_mcp))
+
+# Marker so humans do not edit the generated tree.
+(dst / "GENERATED.md").write_text(
+    "# Generated package\n\n"
+    "Do **not** edit files under `plugins/addison-codex` by hand.\n\n"
+    "- Author skills in **`skills/`** (shared).\n"
+    "- Run `./build-codex.sh` (also refreshes Claude’s `skills/` copy via `./build-claude.sh`).\n"
+    "- CI fails if this tree drifts from source.\n",
+    encoding="utf-8",
+)
 
 plugin_json = {
     "name": "addison",

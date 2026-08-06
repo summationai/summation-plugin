@@ -1,0 +1,41 @@
+<!doctype html>
+<!-- Template for the Summation onboarding visual. Adapt freely: update step
+     states (pending/active/done), fill the panel with the current step's
+     content (source map, report cards), keep it self-contained (no external
+     assets, no network calls). -->
+<html>
+<head><meta charset="utf-8"><style>
+  body{margin:0;font-family:ui-sans-serif,-apple-system,'Segoe UI',sans-serif;background:#0b1220;color:#e6edf6;padding:28px}
+  .card{max-width:760px;margin:0 auto;background:#101a2e;border:1px solid #1f2c45;border-radius:14px;padding:28px}
+  h1{font-size:22px;margin:0 0 4px} .sub{color:#8da2c0;font-size:14px;margin-bottom:22px}
+  .steps{display:flex;gap:10px;margin-bottom:22px}
+  .step{flex:1;border-radius:10px;padding:10px 12px;border:1px solid #1f2c45;font-size:13px}
+  .step b{display:block;font-size:12px;letter-spacing:.4px;margin-bottom:2px}
+  .pending{opacity:.45} .active{border-color:#4f8cff;background:#13233f}
+  .done{border-color:#2e7d5b;background:#10271e} .done b::after{content:" ✓";color:#5ad19a}
+  .blocked{border-color:#b08328;background:#2a2008} .blocked b::after{content:" ⚠ action needed";color:#e8b94c;font-weight:normal}
+  .panel{background:#0d1626;border:1px solid #1f2c45;border-radius:10px;padding:18px;font-size:14px;line-height:1.5}
+  .panel h2{font-size:15px;margin:0 0 10px}
+  .tree{font-family:ui-monospace,Menlo,monospace;font-size:13px;color:#a9c1e8;white-space:pre}
+  .idea{border:1px solid #1f2c45;border-radius:10px;padding:12px 14px;margin-top:10px}
+  .idea b{color:#9cc2ff} .idea span{color:#8da2c0;font-size:13px;display:block;margin-top:2px}
+  .hint{margin-top:16px;color:#8da2c0;font-size:13px}
+</style></head>
+<body><div class="card">
+  <h1>Welcome to Summation</h1>
+  <div class="sub">Four steps to your first report — reply in chat to move forward.</div>
+  <div class="steps">
+    <div class="step active"><b>1 · CONNECT</b>Link your Summation credentials</div>
+    <div class="step pending"><b>2 · DISCOVER</b>Map your data sources</div>
+    <div class="step pending"><b>3 · MEET ADDISON</b>Your analyst agent says hello</div>
+    <div class="step pending"><b>4 · FIRST REPORT</b>Pick one and run it</div>
+  </div>
+  <div class="panel">
+    <h2>Current step content goes here</h2>
+    <div class="tree">Connected systems
+  ├─ (filled from preflight)
+  └─ …</div>
+    <div class="idea"><b>1 · Report idea title</b><span>What you'll learn, one line.</span></div>
+  </div>
+  <div class="hint">Reply in chat: I'll do the work and update this card as steps complete.</div>
+</div></body></html>
