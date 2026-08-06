@@ -1,75 +1,53 @@
 ---
 name: start
-description: Summation onboarding — connect via MCP auth, map data sources, meet Addison, run a first report. Use when a user says "set up summation", "get started with summation", asks what Summation can do, or has clearly never connected before.
+description: Summation onboarding — sign in, map data, meet Addison, first report. Use when the user says set up Summation, get started, or is clearly new.
 ---
 
 # Summation Start
 
-Walk a brand-new user from zero to their first report in chat. **No HTML artifacts, steppers, or welcome visuals** — stay in the conversation. **All data plane = summation MCP tools.** Auth = host OAuth via the `signin` skill (external vs internal).
+Walk a new user from zero to a first useful answer **in plain language**. No HTML artifacts or welcome steppers. Prefer MCP tools + domain skills. Product facts: `../api/references/product.md` and `https://docs.summation.com/llms.txt`.
 
-## The four steps
+## Checklist (optional one-liner in chat)
 
-```
-1 CONNECT → 2 DISCOVER → 3 MEET ADDISON → 4 FIRST REPORT
-```
+`1 Connect → 2 Discover → 3 Meet Addison → 4 First report`
 
-Optionally show a one-line markdown checklist of these four steps; update it in chat as you go. Do **not** open artifacts, publish HTML, or load `references/welcome.html`.
+### Step 1 — Connect (sign in)
 
-### Step 1 — Connect
+Run the **`signin` skill**. Show who they are (name/email, org) in ordinary words. Do not invent a second auth path.
 
-Run the **`signin` skill** (it detects external vs internal via `ADDISON_PLUGIN_INTERNAL`). Do not invent a parallel auth path.
+### Step 2 — Discover (hard gate)
 
-- **External:** no env/tenant questions; `whoami` → browser auth if needed.
-- **Internal:** signin asks **environment** (prod/staging/sandbox) and **tenant** guidance (web-app org), then auth.
+MCP: `list_data_connections`, `list_connection_datasets`, `list_projects`, `search_tables` as needed.
 
-After signin succeeds, show identity (and env if internal) briefly and continue.
+**No connections → stop.** Do not invent reports. Say clearly there is no business source yet. Offer:
 
-### Step 2 — Discover (GATE: connections AND attached datasets)
+1. **Connect a database/warehouse** → `$addison-connect` (web app for passwords; Postgres/Snowflake/etc. are supported — see product.md)  
+2. **They already connected in the web app** → re-list connections and continue  
 
-Build a source map with MCP:
+**Connection exists but no attached datasets → stop.** A connection is only a pipe. Browse what can be attached; attach with **friendly names** (table names). Never leave auto `*_dataset_N` names. Or send them to **Connections** in the web app to attach, then re-check.
 
-- `list_data_connections`
-- For each connection: `list_connection_datasets` (and counts)
-- `search_tables` / project list via `list_projects`
+**CSV / file import** if it fails: use the friendly failure text from the **connect** skill — do not thrash failed import tools or name internal platform tools.
 
-**Zero connections → pause. Do not proceed to steps 3–4. Do not suggest reports.**
+**Gate open** when there is at least one real connection with attached, named datasets. Show a short source map: system names + readable table names.
 
-- Say plainly: no data sources yet. Any internal system tables are **not** business data.
-- Paths: **(a)** `$addison-connect` (webapp for secrets + MCP attach), **(b)** workspace → Connections.
-- After a connection exists: re-check datasets.
+### Step 3 — Meet Addison
 
-**Gate 2b — attached datasets must be > 0.** A connection is only a pipe. If datasets are empty:
-
-- Stay blocked. Optionally `browse_connection_resources` as a **preview of what they can attach**.
-- Attach via `attach_connection_datasets` or the webapp Connections page.
-- Resume when `list_connection_datasets` (or equivalent totals) shows data.
-
-**Both gates pass** → short source map in chat: systems, dataset counts, notable table names (verbatim from tools).
-
-### Step 3 — Meet Addison (project must see data)
-
-1. Ensure a project: `list_projects` / `get_default_project`; if none, propose `getting-started` and `create_project` only after yes.
-2. **Project catalog:** `list_catalog_entries`. If empty, pick business tables (`search_tables`) and `attach_catalog_entry` for each agreed table.
-3. **`ask_analyst`** with roughly:
-
-   > A new user just connected. In 3 short bullets, introduce what you can do with the data you can see, then propose 3 specific, runnable report ideas based on the actual tables available. Keep it under 120 words.
-
-   Buffered ~15–60s; tell the user Addison is thinking. If the analyst fails (infra), generate 3 ideas yourself from real table names — don’t dead-end.
+1. Ensure a project (`list_projects` / `get_default_project` / create only with consent).  
+2. Project catalog: attach agreed business tables if empty (`attach_catalog_entry`).  
+3. `ask_analyst`: introduce what you can see + 3 concrete report ideas from **real** table names. Tell the user Addison is working; long answers are normal.
 
 ### Step 4 — First report
 
-List the report ideas as a short numbered list in chat. Ask: “Run 1, 2, 3 — or describe your own.” On yes → `$addison-report` (markdown) → offer `$addison-validate`. End with next steps (`query`, `catalog`, `report`).
+Numbered ideas in chat. On yes → **report** skill (markdown) → offer **validate**. Next steps in plain language (ask another question, catalog, report).
 
 ## Voice
 
-- Outcomes, never mechanics: no endpoint paths, no schema dumps in chat.
-- Never narrate capability uncertainty mid-flow.
-- Only surface `request_id` when something fails.
-- **No visual chrome** — no HTML artifacts, no re-rendered steppers.
+- Outcomes only for the user: no endpoints, OpenAPI, or raw tool-id dumps.  
+- Never claim “added” / “imported” without a final list/check.  
+- No HTML welcome visuals.
 
 ## Rules
 
-- **Attached datasets** (not raw table counts, not browsable-only sources) mean “data is analyzable.”
-- Ladder: MCP auth → connection → attached datasets → project catalog → Addison.
-- Never ask for DB passwords in chat; `connect` owns secret handling.
-- Prefer under five minutes of feel; stream progress language on long tools.
+- Analyzable data = **attached datasets with clear names**, not system tables alone and not “browsable but unattached.”  
+- Passwords never in chat; **connect** skill owns that path.  
+- Keep momentum: short steps, clear waits on long tools.

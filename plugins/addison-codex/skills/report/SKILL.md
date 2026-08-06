@@ -1,23 +1,26 @@
 ---
 name: report
-description: Generate a Summation report from a question and export it (Markdown, PDF, or DOCX). Use when the user asks for an analysis, report, board update, or exportable document over their Summation data.
+description: Generate a Summation report from a question and export it (Markdown, PDF, or DOCX). Use for analyses, board updates, or exportable documents over Summation data.
 ---
 
 # Summation Report
 
-Full pipeline via **MCP tools only**. Generation is one buffered result (~15–60s+, sometimes longer) — tell the user Addison is working; do not treat silence as failure before ~120s.
+MCP tools only. Generation can take **several minutes** — keep the user informed; do not treat silence as failure after only ~2 minutes if the run is still active.
 
 ## Flow
 
-1. **Project:** `list_projects` / `get_default_project`. Match `--project` by name or id; if none and exactly one project, use it; else list and ask.
-2. **Snapshot:** `list_reports` for that project (note existing ids).
-3. **Generate:** `start_report` with the user’s question (and project context as the tool requires). Take the new report id from the result; if ambiguous vs the snapshot, ask which report is theirs.
-4. **Status:** `get_report_status` if still running.
-5. **Export:** `export_report` — default **markdown** unless the user asked pdf/docx. Prefer exported content over raw markers; never paste internal cite markup.
-6. **Report back:** title/id, content or file path, and offer `$addison-validate` before external share.
+1. **Project:** `list_projects` / `get_default_project`. Match name/id; if none and exactly one, use it; else list and ask.  
+2. **Snapshot** existing reports if tools allow (`list_reports` or project files) so you can tell new from old.  
+3. **Generate:** `start_report` with the question and project context.  
+   - Tell the user: “Building your report — this can take a few minutes.”  
+   - While waiting, brief progress every ~30–45s (“Still working…”).  
+   - Poll `get_report_status` / conversation status until terminal (or up to ~7–10 minutes before declaring a hang).  
+4. **Verify before celebrating:** export or open content; confirm it’s **non-empty** and looks like the real report (not a stub). If `list_reports` is empty but files exist, use file tools.  
+5. **Export:** `export_report` — default **markdown** unless they asked pdf/docx. No internal cite markup.  
+6. **Hand back:** title, short summary, offer `$addison-validate` before external share.
 
 ## Rules
 
-- Long generation is normal — keep the user informed.
-- On failure, include any `request_id` from the tool error.
-- No REST / `sum_api.py` for this skill.
+- Never claim “report done” without a real artifact check.  
+- On failure, plain language first; include `request_id` if present for support.  
+- No REST helper for this skill.

@@ -1,22 +1,26 @@
 ---
 name: query
-description: Run a read-only SQL query against Summation data and render the result as a table. Use for quick data questions, sanity checks, or when the user provides SQL or asks something answerable with one query.
+description: Answer a data question or run read-only SQL against Summation. Use for quick checks, tables, or open-ended questions.
 argument-hint: <sql or data question> [--limit N]
 ---
 
 # Summation Query
 
-Use the hosted **`summation` MCP** tools only. Auth via `/addison:signin` if needed (`whoami` first).
+MCP only. Sign in first if needed (`whoami` / signin skill).
 
 ## Flow
 
-1. If the user gave a question rather than SQL, ground it first: `/addison:catalog <term>` or MCP `search_tables` — never guess table names.
-2. For **open-ended data questions**, prefer **`ask_analyst`** (buffered, ~15–60s; tell the user Addison is working; wait ~120s before failing).
-3. For **explicit SQL**, call **`run_query`** with the SQL, an explicit `limit` (default 100, ask before >1000, max per tool rules), and a reasonable timeout.
-4. Render a compact markdown table. State row count and whether results were truncated. Show the executed SQL for spot-checking.
+1. Ground names: `/addison:catalog` or `search_tables` — never invent table names.  
+2. **Open-ended / ranking / “top N” business questions:** prefer **`ask_analyst`** (Addison). Tell the user it’s working; answers often take 15–60s+.  
+3. **Explicit SQL** the user provided: **`run_query`** with an explicit limit (default 100; ask before very large pulls).  
+4. Render a compact table; show row count and the SQL used when you ran SQL.
+
+## Ranking / ORDER BY caveat
+
+Until the platform reliably preserves sort order on limited queries, **do not treat `ORDER BY … LIMIT` SQL as a trustworthy “top N”** without a cross-check (e.g. max/min aggregate, or prefer Addison). For “top customers / largest / worst,” prefer **`ask_analyst`** or rank with window functions in a way that doesn’t depend on discarded outer order — and still sanity-check surprising results.
 
 ## Rules
 
-- Read-only semantics: mutations are rejected — say so, don’t retry as writes.
-- On error, surface tool error text and any `request_id`. A role/permission message means the tenant lacks query roles — not “broken auth.”
-- No REST helper / `sum_api.py` for this skill.
+- Read-only: don’t retry mutations.  
+- Errors: plain language; role/permission ≠ “not signed in.”  
+- No REST helper.

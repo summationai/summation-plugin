@@ -1,30 +1,68 @@
 ---
 name: connect
-description: Connect a data source (Postgres, Snowflake, etc.) to Summation — non-secret settings in chat, secrets never in MCP tool args or the conversation when avoidable; then test and attach datasets via MCP.
+description: Connect a data source (Postgres, Snowflake, BigQuery, etc.) to Summation. Use when the user wants to add a warehouse or database. Secrets stay in the Summation web app; then attach tables with clear names via MCP.
 ---
 
 # Summation Connect
 
-**Secrets must never pass through MCP tool arguments or (when avoidable) chat.** Connection **create with password** is not on the curated MCP surface for that reason.
+Help the user get a **live data source** into Summation, then make its tables analyzable under **human-readable names**.
 
-## Preferred paths (in order)
+## Product knowledge (required)
 
-1. **Webapp end-to-end (default):** workspace → **Connections** → Add connection. Dictate non-secret fields so the user only types secrets in the browser. Then return here for MCP browse/attach/test.
-2. **After a connection exists:** use MCP only — `list_data_connections`, `test_data_connection`, `browse_connection_resources`, `attach_connection_datasets`, `list_connection_datasets`.
-3. **Pasted-secret salvage:** if the user already pasted a secret, do not bounce them — guide webapp create with that value and advise **rotating** the credential; teach webapp/file habits next time.
+1. Read sibling `../api/references/product.md` (or fetch `https://docs.summation.com/llms.txt`) before answering “what sources are supported?”
+2. **Postgres is supported**, as are Snowflake, BigQuery, Redshift, Databricks, MySQL, SQL Server, Oracle, MongoDB, ClickHouse, MotherDuck, S3, GCS, Glue, Iceberg, REST, GitHub — see product.md.
+3. Hosted Postgres (Neon, RDS, Cloud SQL, …) → walk them as **Postgres**.
 
-## Flow (MCP after the pipe exists)
+Never invent “I can’t confirm that source” after a failed URL or truncated API spec. Prefer product docs.
 
-1. Collect **non-secret** settings in chat; echo them back for a yes.
-2. User creates the connection in the **webapp** (or already has one).
-3. **`list_data_connections`** → find the new id; **`test_data_connection`**.
-4. **Datasets gate:** `list_connection_datasets`. If empty, `browse_connection_resources` (label as attachable preview, not “already data”), then **`attach_connection_datasets`** for chosen tables — or send them to Connections in the webapp.
-5. Confirm with `list_connection_datasets` / a light `search_tables`. Hand back to `$addison-start` step 2 if that was the parent flow.
+## Customer path (default — do this)
 
-## Rules
+**New connections with passwords are created in the Summation web app**, not by inventing API calls in chat.
 
-- Narrate outcomes, not protocol internals.
-- Never put passwords into MCP tool JSON.
-- Never create a secretless orphan connection and leave it.
-- A live connection is not the finish line — **attached datasets** are.
-- Auth for MCP tools: `$addison-signin` if `whoami` fails.
+1. Confirm the source type (use the supported list).
+2. Collect **non-secret** fields only (host, database, user, warehouse, …). Echo them for confirmation.
+3. Tell the user clearly:
+
+   > Open Summation → **Connections** → **Add connection** → pick **\<Source\>**.  
+   > Enter the settings we listed. Put the **password only in the browser**.  
+   > Click **Test**, then save. Tell me when it’s done.
+
+4. Wait for the user. Do **not** dig through OpenAPI, guess config key names, or run multi-variant experiments in chat.
+5. When they say done: MCP `list_data_connections` → `test_data_connection` → browse → **attach with names** (below).
+
+If they already have a connection: skip create; go to attach.
+
+## After the connection exists (MCP)
+
+1. `list_data_connections` — find the connection by name.
+2. `test_data_connection` — report pass/fail in plain language (not raw error dumps unless needed).
+3. `browse_connection_resources` — show what can be attached as a **preview**, not “already loaded.”
+4. **`attach_connection_datasets` — always pass a clear `name` for each table** (use the source table name, e.g. `customers`, `invoices`).  
+   **Never accept auto names** like `pg_…_dataset_2`. If the tool would auto-name, set `name` explicitly.
+5. Verify: `list_connection_datasets` shows those friendly names; for project work, `attach_catalog_entry` as needed with clear labels.
+6. Confirm to the user: “Connected **X**. Tables ready: **a, b, c**.” Only after verification.
+
+## Hard bans (do not do these in chat)
+
+- Download or parse OpenAPI to discover connector types or field names for the user.
+- Guess password-field or config-key variants (`database` vs `pgDb`, etc.) across many retries.
+- Put secrets in MCP tool arguments or re-ask for a password in chat (if they already pasted one: use webapp, advise rotating).
+- Create a connection without a password and leave an unfinished orphan.
+- Claim success from intermediate status text without a final list/test check.
+- Dump `/v1/…` paths, schema JSON, or internal tool ids to the user.
+
+## File / CSV import
+
+If file→table import fails or tools are missing:
+
+> File import isn’t available in this environment right now. Easiest path: connect a database in Summation (**Connections**), or explore files only if Addison can already read them in this project. We can retry import later if the platform path is fixed.
+
+Do not name internal sandbox tools (`apply_data_table`, etc.) to the user.
+
+## Pasted-secret salvage
+
+If the user already pasted a password: don’t scold and bounce them. Guide webapp create with that value, then firmly recommend **rotating** the credential because it appeared in chat. Prefer file/webapp next time.
+
+## Auth
+
+If MCP auth fails: hand off to `$addison-signin`.

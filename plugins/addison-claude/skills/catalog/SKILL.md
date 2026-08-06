@@ -1,24 +1,24 @@
 ---
 name: catalog
-description: Search and describe Summation tables, views, and catalog metadata. Use when the user asks what data exists, wants schemas or column details, or before writing any SQL.
+description: Search and describe Summation tables, views, and catalog metadata. Use when the user asks what data exists or before writing SQL.
 argument-hint: "[search term]"
 ---
 
 # Summation Catalog
 
-Discover what data exists before touching it. **MCP tools only.**
+MCP only. Show **human-readable names** first.
 
 ## Flow
 
-1. **Search:** `search_tables` (and `search_views` if relevant) with the user’s term.
-2. **Detail:** for a chosen table — `get_table_schema`, optional `preview_table_data` (limit ≤ 5), optional `get_table_lineage`. For views — `get_view` / `preview_view_data` (see caveat).
-3. **Project catalog:** `list_catalog_entries` when the question is “what’s in this project?”
-4. Render compact schema cards: name, id, columns/types, one-line description. Group tables vs views.
+1. **Search:** `search_tables` / `search_views` as needed.  
+2. **Detail:** `get_table_schema`, optional small `preview_table_data` (≤ 5 rows), lineage if useful. Views: `get_view` / preview (may 404 — fall back to tables).  
+3. **Project:** `list_catalog_entries` when asking “what’s in this project?”  
+4. Present compact cards: **friendly name**, columns/types, one-line description.
 
 ## Rules
 
-- With huge inventories, never dump everything — show matches + totals and ask to narrow.
-- Sample peeks stay small (`limit` ≤ 5); analysis is `/addison:query` or `ask_analyst`.
-- **Caveat:** `get_view` / `preview_view_data` can 404 on ids from `search_views` — fall back to tables tools.
-- Suggest next steps: `/addison:query` or `/addison:report`.
-- No REST helper for this skill.
+- Huge lists: show matches + totals; ask to narrow.  
+- Previews small; deep analysis → query / report.  
+- If names look like `…_dataset_N`, offer to re-attach with proper names via **connect** / attach flow.  
+- Suggest next: ask a question, report, or connect more data.  
+- No REST helper. User-facing text stays non-technical.
