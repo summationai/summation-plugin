@@ -8,13 +8,14 @@ argument-hint: "[postgres|snowflake|bigquery|... or describe the source]"
 
 Help the user get a **live data source** into Summation, then make its tables analyzable under **human-readable names**.
 
-## Product knowledge (required)
+## Product knowledge (required — live, not baked in)
 
-1. Read sibling `../api/references/product.md` (or fetch `https://docs.summation.com/llms.txt`) before answering “what sources are supported?”
-2. **Postgres is supported**, as are Snowflake, BigQuery, Redshift, Databricks, MySQL, SQL Server, Oracle, MongoDB, ClickHouse, MotherDuck, S3, GCS, Glue, Iceberg, REST, GitHub — see product.md.
-3. Hosted Postgres (Neon, RDS, Cloud SQL, …) → treat as **Postgres**.
+1. **Fetch `https://docs.summation.com/llms.txt`** before answering which sources are supported.  
+2. Open the matching connector page from that index (e.g. Postgres, Snowflake, BigQuery).  
+3. Hosted variants (Neon, RDS, Cloud SQL, …) map to the closest connector in the index (usually Postgres).  
+4. See `../api/references/product.md` for lookup rules only — **not** a static feature list.
 
-Never invent “I can’t confirm that source” after a failed URL or truncated API dig. Prefer product docs.
+Never invent “unsupported” after a failed URL, truncated API dig, or homepage marketing. If docs can’t be reached, say so and retry — don’t guess.
 
 ## Customer path for new connections (default)
 

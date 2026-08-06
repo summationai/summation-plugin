@@ -42,4 +42,4 @@ If empty: “You’re signed in, but there’s no business data yet” → `/add
 
 - Do **not** download OpenAPI or debug connector key names here.  
 - Do **not** dump internal tool ids into chat.  
-- Prefer product facts from `../api/references/product.md` / `https://docs.summation.com/llms.txt` if they ask “is X supported?”
+- If they ask “is X supported?”, fetch **`https://docs.summation.com/llms.txt`** then the linked page (see `../api/references/product.md`).

@@ -11,9 +11,10 @@ All day-to-day data work goes through the hosted **`summation` MCP server** and 
 
 ## Before you answer “what’s supported?”
 
-1. Read **`references/product.md`** (connectors + feature map).  
-2. If still unsure, fetch **`https://docs.summation.com/llms.txt`**, then the linked page.  
-3. Never treat a bad URL, marketing homepage, or truncated OpenAPI as “unsupported.” **Postgres is supported** (and the full list in product.md).
+1. **Fetch `https://docs.summation.com/llms.txt`** (live product map — do not rely on a baked-in list).  
+2. Open the linked doc for that feature or connector.  
+3. See **`references/product.md`** for how to use the index and plugin skill routing.  
+4. Never invent “unsupported” from a failed fetch, wrong URL, homepage marketing, or truncated OpenAPI.
 
 ## Core workflow
 

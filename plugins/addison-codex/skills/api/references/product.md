@@ -1,64 +1,41 @@
-# Summation product map (for the Addison plugin)
+# Summation product knowledge (dynamic)
 
-Use this before answering “what can Summation do?” or “is X supported?”. Prefer this file and official docs over inventing limits. When unsure, fetch **`https://docs.summation.com/llms.txt`** first, then open the linked page — never treat a wrong URL 404 as “unsupported.”
+**Do not treat this file as a catalog of features.** Product capabilities change; the live docs index is authoritative.
 
-## Supported data connections
+## Always look up the product map
 
-These are **supported** (docs under `https://docs.summation.com/features/connectors/…`):
-
-| Source | Docs |
-|---|---|
-| **Postgres** | https://docs.summation.com/features/connectors/postgres.md |
-| **Snowflake** | https://docs.summation.com/features/connectors/snowflake.md |
-| **BigQuery** | https://docs.summation.com/features/connectors/bigquery.md |
-| **Redshift** | https://docs.summation.com/features/connectors/redshift.md |
-| **Databricks** | https://docs.summation.com/features/connectors/databricks.md |
-| **MySQL** | https://docs.summation.com/features/connectors/mysql.md |
-| **SQL Server** | https://docs.summation.com/features/connectors/mssql.md |
-| **Oracle** | https://docs.summation.com/features/connectors/oracle.md |
-| **MongoDB** | https://docs.summation.com/features/connectors/mongodb.md |
-| **ClickHouse** | https://docs.summation.com/features/connectors/clickhouse.md |
-| **MotherDuck** | https://docs.summation.com/features/connectors/motherduck.md |
-| **S3** | https://docs.summation.com/features/connectors/s3.md |
-| **GCS** | https://docs.summation.com/features/connectors/gcs.md |
-| **AWS Glue** | https://docs.summation.com/features/connectors/glue.md |
-| **Apache Iceberg** | https://docs.summation.com/features/connectors/iceberg.md |
-| **REST / HTTP APIs** | https://docs.summation.com/features/connectors/http.md |
-| **GitHub** | https://docs.summation.com/features/connectors/github.md |
-
-Overview: https://docs.summation.com/features/connectors.md
-
-**Neon, RDS, Cloud SQL, AlloyDB, etc.** that speak Postgres → treat as **Postgres**. Same idea for other hosted variants of the sources above.
-
-**Do not say a source is unsupported** unless you have checked `llms.txt` / this list and the connector page is missing. OpenAPI free-form `type` fields are **not** a full product catalog.
-
-## How customers get value (product features)
-
-| Need | How in this plugin |
-|---|---|
-| Ask a business question | Addison (`ask_analyst`) / `$addison-query` |
-| Explore tables | `$addison-catalog` |
-| Full write-up for leadership | `$addison-report` → export markdown/PDF/DOCX |
-| Check a report before sharing | `$addison-validate` |
-| Add a warehouse/database | `$addison-connect` (passwords in the Summation **Connections** UI) |
-| Recurring emailed analysis | Playbooks + `$addison-schedule` |
-| Who am I / is it working? | `$addison-signin`, `$addison-diagnose` |
-
-## Product docs index
-
-Always start here when looking up features:
+Before answering “what’s supported?”, “can we connect X?”, or “what can Summation do?”, fetch:
 
 ```text
 https://docs.summation.com/llms.txt
 ```
 
-Useful integration pages (when present in the index): Codex plugin, Codex plugin, MCP server, CLI, Public API under `https://docs.summation.com/integrations/…`.
+That index lists current docs (connectors, integrations, features). Then:
 
-## Voice with customers
+1. Open the relevant linked page (e.g. a connector or feature guide).  
+2. Answer from that page in plain language for the user.  
+3. If `llms.txt` or the page fails to load, say you couldn’t reach the docs right now — **do not invent** “unsupported” from a failed fetch, a wrong URL, marketing homepage copy, or a truncated API spec.
 
-Talk like a helpful analyst, not an API engineer:
+## How to use the index
 
-- Say “Connections in Summation” not “POST /v1/connections/data”
-- Say “Postgres is supported” not “type enum is free-form in OpenAPI”
-- Say “Still building your report…” not silent multi-minute waits
-- Never dump OpenAPI, raw tool ids, or failed key-guessing experiments into chat
+- **Supported data sources:** find connector entries under the docs index (Postgres, Snowflake, BigQuery, etc. appear when published there). Hosted variants (e.g. Neon → Postgres) map to the matching connector page.  
+- **Other product areas:** reports, playbooks, schedules, plugins, MCP, CLI, API — use the matching links in `llms.txt`.  
+- **Never** treat OpenAPI free-form fields as the full product catalog.
+
+## Plugin behavior vs product catalog
+
+| Need | In this plugin |
+|---|---|
+| Ask a business question | Addison / `$addison-query` |
+| Explore tables | `$addison-catalog` |
+| Leadership write-up | `$addison-report` → export |
+| Check a report | `$addison-validate` |
+| Add a warehouse/database | `$addison-connect` (passwords in Summation **Connections**) |
+| Recurring emailed analysis | playbooks + `$addison-schedule` |
+| Sign in / health | `$addison-signin`, `$addison-diagnose` |
+
+The **list of warehouses and features** still comes from `llms.txt` + linked docs, not from hardcoding here.
+
+## Voice
+
+Talk like a helpful analyst: “Postgres is supported — here’s how we connect it,” not API enums or OpenAPI dumps.

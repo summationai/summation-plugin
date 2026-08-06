@@ -5,7 +5,7 @@ description: Summation onboarding — sign in, map data, meet Addison, first rep
 
 # Summation Start
 
-Walk a new user from zero to a first useful answer **in plain language**. No HTML artifacts or welcome steppers. Prefer MCP tools + domain skills. Product facts: `../api/references/product.md` and `https://docs.summation.com/llms.txt`.
+Walk a new user from zero to a first useful answer **in plain language**. No HTML artifacts or welcome steppers. Prefer MCP tools + domain skills. For “what’s supported?”, always fetch **`https://docs.summation.com/llms.txt`** (see `../api/references/product.md`).
 
 ## Checklist (optional one-liner in chat)
 
@@ -21,7 +21,7 @@ MCP: `list_data_connections`, `list_connection_datasets`, `list_projects`, `sear
 
 **No connections → stop.** Offer:
 
-1. **Connect a database/warehouse** → `$addison-connect` (Postgres, Snowflake, BigQuery, and more are supported — see product.md)  
+1. **Connect a database/warehouse** → `$addison-connect` (confirm sources via `llms.txt` / product docs)  
 2. **Import files** if they already have files in a project → file import tools, then confirm tables exist  
 3. **They already connected in the web app** → re-list and continue  
 
