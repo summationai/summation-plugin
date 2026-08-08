@@ -64,16 +64,18 @@ def strip_skill_frontmatter(text: str) -> str:
 
 
 def codex_text(text: str) -> str:
+    # Logout first so OAuth session clears while the server name still resolves.
+    # Do not re-inject `|| true` — signout skill requires real failures to surface.
     text = re.sub(
         r"claude mcp remove -s user summation(?:\s+2>/dev/null\s*\|\|\s*true)?",
-        "codex mcp logout summation 2>/dev/null || true\n"
-        "codex mcp remove summation 2>/dev/null || true",
+        "codex mcp logout summation\n"
+        "codex mcp remove summation",
         text,
     )
     text = re.sub(
         r"claude mcp remove summation -s user(?:\s+2>/dev/null\s*\|\|\s*true)?",
-        "codex mcp logout summation 2>/dev/null || true\n"
-        "codex mcp remove summation 2>/dev/null || true",
+        "codex mcp logout summation\n"
+        "codex mcp remove summation",
         text,
     )
     text = re.sub(

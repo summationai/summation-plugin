@@ -17,17 +17,22 @@ Run the **`signin` skill**. Show who they are (name/email, org) in ordinary word
 
 ### Step 2 — Discover (hard gate)
 
-MCP: `list_data_connections`, `list_connection_datasets`, `list_projects`, `search_tables` as needed.
+MCP first (do not stop early): `list_data_connections`, `list_connection_datasets`, `list_projects`, `search_tables` as needed. Treat **imported project tables** and **attached connection datasets** as analyzable data.
 
-**No connections → stop.** Offer:
+**Gate open** when either holds:
+
+- at least one connection with attached datasets (friendly names — never leave auto `*_dataset_N`), **or**
+- at least one imported / project table with a clear analyzable name  
+
+Then give a short source map and continue.
+
+**Gate closed** only when **both** are missing — no attached datasets **and** no imported tables. Then stop and offer:
 
 1. **Connect a database/warehouse** → `/addison:connect` (confirm sources via `llms.txt` / product docs)  
-2. **Import files** if they already have files in a project → file import tools, then confirm tables exist  
-3. **They already connected in the web app** → re-list and continue  
+2. **Import files** into a project → file import tools, then re-list tables  
+3. **They already connected or imported in the web app** → re-list and continue  
 
-**Connection exists but no attached datasets → stop.** Browse and attach with **friendly names** (table names). Never leave auto `*_dataset_N` names.
-
-**Gate open** when there is at least one real connection (or imported tables) with clear, analyzable names. Short source map for the user.
+**Connection exists but nothing attached and no imports →** browse and attach with **friendly names** (table names), or import. Do not claim readiness until the gate opens.
 
 ### Step 3 — Meet Addison
 

@@ -82,10 +82,12 @@ User-scope override so the chosen env wins over the plugin default. Do **not** s
 
 ```bash
 # replace URL with the allowlisted URL for the chosen env
-codex mcp logout summation 2>/dev/null || true
-codex mcp remove summation 2>/dev/null || true
+codex mcp logout summation
+codex mcp remove summation
 codex mcp add summation --url '<ENV_MCP_URL>'
 ```
+
+Remove may fail with “not found / not registered” — that is fine; continue to **add**. Surface any other remove failure. **Add** must succeed before auth.
 
 If `codex mcp add` is unavailable (e.g. Desktop-only), tell them to set the Summation MCP URL to the chosen env’s allowlisted host in `/mcp` (still no `Authorization` header), or re-auth after an admin points the plugin default.
 

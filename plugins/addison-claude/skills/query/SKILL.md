@@ -18,6 +18,8 @@ MCP only. Sign in first if needed (`whoami` / signin skill).
 ## Rules
 
 - Prefer Addison for narrative analysis; SQL for precise, user-authored queries.  
+- **Ranked / top-N SQL** needs `ORDER BY`. Without it, `LIMIT N` is not “top N” — add an order (with consent) or say the rows are unordered, not a ranking.  
+- **Truncation:** if the result row count equals the limit (default 100), say the result may be truncated and offer a higher limit or a tighter filter. Never present a capped pull as the full set.  
 - Read-only: don’t retry mutations.  
 - Errors: plain language; permission issues ≠ “not signed in.”  
 - No REST helper.

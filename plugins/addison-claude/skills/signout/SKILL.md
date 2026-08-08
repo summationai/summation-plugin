@@ -9,15 +9,20 @@ Auth lives in Claude Code’s MCP client. Sign-out clears that session so the ne
 
 ## Flow
 
-1. **Disconnect** using the host control when available (`/mcp` → disconnect / re-authenticate for **summation**), or clear the user-scope registration:
+1. **Disconnect** using the host control when available (`/mcp` → disconnect / re-authenticate for **summation**). Prefer that over CLI when the host can do it.
+
+2. **CLI fallback** only if the host control is unavailable. Do **not** blanket-suppress errors:
 
 ```bash
-claude mcp remove -s user summation 2>/dev/null || true
+claude mcp remove -s user summation
 ```
 
-2. **Confirm** tools no longer work without re-auth (optional: do not call tools that would immediately re-prompt unless the user wants to stay signed out).
+- Exit 0, or a clear “not found / not registered” message → registration is gone; treat as already signed out for that path.  
+- Any other failure (CLI missing, permission, unexpected error) → **stop**. Tell the user what failed and how to clear **summation** under `/mcp` manually. Do not claim disconnected.
 
-3. Report: disconnected. Next `/addison:signin` re-runs the connect flow.
+3. **Verify** before confirming: `claude mcp get summation` should fail or show no live session / no stale `Authorization` header. If it still shows a configured server with auth material, remove that user-scope entry and re-check.
+
+4. Report **disconnected** only after host disconnect or a successful remove **and** verification. Next `/addison:signin` re-runs the connect flow.
 
 ## Internal vs external
 

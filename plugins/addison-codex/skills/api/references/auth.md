@@ -63,8 +63,8 @@ Do **not** pass `--header`, an `Authorization` header, or any bearer token — t
 Old user-scope entries that inject an `Authorization` header (device-login `sm_dls_…` style) fight OAuth:
 
 ```bash
-codex mcp logout summation 2>/dev/null || true
-codex mcp remove summation 2>/dev/null || true
+codex mcp logout summation
+codex mcp remove summation
 ```
 
 Then `$addison-signin`.
