@@ -1,6 +1,6 @@
 # Auth Reference (MCP-native)
 
-The host (Claude Code, Claude Desktop, or Codex) authenticates to the hosted Summation MCP server. The plugin does not mint or store customer credentials for the happy path.
+The host MCP client authenticates to the hosted Summation MCP server. The plugin does not mint or store customer credentials for the happy path.
 
 ## Two experiences
 

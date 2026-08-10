@@ -78,6 +78,24 @@ def device_login_state_path() -> pathlib.Path:
     return pathlib.Path.home() / ".summation" / DEVICE_LOGIN_STATE_FILE_NAME
 
 
+def write_private_text(path: pathlib.Path, content: str) -> None:
+    """Write text with mode 0600 applied on the open descriptor before any content.
+
+    ``Path.write_text`` + post-hoc ``chmod`` leaves a umask-shaped window (often 0644)
+    and never tightens an existing world-readable file until after secrets are already
+    on disk. Create/truncate with 0600 and ``fchmod`` first, then write.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+    except OSError:
+        os.close(fd)
+        raise
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(content)
+
+
 def legacy_config_paths() -> list[pathlib.Path]:
     paths = [skill_root() / CONFIG_FILE_NAME, pathlib.Path.home() / CONFIG_FILE_NAME]
     if is_internal():
@@ -93,9 +111,7 @@ def migrate_legacy_config(found: pathlib.Path) -> pathlib.Path:
         return found
     if found.resolve() not in {path.resolve() for path in legacy_config_paths()}:
         return found
-    canonical.parent.mkdir(parents=True, exist_ok=True)
-    canonical.write_text(found.read_text(encoding="utf-8"), encoding="utf-8")
-    os.chmod(canonical, 0o600)
+    write_private_text(canonical, found.read_text(encoding="utf-8"))
     print(
         f"Migrated config from {found} to {canonical}; legacy file left in place.",
         file=sys.stderr,
@@ -357,9 +373,7 @@ def _read_device_login_states() -> dict[str, dict[str, Any]]:
 
 def _write_device_login_states(states: dict[str, dict[str, Any]]) -> pathlib.Path:
     path = device_login_state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(states, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.chmod(path, 0o600)
+    write_private_text(path, json.dumps(states, indent=2, sort_keys=True) + "\n")
     return path
 
 
@@ -492,9 +506,14 @@ def _audit(method: str, url: str, started: float, status: int | None, request_id
             record["error"] = error
         path = audit_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+        except OSError:
+            os.close(fd)
+            raise
+        with os.fdopen(fd, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
-        os.chmod(path, 0o600)
     except Exception:
         pass
 
@@ -1220,9 +1239,7 @@ def write_config_file(
     values: dict[str, str],
     profiles: dict[str, dict[str, str]],
 ) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_config(values, profiles), encoding="utf-8")
-    os.chmod(path, 0o600)
+    write_private_text(path, render_config(values, profiles))
 
 
 def mcp_url() -> str:
@@ -1316,9 +1333,7 @@ def remove_toml_table_family(content: str, table_name: str) -> tuple[str, bool]:
 
 
 def write_codex_config(path: pathlib.Path, content: str) -> pathlib.Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-    os.chmod(path, 0o600)
+    write_private_text(path, content)
     return path
 
 
@@ -1404,6 +1419,23 @@ def command_mcp_connect(args: argparse.Namespace) -> None:
     }))
 
 
+def _cli_output_looks_not_registered(result: subprocess.CompletedProcess) -> bool:
+    """True only for known missing-registration messages — not every nonzero exit."""
+    blob = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+    return any(
+        needle in blob
+        for needle in (
+            "not found",
+            "not registered",
+            "does not exist",
+            "no such",
+            "unknown server",
+            "not configured",
+            "no mcp server",
+        )
+    )
+
+
 def command_mcp_disconnect(args: argparse.Namespace) -> None:
     if getattr(args, "client", "claude") == "codex":
         command_codex_mcp_disconnect()
@@ -1412,7 +1444,16 @@ def command_mcp_disconnect(args: argparse.Namespace) -> None:
         [_claude_binary(), "mcp", "remove", "-s", "user", MCP_SERVER_NAME],
         capture_output=True, text=True, check=False,
     )
-    status = "disconnected" if result.returncode == 0 else "not_registered"
+    if result.returncode == 0:
+        status = "disconnected"
+    elif _cli_output_looks_not_registered(result):
+        status = "not_registered"
+    else:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise SystemExit(
+            f"claude mcp remove failed (exit {result.returncode})"
+            + (f": {detail}" if detail else "; run `claude mcp list` to inspect.")
+        )
     print(json_dumps({"status": status, "server": MCP_SERVER_NAME}))
 
 

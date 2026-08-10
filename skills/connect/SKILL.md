@@ -12,7 +12,7 @@ Help the user get a **live data source** into Summation, then make its tables an
 
 1. **Fetch `https://docs.summation.com/llms.txt`** before answering which sources are supported.  
 2. Open the matching connector page from that index (e.g. Postgres, Snowflake, BigQuery).  
-3. Hosted variants (Neon, RDS, Cloud SQL, …) map to the closest connector in the index (usually Postgres).  
+3. Hosted multi-engine services (RDS, Cloud SQL, Azure Database, …) are **not** a connector by themselves — ask which engine (Postgres, MySQL, SQL Server, …) before mapping to the index. Neon and similar Postgres-only hosts can map to Postgres once confirmed.  
 4. See `../api/references/product.md` for lookup rules only — **not** a static feature list.
 
 Never invent “unsupported” after a failed URL, truncated API dig, or homepage marketing. If docs can’t be reached, say so and retry — don’t guess.
