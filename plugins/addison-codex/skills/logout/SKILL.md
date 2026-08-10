@@ -1,6 +1,6 @@
 ---
 name: logout
-description: >
+description: "Alias for signout — disconnect Summation MCP session so the next use re-authenticates. Prefer signout."
 ---
 
 # Logout → signout

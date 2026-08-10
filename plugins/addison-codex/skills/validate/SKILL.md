@@ -1,6 +1,6 @@
 ---
 name: validate
-description: Verify a Summation report against its sources before sharing. Use before external or executive distribution, or when the user asks if a report is solid.
+description: "Verify a Summation report against its sources before sharing. Use before external or executive distribution, or when the user asks if a report is solid."
 ---
 
 # Summation Validate

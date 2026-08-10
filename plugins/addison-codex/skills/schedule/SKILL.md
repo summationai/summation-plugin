@@ -1,6 +1,6 @@
 ---
 name: schedule
-description: Schedule recurring Summation playbook runs with email delivery — list, create, update, pause, resume, or run now.
+description: "Schedule recurring Summation playbook runs with email delivery — list, create, update, pause, resume, or run now."
 ---
 
 # Summation Schedule

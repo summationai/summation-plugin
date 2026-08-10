@@ -1,6 +1,6 @@
 ---
 name: query
-description: Answer a data question or run read-only SQL against Summation. Use for quick checks, tables, or open-ended questions.
+description: "Answer a data question or run read-only SQL against Summation. Use for quick checks, tables, or open-ended questions."
 ---
 
 # Summation Query

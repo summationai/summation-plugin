@@ -1,6 +1,6 @@
 ---
 name: signout
-description: Disconnect Codex from Summation — clear the hosted MCP session so the next use re-authenticates. Use when the user wants to disconnect, switch Summation user/org/environment, or clear a stale MCP session.
+description: "Disconnect Codex from Summation — clear the hosted MCP session so the next use re-authenticates. Use when the user wants to disconnect, switch Summation user/org/environment, or clear a stale MCP session."
 ---
 
 # Addison Sign-out

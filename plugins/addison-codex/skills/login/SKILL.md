@@ -1,6 +1,6 @@
 ---
 name: login
-description: >
+description: "Alias for signin — connect Codex to Summation via hosted MCP browser OAuth. Use when the user needs to connect Addison or tools return 401/403. Prefer signin."
 ---
 
 # Login → signin

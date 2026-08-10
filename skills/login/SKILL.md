@@ -1,8 +1,6 @@
 ---
 name: login
-description: >
-  Alias for signin — connect Claude to Summation via hosted MCP browser OAuth.
-  Use when the user needs to connect Addison or tools return 401/403. Prefer signin.
+description: Alias for signin — connect Claude to Summation via hosted MCP browser OAuth. Use when the user needs to connect Addison or tools return 401/403. Prefer signin.
 ---
 
 # Login → signin

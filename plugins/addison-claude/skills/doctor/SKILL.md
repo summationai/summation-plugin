@@ -1,8 +1,6 @@
 ---
 name: doctor
-description: >
-  Alias for diagnose — check whether Summation is connected and what data is visible.
-  Use when tools fail, sign-in seems broken, or the user asks if setup is OK. Prefer diagnose.
+description: Alias for diagnose — check whether Summation is connected and what data is visible. Use when tools fail, sign-in seems broken, or the user asks if setup is OK. Prefer diagnose.
 ---
 
 # Doctor → diagnose

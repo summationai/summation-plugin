@@ -1,6 +1,6 @@
 ---
 name: signin
-description: Connect Codex to Summation via the hosted MCP server. Use when the user needs to connect Addison, when Summation tools are missing or unauthenticated, or when any Summation MCP call fails with 401/403.
+description: "Connect Codex to Summation via the hosted MCP server. Use when the user needs to connect Addison, when Summation tools are missing or unauthenticated, or when any Summation MCP call fails with 401/403."
 ---
 
 # Addison Sign-in

@@ -1,6 +1,6 @@
 ---
 name: report
-description: Generate a Summation report from a question and export it (Markdown, PDF, or DOCX). Use for analyses, board updates, or exportable documents over Summation data.
+description: "Generate a Summation report from a question and export it (Markdown, PDF, or DOCX). Use for analyses, board updates, or exportable documents over Summation data."
 ---
 
 # Summation Report

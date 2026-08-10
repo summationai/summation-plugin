@@ -1,6 +1,6 @@
 ---
 name: connect
-description: Connect a data source (Postgres, Snowflake, BigQuery, etc.) to Summation. Use when the user wants to add a warehouse or database. Keep secrets out of chat; attach tables with clear names.
+description: "Connect a data source (Postgres, Snowflake, BigQuery, etc.) to Summation. Use when the user wants to add a warehouse or database. Keep secrets out of chat; attach tables with clear names."
 ---
 
 # Summation Connect

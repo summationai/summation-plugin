@@ -1,6 +1,6 @@
 ---
 name: start
-description: Summation onboarding — sign in, map data, meet Addison, first report. Use when the user says set up Summation, get started, or is clearly new.
+description: "Summation onboarding — sign in, map data, meet Addison, first report. Use when the user says set up Summation, get started, or is clearly new."
 ---
 
 # Summation Start

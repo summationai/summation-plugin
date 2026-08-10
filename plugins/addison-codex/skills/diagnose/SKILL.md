@@ -1,6 +1,6 @@
 ---
 name: diagnose
-description: Check whether Summation is connected and what data is visible. Use when tools fail, sign-in seems broken, or the user asks if setup is OK.
+description: "Check whether Summation is connected and what data is visible. Use when tools fail, sign-in seems broken, or the user asks if setup is OK."
 ---
 
 # Summation Diagnose

@@ -1,8 +1,6 @@
 ---
 name: logout
-description: >
-  Alias for signout — disconnect Summation MCP session so the next use re-authenticates.
-  Prefer signout.
+description: Alias for signout — disconnect Summation MCP session so the next use re-authenticates. Prefer signout.
 ---
 
 # Logout → signout

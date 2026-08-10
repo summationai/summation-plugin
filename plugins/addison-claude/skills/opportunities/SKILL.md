@@ -1,10 +1,6 @@
 ---
 name: opportunities
-description: >
-  Suggest Summation workflows from recent Claude Code or Codex chats and the live catalog.
-  Use when the user asks what Summation can do for their work, wants workflow ideas, use cases,
-  “how can you help”, opportunity scan, or after onboarding discover when they consent to a
-  local chat scan. Also /addison:opportunities.
+description: Suggest Summation workflows from recent Claude Code or Codex chats and the live catalog. Use when the user asks what Summation can do for their work, wants workflow ideas, use cases, how you can help, opportunity scan, or after onboarding when they consent to a local chat scan.
 ---
 
 # Summation opportunities

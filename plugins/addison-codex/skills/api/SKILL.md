@@ -1,6 +1,6 @@
 ---
 name: api
-description: Use Summation through the hosted summation MCP server and Addison skills. Product questions, data work, reports, connections, and auth.
+description: "Use Summation through the hosted summation MCP server and Addison skills. Product questions, data work, reports, connections, and auth."
 ---
 
 # Summation (MCP-native)

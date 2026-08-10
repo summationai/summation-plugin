@@ -60,16 +60,52 @@ def write_json(path: pathlib.Path, payload: dict) -> None:
 
 
 def strip_skill_frontmatter(text: str) -> str:
+    """Keep only name + description for Codex.
+
+    Codex rejects skills whose frontmatter lacks a non-empty ``description``.
+    Folded YAML (``description: >`` plus indented lines) used to be stripped to
+    a bare ``description: >`` with no body — Codex then skipped the skill.
+    Flatten multi-line descriptions to one line so the field always has a value.
+    """
     if not text.startswith("---\n"):
         return text
     end = text.find("\n---", 4)
     if end == -1:
         return text
-    kept = [
-        line for line in text[4:end].splitlines()
-        if line.startswith("name:") or line.startswith("description:")
-    ]
-    return "---\n" + "\n".join(kept) + "\n---" + text[end + len("\n---"):]
+    lines = text[4:end].splitlines()
+    name: str | None = None
+    description = ""
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("name:"):
+            name = line.split(":", 1)[1].strip().strip("\"'")
+            i += 1
+            continue
+        if line.startswith("description:"):
+            rest = line.split(":", 1)[1].strip()
+            i += 1
+            if rest in {">", "|", ">-", "|-", ">+", "|+"}:
+                parts: list[str] = []
+                while i < len(lines) and (lines[i].startswith(" ") or lines[i].startswith("\t")):
+                    parts.append(lines[i].strip())
+                    i += 1
+                description = " ".join(parts)
+            else:
+                description = rest.strip("\"'")
+                while i < len(lines) and (lines[i].startswith(" ") or lines[i].startswith("\t")):
+                    description = f"{description} {lines[i].strip()}".strip()
+                    i += 1
+            continue
+        i += 1
+    if not name:
+        return text
+    description = " ".join(description.split())
+    if not description:
+        raise SystemExit(f"skill {name!r}: empty description after frontmatter strip")
+    # Double-quote so colons / dashes in the blurb stay valid YAML.
+    desc_yaml = json.dumps(description, ensure_ascii=False)
+    return f"---\nname: {name}\ndescription: {desc_yaml}\n---" + text[end + len("\n---") :]
 
 
 def codex_text(text: str) -> str:
