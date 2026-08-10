@@ -32,6 +32,7 @@ That index lists current docs (connectors, integrations, features). Then:
 | Check a report | `$addison-validate` |
 | Add a warehouse/database | `$addison-connect` (passwords in Summation **Connections**) |
 | Recurring emailed analysis | playbooks + `$addison-schedule` |
+| Workflow ideas from recent IDE chats | `$addison-opportunities` (local scan + catalog) |
 | Sign in / health | `$addison-signin`, `$addison-diagnose` |
 
 The **list of warehouses and features** still comes from `llms.txt` + linked docs, not from hardcoding here.

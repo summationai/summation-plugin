@@ -21,7 +21,7 @@ All day-to-day data work goes through the hosted **`summation` MCP server** and 
 ## Core workflow
 
 1. Auth: **`whoami`**. If needed → **signin** skill.  
-2. Prefer a domain skill: `start`, `report`, `validate`, `query`, `catalog`, `schedule`, `connect`, `diagnose`.  
+2. Prefer a domain skill: `start`, `opportunities`, `report`, `validate`, `query`, `catalog`, `schedule`, `connect`, `diagnose`.  
 3. Else use MCP tools (below). Speak in outcomes to the user.  
 4. Auth errors → signin; never ask for tokens in chat.
 

@@ -41,6 +41,7 @@ Then `$addison-signin` or any data ask. Skills use `$addison-…` mentions. MCP 
 | Skill | Invoke | Does |
 |---|---|---|
 | `start` | `/addison:start` | guided onboarding: connect → map data → meet Addison → first report |
+| `opportunities` | `/addison:opportunities` | suggest workflows from recent local chats + live catalog (consent first) |
 | `api` | model-invoked | MCP tool map + safety rules |
 | `signin` | `/addison:signin` | connect or re-authenticate Summation |
 | `signout` | `/addison:signout` | disconnect Summation |

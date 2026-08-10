@@ -40,9 +40,19 @@ Then give a short source map and continue.
 2. Project catalog: attach agreed business tables if empty.  
 3. `ask_analyst`: introduce what you see + 3 concrete report ideas from **real** table names. Tell the user Addison is working.
 
+### Step 3b — Opportunities from recent chats (optional, once)
+
+After the gate is open **or** after a clear “no data yet” path, offer **once**:
+
+> I can also look at recent local chats in this IDE for workflows Summation can take over (scan stays on your machine). Want that?
+
+- **Yes** → run the **`opportunities`** skill (consent + local scan + catalog-grounded list). Prefer their pick for step 4.  
+- **No** → one line: anytime `/addison:opportunities` — then continue.  
+- Do **not** scan without consent. Do **not** dump transcripts.
+
 ### Step 4 — First report
 
-Numbered ideas. On yes → **report** skill (markdown) → offer **validate**. Next steps in plain language.
+Numbered ideas (from catalog and/or opportunities). On yes → **report** skill (markdown) → offer **validate**. Next steps in plain language.
 
 ## Voice
 
