@@ -27,14 +27,35 @@ https://github.com/summationai/addison-plugin/releases/latest/download/addison-p
 
 Members then install from the org library.
 
-**Codex:**
+**Codex (CLI):**
 
 ```
 codex plugin marketplace add summationai/addison-plugin
 codex plugin install addison
 ```
 
-Then `$addison-signin` or any data ask. Skills use `$addison-…` mentions. MCP is packaged with the plugin; auth is the same browser flow (`codex mcp login summation` if needed).
+Then `$addison-signin` or any data ask. Skills use `$addison-…` mentions (not `/addison:…`). MCP is packaged with the plugin; auth is the same browser flow (`codex mcp login summation` if needed).
+
+**Codex desktop app (Add plugin marketplace):**
+
+Layout matches the `openai/plugins` convention: marketplace catalog at `.agents/plugins/marketplace.json`, plugin package at `plugins/addison-codex/`.
+
+| Field | Value |
+|---|---|
+| **Source** | `summationai/addison-plugin` |
+| **Git ref** | `main` |
+| **Sparse paths** | leave **empty** (clear the default `plugins/codex` placeholder) |
+
+Then install plugin **addison** from the Summation marketplace, start a new thread (or restart the app), and run `$addison-start` or `$addison-signin`.
+
+If you must sparse-checkout, include **both** the catalog and the package (not the package alone):
+
+```text
+.agents/plugins
+plugins/addison-codex
+```
+
+Sparse path `plugins/addison-codex` alone fails with “marketplace root does not contain a supported manifest” — that directory is the plugin, not the marketplace.
 
 ## Contents
 
