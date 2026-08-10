@@ -97,8 +97,9 @@ user approval before publishing anywhere.
 | Path | Role |
 |---|---|
 | **`skills/`** | **Source of truth** — edit skills here only |
+| **`assets/`** | Brand images for Codex (`logo.png`, `logo-dark.png`, `icon.png`) — copied into the Codex package by `./build-codex.sh` |
 | `plugins/addison-claude/` | Claude package (skills copied in by `./build-claude.sh`) |
-| `plugins/addison-codex/` | Codex package (generated: mention syntax + MCP shape) |
+| `plugins/addison-codex/` | Codex package (generated: mention syntax + MCP shape + assets) |
 
 ```bash
 # edit skills/…

@@ -34,6 +34,9 @@
     ],
     "websiteURL": "https://summation.com",
     "brandColor": "#2F6FEB",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "logoDark": "./assets/logo-dark.png",
     "defaultPrompt": [
       "Set up Addison for Summation.",
       "What data can Addison see?",
