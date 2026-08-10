@@ -28,6 +28,15 @@ rm -rf "$DST"
 mkdir -p "$DST" "$(dirname "$MARKETPLACE")"
 cp -R "$SKILLS" "$DST/skills"
 cp "$CLAUDE/.mcp.json" "$DST/.mcp.json"
+# Brand assets for Codex marketplace / composer (canonical: repo-root assets/)
+if [[ -d assets ]]; then
+  mkdir -p "$DST/assets"
+  # logo.png, logo-dark.png, icon.png (composer)
+  cp -f assets/logo.png assets/logo-dark.png assets/icon.png "$DST/assets/" 2>/dev/null || {
+    echo "refusing to build: assets/ must include logo.png, logo-dark.png, icon.png" >&2
+    exit 1
+  }
+fi
 find "$DST" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
 python3 - "$CLAUDE" "$DST" "$MARKETPLACE" <<'PY'
@@ -178,6 +187,9 @@ plugin_json = {
         "capabilities": ["Interactive", "Data analysis", "Reports", "MCP"],
         "websiteURL": "https://summation.com",
         "brandColor": "#2F6FEB",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/logo.png",
+        "logoDark": "./assets/logo-dark.png",
         "defaultPrompt": [
             "Set up Addison for Summation.",
             "What data can Addison see?",
@@ -185,6 +197,10 @@ plugin_json = {
         ],
     },
 }
+assets_dir = dst / "assets"
+for rel in ("assets/icon.png", "assets/logo.png", "assets/logo-dark.png"):
+    if not (dst / rel).is_file():
+        raise SystemExit(f"missing brand asset {rel} — add files under repo assets/ and rebuild")
 write_json(dst / ".codex-plugin" / "plugin.json", plugin_json)
 
 entry = {
