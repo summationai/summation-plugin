@@ -1,27 +1,28 @@
 ---
 name: schedule
-description: Schedule recurring Summation playbook runs with email delivery — list, create, pause, resume, or trigger schedules. Use when the user wants a report/playbook on a cadence ("every Monday", "daily at 9am") or asks what's scheduled.
+description: Schedule recurring Summation playbook runs with email delivery — list, create, update, pause, resume, or run now.
 ---
 
 # Summation Schedule
 
-Recurring playbook runs, email delivery. **MCP tools only.**
+MCP only. Schedules email real people — confirm carefully.
 
 ## Flows
 
-**Inspect:** `list_schedules` → table of description, kind, cadence (+ timezone), target, status. History: `list_schedule_runs` / `get_schedule`.
+**List:** `list_schedules` → plain table: what, when (with timezone), who gets email, status. History via run tools as needed.
 
-**Create:**
-1. Schedules target **playbooks** (`list_playbooks` / `get_playbook`). If none exists for the ask, say so — `$addison-report` is one-off; a playbook must exist first.
-2. Build the schedule body per the tool schema: target ids, cadence (`time_of_day`, **explicit timezone** — ask, never assume), `email_recipients` (to/cc/bcc).
-3. **Confirm before `create_schedule`:** read back what runs, when (with zone), and exactly who is emailed. Create only after an explicit yes.
-4. Report schedule id and first expected run.
+**Create / update:**
+1. Needs a **playbook** (`list_playbooks` / create or update via available playbook tools if the user is authoring one). One-off docs without a playbook → `$addison-report`.  
+2. Cadence with **explicit timezone** (ask; never assume).  
+3. Recipients exactly as named.  
+4. **Read back** what / when / who → explicit yes → `create_schedule` or the update/patch tool if changing an existing schedule.  
+5. Confirm via `list_schedules` / `get_schedule`.
 
-**Operate:** pause / resume / run-now via the matching schedule tools. Run-now emails recipients — confirm first. Delete only when the user names the exact schedule and confirms.
+**Operate:** pause / resume / run-now with confirmation when email will fire.
 
 ## Rules
 
-- Recipient lists are blast radius: verbatim read-back; never add recipients the user didn’t name.
-- Always show cadence with timezone.
-- Surface `request_id` on errors.
-- No REST helper for this skill.
+- No recipients the user didn’t name.  
+- Always show timezone.  
+- Prefer partial updates when a patch/update tool exists — don’t wipe fields the user didn’t mention.  
+- Plain language. No REST helper.

@@ -1,9 +1,7 @@
-name: Check generated Codex edition
+name: Check generated plugin packages
 
-# Anti-drift guard: plugins/addison-codex is GENERATED from plugins/addison-claude.
-# This regenerates it and fails if the committed output differs — so a change to the source
-# that wasn't rebuilt, or a hand-edit of the generated dir, can never merge.
-# One source of truth (plugins/addison-claude), enforced.
+# Anti-drift guard: plugins/*/skills are GENERATED from skills/ (canonical).
+# Regenerates Claude + Codex packages and fails if committed output differs.
 
 on:
   pull_request:
@@ -16,18 +14,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Regenerate the Codex edition
+      - name: Regenerate Claude and Codex packages
         run: |
-          ./build-codex.sh
+          ./build-plugins.sh
 
-      - name: Fail if generated editions drift from source
+      - name: Fail if generated packages drift from skills/
         run: |
-          # Ignore build byproducts that aren't committed.
           find plugins -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
-          if ! git diff --quiet; then
-            echo "::error::The generated Codex edition is out of sync with plugins/addison-claude."
-            echo "Run ./build-codex.sh, then commit the result."
+          # Tracked diffs and new untracked generated files both count as drift.
+          # git diff alone misses a brand-new skill/reference that was never committed.
+          if ! git diff --quiet || [ -n "$(git status --porcelain --untracked-files=all)" ]; then
+            echo "::error::Generated plugins are out of sync with skills/."
+            echo "Edit skills/, run ./build-plugins.sh, then commit."
+            git --no-pager status --porcelain --untracked-files=all
             git --no-pager diff --stat
             exit 1
           fi
-          echo "Generated Codex edition matches source."
+          echo "Generated Claude + Codex packages match skills/."

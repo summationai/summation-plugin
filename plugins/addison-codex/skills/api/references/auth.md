@@ -1,6 +1,6 @@
 # Auth Reference (MCP-native)
 
-The host (Codex, Codex, or Codex) authenticates to the hosted Summation MCP server. The plugin does not mint or store customer credentials for the happy path.
+The host MCP client authenticates to the hosted Summation MCP server. The plugin does not mint or store customer credentials for the happy path.
 
 ## Two experiences
 
@@ -63,8 +63,8 @@ Do **not** pass `--header`, an `Authorization` header, or any bearer token — t
 Old user-scope entries that inject an `Authorization` header (device-login `sm_dls_…` style) fight OAuth:
 
 ```bash
-codex mcp logout summation 2>/dev/null || true
-codex mcp remove summation 2>/dev/null || true
+codex mcp logout summation
+codex mcp remove summation
 ```
 
 Then `$addison-signin`.

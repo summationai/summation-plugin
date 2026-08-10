@@ -1,21 +1,24 @@
 ---
 name: query
-description: Run a read-only SQL query against Summation data and render the result as a table. Use for quick data questions, sanity checks, or when the user provides SQL or asks something answerable with one query.
+description: Answer a data question or run read-only SQL against Summation. Use for quick checks, tables, or open-ended questions.
 ---
 
 # Summation Query
 
-Use the hosted **`summation` MCP** tools only. Auth via `$addison-signin` if needed (`whoami` first).
+MCP only. Sign in first if needed (`whoami` / signin skill).
 
 ## Flow
 
-1. If the user gave a question rather than SQL, ground it first: `$addison-catalog <term>` or MCP `search_tables` — never guess table names.
-2. For **open-ended data questions**, prefer **`ask_analyst`** (buffered, ~15–60s; tell the user Addison is working; wait ~120s before failing).
-3. For **explicit SQL**, call **`run_query`** with the SQL, an explicit `limit` (default 100, ask before >1000, max per tool rules), and a reasonable timeout.
-4. Render a compact markdown table. State row count and whether results were truncated. Show the executed SQL for spot-checking.
+1. Ground names: `$addison-catalog` or `search_tables` — never invent table names.  
+2. **Open-ended business questions** (including “top N”, trends, “why”): prefer **`ask_analyst`** (Addison). Tell the user it’s working; answers often take a bit.  
+3. **Explicit SQL** the user provided (or a simple lookup): **`run_query`** with an explicit limit (default 100; ask before very large pulls).  
+4. Render a compact table; show row count and the SQL used when you ran SQL. Spot-check surprising results in plain language.
 
 ## Rules
 
-- Read-only semantics: mutations are rejected — say so, don’t retry as writes.
-- On error, surface tool error text and any `request_id`. A role/permission message means the tenant lacks query roles — not “broken auth.”
-- No REST helper / `sum_api.py` for this skill.
+- Prefer Addison for narrative analysis; SQL for precise, user-authored queries.  
+- **Ranked / top-N SQL** needs `ORDER BY`. Without it, `LIMIT N` is not “top N” — add an order (with consent) or say the rows are unordered, not a ranking.  
+- **Truncation:** if the result row count equals the limit (default 100), say the result may be truncated and offer a higher limit or a tighter filter. Never present a capped pull as the full set.  
+- Read-only: don’t retry mutations.  
+- Errors: plain language; permission issues ≠ “not signed in.”  
+- No REST helper.

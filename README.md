@@ -70,21 +70,28 @@ user approval before publishing anywhere.
 
 ## Development
 
-`plugins/addison-claude` is the source of truth. The Codex package is generated:
+**One skill tree, two packages** (DRY authoring):
+
+| Path | Role |
+|---|---|
+| **`skills/`** | **Source of truth** — edit skills here only |
+| `plugins/addison-claude/` | Claude package (skills copied in by `./build-claude.sh`) |
+| `plugins/addison-codex/` | Codex package (generated: mention syntax + MCP shape) |
 
 ```bash
+# edit skills/…
+./build-plugins.sh        # Claude + Codex from skills/
 claude --plugin-dir ./plugins/addison-claude
 claude plugin validate ./plugins/addison-claude
-./build-codex.sh          # regenerates plugins/addison-codex
 ./build-zip.sh            # dist/addison-plugin.zip for Desktop upload
 ```
 
-CI fails if the generated Codex edition drifts from source. Never hand-edit `plugins/addison-codex`.
+CI regenerates both packages and fails on drift. **Never hand-edit** `plugins/addison-*/skills` or `plugins/addison-codex` (see `plugins/addison-codex/GENERATED.md`).
 
 ## Release
 
 1. Bump `version` in `plugins/addison-claude/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
-2. Run `./build-codex.sh`, commit, merge to `main`.
-3. Tag matching the version (for example `v0.10.1`) and push the tag. The release workflow publishes `addison-plugin.zip` as **Latest**.
+2. Run `./build-plugins.sh`, commit, merge to `main`.
+3. Tag matching the version (for example `v0.10.2`) and push the tag. The release workflow publishes `addison-plugin.zip` as **Latest**.
 
 `https://github.com/summationai/addison-plugin/releases/latest/download/addison-plugin.zip`

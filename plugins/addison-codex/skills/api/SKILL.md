@@ -1,20 +1,27 @@
 ---
 name: api
-description: Use Summation through the hosted summation MCP server and Addison skills. Use when users ask to inspect or operate Summation data, projects, reports, chats, files, or MCP auth.
+description: Use Summation through the hosted summation MCP server and Addison skills. Product questions, data work, reports, connections, and auth.
 ---
 
 # Summation (MCP-native)
 
-All data operations go through the hosted **`summation` MCP server**. Auth is Codex OAuth against that server (browser sign-in). Do **not** call sum-api with a local helper for day-to-day work, and do **not** invent REST paths in chat.
+All day-to-day data work goes through the hosted **`summation` MCP server** and domain skills. Browser sign-in owns auth. Do **not** call sum-api or invent REST for normal work.
 
-**Default MCP URL:** `https://mcp.summation.com/mcp` (plugin `.mcp.json`).
+**Default MCP:** `https://mcp.summation.com/mcp`
+
+## Before you answer “what’s supported?”
+
+1. **Fetch `https://docs.summation.com/llms.txt`** (live product map — do not rely on a baked-in list).  
+2. Open the linked doc for that feature or connector.  
+3. See **`references/product.md`** for how to use the index and plugin skill routing.  
+4. Never invent “unsupported” from a failed fetch, wrong URL, homepage marketing, or truncated OpenAPI.
 
 ## Core workflow
 
-1. Ensure auth: call **`whoami`**. If unauthenticated, hand off to the `signin` skill.
-2. Prefer a **domain skill** when the task matches one (`start`, `report`, `validate`, `query`, `catalog`, `schedule`, `connect`).
-3. Otherwise call the right **MCP tools** directly (list below). Prefer task-shaped tools over inventing multi-step REST.
-4. On auth failure, re-run `signin` — never ask for tokens in chat.
+1. Auth: **`whoami`**. If needed → **signin** skill.  
+2. Prefer a domain skill: `start`, `report`, `validate`, `query`, `catalog`, `schedule`, `connect`, `diagnose`.  
+3. Else use MCP tools (below). Speak in outcomes to the user.  
+4. Auth errors → signin; never ask for tokens in chat.
 
 ## MCP tools (curated)
 
@@ -28,35 +35,32 @@ Tables / views / query: `search_tables`, `get_table_schema`, `preview_table_data
 
 Files: `list_files`, `download_file`, `upload_file`, `request_file_upload`, `finalize_file_upload`, `import_file_to_table`
 
-Catalog / reports / playbooks / schedules: `list_catalog_entries`, `attach_catalog_entry`, `start_report`, `list_reports`, `get_report_status`, `export_report`, `validate_report`, `list_playbooks`, `get_playbook`, `list_schedules`, `get_schedule`, `list_schedule_runs`, `create_schedule`
+Catalog / reports / playbooks / schedules: `list_catalog_entries`, `attach_catalog_entry`, `start_report`, `list_reports`, `get_report_status`, `export_report`, `validate_report`, `list_playbooks`, `get_playbook`, `list_schedules`, `get_schedule`, `list_schedule_runs`, `create_schedule` — plus any create/update/detach tools the live server exposes (use them when present).
 
-Tool names and shapes come from the live MCP server — if a name differs slightly, use the server’s list, not this doc as gospel.
+Prefer the **live server’s tool list** over this doc if names differ.
 
-## Client-side behaviors
+## Client behaviors (required)
 
-- **Long tools return one buffered result:** `ask_analyst`, `start_report`, `validate_report`, `import_file_to_table` (~15–60s). Tell the user Addison is working; do not treat silence as failure before ~120s.
-- **Auth errors** → `$addison-signin` (host re-auth).
-- **`get_view` / `preview_view_data`** can 404 on ids from `search_views` (known list/show split) — fall back to tables tools.
-- **`create_schedule`** emails people — confirm recipients + cadence (with timezone) verbatim before calling.
-- **Secrets never in tool args.** Connection passwords use the `connect` skill (webapp or local-file path), never MCP arguments.
+- **Long tools** (`ask_analyst`, `start_report`, `validate_report`, `import_file_to_table`): tell the user you’re working; **reports can take a few minutes** — brief progress every ~30–45s until status is terminal.  
+- **Auth errors** → signin.  
+- **Views** may 404 on ids from search — fall back to tables.  
+- **Schedules** that email people — confirm recipients + cadence (with timezone) first.  
+- **Secrets:** never in tool args or chat; **connect** skill + web app for passwords.  
+- **Attach datasets:** always set human-readable **`name`** (table name). Never leave auto `*_dataset_N` names.  
+- **Success:** verify with list/test/export before telling the user it’s done.  
+- **User chat:** product language only — no OpenAPI dumps, path lists, or key-guessing experiments.
 
-## Auth
+## Auth summary
 
-See the sibling `signin` / `signout` skills and `references/auth.md`. Summary:
+See `signin` / `signout` and `references/auth.md`. Headerless plugin MCP; host OAuth. Do not re-register with an Authorization header.
 
-- Plugin ships headerless `.mcp.json` for `summation`.
-- Codex stores the OAuth/session token; skills never read or write `sm_dls_…` files for the happy path.
-- **External** (default): one env, no env/tenant prompts.
-- **Internal** (`ADDISON_PLUGIN_INTERNAL=1` in the launch shell): signin asks **environment** (prod/staging/sandbox allowlist) and **tenant** guidance (web-app org + re-auth).
-- Do not register a user-scope MCP entry with an `Authorization` header — that fights OAuth.
+## Safety
 
-## Safety rules
+- Confirm email schedules and destructive actions.  
+- Prefer list before mutate.  
+- Preserve org/project from `whoami` / project tools.  
+- On hard failures, you may mention a `request_id` if present (for support) — still explain in plain language.
 
-- Destructive or outward-facing actions (email schedules, deletes) are confirmation-gated.
-- Prefer list/show before mutate.
-- Preserve org/project context from `whoami` / project tools — never trust caller-supplied org headers.
-- On failure, quote any `request_id` from the tool error.
+## Legacy helper
 
-## Legacy helper (not for normal use)
-
-`scripts/sum_api.py` remains in-tree only for rare local recovery (e.g. secret-file connection create when MCP cannot carry secrets). **Do not use it for queries, reports, catalog, schedules, or auth.** Prefer MCP tools and the domain skills.
+`scripts/sum_api.py` is not for normal customer flows. Prefer MCP + domain skills.

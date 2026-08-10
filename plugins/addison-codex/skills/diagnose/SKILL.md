@@ -1,56 +1,45 @@
 ---
 name: diagnose
-description: Diagnose Summation MCP connectivity and auth. Use when Summation tools fail, auth seems stale, or the user asks whether Summation is set up correctly.
+description: Check whether Summation is connected and what data is visible. Use when tools fail, sign-in seems broken, or the user asks if setup is OK.
 ---
 
 # Summation Diagnose
 
-Auth and data plane are the hosted **`summation` MCP server**. Diagnose with MCP tools, not OpenAPI scripts.
+Give a **plain-language health check** for customers and data scientists — not an API essay.
 
-## 0. Mode
-
-```bash
-printf '%s' "${ADDISON_PLUGIN_INTERNAL:-}"
-```
-
-- Internal if `1` / `true` / `yes` / `on` → expect env selection at sign-in; report which env URL is configured if you can see it (`codex mcp get summation`, redact secrets).
-- Otherwise **external** → single plugin default; no env questions.
-
-## 1. Auth + identity
+## 1. Identity
 
 Call **`whoami`** on **`summation`**.
 
-| Result | Meaning |
+| Result | What to tell the user |
 |---|---|
-| Identity + org + scopes | Auth OK. Continue. |
-| Needs authentication / 401 | `$addison-signin`. |
-| Server not found | Plugin MCP not loaded — enable **addison**, restart; internal may need the env URL re-registered. |
+| Identity + org | “You’re signed in as … in org …” |
+| Needs sign-in / 401 | Hand off to `$addison-signin` |
+| Tools missing | Enable/reload the **addison** plugin and restart the host |
 
-## 2. Environment card (when `whoami` works)
+## 2. What’s visible
 
-Call as available: `get_org`, `list_projects`, `get_default_project`, `list_data_connections`, `search_tables`.
+As available: `get_org`, `list_projects`, `get_default_project`, `list_data_connections`, `list_connection_datasets` / `search_tables`.
 
-Render a short card:
+Short card:
 
-- **Mode:** external | internal  
-- **Env:** (internal) prod / staging / sandbox if known from MCP URL; (external) plugin default  
-- **Tenant/org:** from `whoami` / `get_org`  
-- Projects, connections, sample tables  
-- 2–3 sample questions against real names  
+- Who / org  
+- Connections (friendly names)  
+- Tables ready for analysis (friendly names)  
+- 2–3 sample questions that fit **those** tables  
 
-## 3. Auth mismatch (legacy install)
+If empty: “You’re signed in, but there’s no business data yet” → `$addison-connect` or Connections in the web app.
 
-If user-scope `summation` has an `Authorization` header (old device-login bridge):
+## 3. Interpreting problems (user language)
 
-1. Explain the plugin uses headerless OAuth.
-2. `codex mcp logout summation 2>/dev/null || true
-codex mcp remove summation 2>/dev/null || true`
-3. `$addison-signin` (internal will re-ask env).
+- **Can’t authenticate** → sign in again in the browser.  
+- **Signed in but no data** → connect a source in Summation, then attach tables with clear names.  
+- **Permission denied** → their role/org may not allow that action; try another org (sign out / sign in after switching in the web app) or ask an admin.  
+- **Long report / analysis** → still normal for several minutes; keep the user informed.  
+- If support is needed and a `request_id` exists, include it **after** a plain explanation.
 
-## Interpreting failures
+## Rules
 
-- **401** → `$addison-signin` (internal: confirm env + web-app org first).
-- **403** → wrong org/role for this env; switch org on web app and re-auth, or pick another env (internal).
-- **Empty connections** → auth fine; `$addison-connect` or `$addison-start`.
-- Long tools (`ask_analyst`, reports): wait ~120s before declaring failure.
-- Surface any `request_id` from tool errors.
+- Do **not** download OpenAPI or debug connector key names here.  
+- Do **not** dump internal tool ids into chat.  
+- If they ask “is X supported?”, fetch **`https://docs.summation.com/llms.txt`** then the linked page (see `../api/references/product.md`).
