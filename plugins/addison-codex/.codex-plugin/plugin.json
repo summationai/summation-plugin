@@ -1,6 +1,6 @@
 {
   "name": "addison",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "description": "Addison, Summation's AI data analyst, in Codex: ask data questions, search the catalog, run bounded SQL, generate and validate reports, and export artifacts.",
   "author": {
     "name": "Summation",

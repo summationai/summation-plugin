@@ -1,0 +1,16 @@
+---
+name: doctor
+description: >
+---
+
+# Doctor → diagnose
+
+This skill was **renamed to `diagnose`**. Do **not** run `python3 ../api/scripts/sum_api.py doctor` (or any relative `../api/...` path). That path breaks when the host mounts skills as `addison:api` / `addison:doctor` rather than plain `api` / `doctor`.
+
+## What to do
+
+1. Follow the **`diagnose`** skill end-to-end.  
+2. Auth and health checks use MCP only: **`whoami`** on server **`summation`**, then list projects/connections/tables.  
+3. If not signed in → **`signin`** skill (browser OAuth). Never mint tokens with the legacy helper for day-to-day use.
+
+Slash: `$addison-diagnose` (or this alias `$addison-doctor` if the host still registers it).

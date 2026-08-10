@@ -64,9 +64,9 @@ Sparse path `plugins/addison-codex` alone fails with “marketplace root does no
 | `start` | `/addison:start` | guided onboarding: connect → map data → meet Addison → first report |
 | `opportunities` | `/addison:opportunities` | suggest workflows from recent local chats + live catalog (consent first) |
 | `api` | model-invoked | MCP tool map + safety rules |
-| `signin` | `/addison:signin` | connect or re-authenticate Summation |
-| `signout` | `/addison:signout` | disconnect Summation |
-| `diagnose` | `/addison:diagnose` | check connectivity and what data is visible |
+| `signin` | `/addison:signin` | connect or re-authenticate Summation (`login` is an alias) |
+| `signout` | `/addison:signout` | disconnect Summation (`logout` is an alias) |
+| `diagnose` | `/addison:diagnose` | check connectivity and what data is visible (`doctor` is an alias) |
 | `report` | `/addison:report` | generate a report → export markdown/PDF/DOCX |
 | `validate` | `/addison:validate` | verify a report before sharing |
 | `query` | `/addison:query` | read-only query or open-ended analysis |
