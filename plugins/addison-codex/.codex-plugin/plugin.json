@@ -1,7 +1,7 @@
 {
-  "name": "addison",
-  "version": "0.10.4",
-  "description": "Addison, Summation's AI data analyst, in Codex: ask data questions, search the catalog, run bounded SQL, generate and validate reports, and export artifacts.",
+  "name": "summation",
+  "version": "0.11.0",
+  "description": "Summation's AI data analyst, in Codex: ask data questions, search the catalog, run bounded SQL, generate and validate reports, and export artifacts.",
   "author": {
     "name": "Summation",
     "url": "https://summation.com"
@@ -10,20 +10,20 @@
   "repository": "https://github.com/summationai/addison-plugin",
   "license": "MIT",
   "keywords": [
-    "addison",
     "analytics",
     "codex",
     "data",
     "mcp",
     "reports",
-    "sum-api"
+    "sum-api",
+    "summation"
   ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "Addison",
-    "shortDescription": "Ask Addison data questions from Codex.",
-    "longDescription": "Addison brings Summation's AI data analyst into Codex for governed data questions, catalog discovery, SQL, reports, validation, and scheduling. Skills orchestrate the hosted Summation MCP server; auth is browser OAuth on first use (same product as Claude).",
+    "displayName": "Summation",
+    "shortDescription": "Ask Summation data questions from Codex.",
+    "longDescription": "The Summation plugin brings the analyst into Codex for governed data questions, catalog discovery, SQL, reports, validation, and scheduling. Skills orchestrate the hosted Summation MCP server; auth is browser OAuth on first use (same product as Claude).",
     "developerName": "Summation",
     "category": "Data",
     "capabilities": [
@@ -38,8 +38,8 @@
     "logo": "./assets/logo.png",
     "logoDark": "./assets/logo-dark.png",
     "defaultPrompt": [
-      "Set up Addison for Summation.",
-      "What data can Addison see?",
+      "Set up Summation.",
+      "What data can Summation see?",
       "Generate a report from my data."
     ]
   }

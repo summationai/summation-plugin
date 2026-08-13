@@ -26,14 +26,14 @@ That index lists current docs (connectors, integrations, features). Then:
 
 | Need | In this plugin |
 |---|---|
-| Ask a business question | Addison / `$addison-query` |
-| Explore tables | `$addison-catalog` |
-| Leadership write-up | `$addison-report` → export |
-| Check a report | `$addison-validate` |
-| Add a warehouse/database | `$addison-connect` (passwords in Summation **Connections**) |
-| Recurring emailed analysis | playbooks + `$addison-schedule` |
-| Workflow ideas from recent IDE chats | `$addison-opportunities` (local scan + catalog) |
-| Sign in / health | `$addison-signin`, `$addison-diagnose` |
+| Ask a business question | `$summation-query` or `ask_analyst` |
+| Explore tables | `$summation-catalog` |
+| Leadership write-up | `$summation-report` → export |
+| Check a report | `$summation-validate` |
+| Add a warehouse/database | `$summation-connect` (passwords in Summation **Connections**) |
+| Recurring emailed analysis | playbooks + `$summation-schedule` |
+| Workflow ideas from recent IDE chats | `$summation-opportunities` (local scan + catalog) |
+| Sign in / health | `$summation-signin`, `$summation-diagnose` |
 
 The **list of warehouses and features** still comes from `llms.txt` + linked docs, not from hardcoding here.
 

@@ -39,6 +39,6 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             dist/addison-plugin.zip \
-            --title "Addison $GITHUB_REF_NAME" \
+            --title "Summation $GITHUB_REF_NAME" \
             --generate-notes \
             --latest

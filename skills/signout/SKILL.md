@@ -3,7 +3,7 @@ name: signout
 description: Disconnect Claude from Summation — clear the hosted MCP session so the next use re-authenticates. Use when the user wants to disconnect, switch Summation user/org/environment, or clear a stale MCP session.
 ---
 
-# Addison Sign-out
+# Summation Sign-out
 
 Auth lives in Claude Code’s MCP client. Sign-out clears that session so the next Summation tool call re-prompts browser auth.
 
@@ -22,14 +22,14 @@ claude mcp remove -s user summation
 
 3. **Verify** before confirming: `claude mcp get summation` should fail or show no live session / no stale `Authorization` header. If it still shows a configured server with auth material, remove that user-scope entry and re-check.
 
-4. Report **disconnected** only after host disconnect or a successful remove **and** verification. Next `/addison:signin` re-runs the connect flow.
+4. Report **disconnected** only after host disconnect or a successful remove **and** verification. Next `/summation:signin` re-runs the connect flow.
 
 ## Internal vs external
 
 | | After sign-out |
 |---|---|
 | **External** | Next sign-in is production/plugin default only — no env picker. |
-| **Internal** (`ADDISON_PLUGIN_INTERNAL=1`) | Next sign-in asks **environment** again and re-applies the allowlisted MCP URL; **tenant** is whatever org they approve in the browser (switch org on the web app first if needed). |
+| **Internal** (`SUMMATION_PLUGIN_INTERNAL=1`) | Next sign-in asks **environment** again and re-applies the allowlisted MCP URL; **tenant** is whatever org they approve in the browser (switch org on the web app first if needed). |
 
 Env and tenant are both pinned at sign-in. Changing either always means sign out → sign in.
 

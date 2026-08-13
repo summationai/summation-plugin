@@ -1,6 +1,6 @@
 ---
 name: api
-description: "Use Summation through the hosted summation MCP server and Addison skills. Product questions, data work, reports, connections, and auth."
+description: "Use Summation through the hosted summation MCP server and Summation skills. Product questions, data work, reports, connections, and auth."
 ---
 
 # Summation (MCP-native)
@@ -65,7 +65,7 @@ See `signin` / `signout` and `references/auth.md`. Headerless plugin MCP; host O
 
 `scripts/sum_api.py` is **not** for normal customer flows. Prefer MCP + domain skills (`signin`, `diagnose`, …).
 
-If you must run the helper (internal/debug only), **never** use relative `../api/scripts/sum_api.py` — hosts often mount skills as `addison:api` / `addison:doctor`, so `../api` resolves outside the plugin and fails. Use the plugin root:
+If you must run the helper (internal/debug only), **never** use relative `../api/scripts/sum_api.py` — hosts often mount skills as `summation:api` / `summation:doctor`, so `../api` resolves outside the plugin and fails. Use the plugin root:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/api/scripts/sum_api.py" doctor

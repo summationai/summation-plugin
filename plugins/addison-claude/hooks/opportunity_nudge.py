@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SessionStart hook: rare soft invite to run /addison:opportunities.
+"""SessionStart hook: rare soft invite to run /summation:opportunities.
 
 Fail-soft — always exits 0 with valid hook JSON. Does not read chat history
 (that stays in the opportunities skill after user consent). Throttled to once
@@ -36,12 +36,12 @@ def main() -> None:
         os.environ.get("CLAUDE_PLUGIN_DATA") or (pathlib.Path.home() / ".summation")
     )
     try:
-        name = "addison"
+        name = "summation"
         manifest = pathlib.Path(root) / ".claude-plugin" / "plugin.json"
         if manifest.is_file():
             name = json.loads(manifest.read_text(encoding="utf-8")).get("name") or name
     except Exception:
-        name = "addison"
+        name = "summation"
 
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -82,8 +82,8 @@ def main() -> None:
         pass
 
     emit(
-        "Addison can suggest Summation workflows from recent local chats in this IDE "
-        "(scan stays on your machine). Say “suggest opportunities” or run /addison:opportunities."
+        "Summation can suggest workflows from recent local chats in this IDE "
+        "(scan stays on your machine). Say “suggest opportunities” or run /summation:opportunities."
     )
 
 

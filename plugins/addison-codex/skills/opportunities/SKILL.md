@@ -10,7 +10,7 @@ Turn **recent local IDE chats** + **what’s already in Summation** into a short
 ## When to run
 
 - User: “what can Summation do for me?”, “workflows”, “use cases”, “how can you help my work?”
-- `$addison-opportunities`
+- `$summation-opportunities`
 - Handoff from **`start`** after the data gate (only with consent)
 
 ## Privacy (say this once, plainly)
@@ -40,10 +40,10 @@ Caps are intentional. Prefer `--json` and turn themes into customer language you
 
 ### 2. Live Summation context (if signed in)
 
-MCP: `whoami` (signin if needed) → `list_data_connections` / `list_connection_datasets` / `search_tables` or `$addison-catalog` as needed.
+MCP: `whoami` (signin if needed) → `list_data_connections` / `list_connection_datasets` / `search_tables` or `$summation-catalog` as needed.
 
 - **Have named tables** → ground each idea in real names.  
-- **No data yet** → opportunities that start with `$addison-connect` or import, not fake schemas.
+- **No data yet** → opportunities that start with `$summation-connect` or import, not fake schemas.
 
 ### 3. Present 3–5 opportunities
 
@@ -57,7 +57,7 @@ Map themes roughly:
 
 | Scan theme | Prefer |
 |---|---|
-| Metrics / KPIs / “why did it move” | `query` (Addison for narrative) or ranked SQL with `ORDER BY` |
+| Metrics / KPIs / “why did it move” | `query` (analyst / `ask_analyst` for narrative) or ranked SQL with `ORDER BY` |
 | SQL / warehouse | `catalog` then `query`; `connect` if no source |
 | CSV / files | import / `connect` then catalog |
 | Board / status / narrative | `report` → offer `validate` |
@@ -75,4 +75,4 @@ When they choose a number → run that skill. Do not dump the whole menu again.
 - Prefer **catalog-grounded** next steps when MCP works.  
 - Product map for “is X supported?” still comes from `https://docs.summation.com/llms.txt` (see `../api/references/product.md`).  
 - Outcomes in user chat; no OpenAPI archaeology.  
-- If not signed in: still list opportunities; first step is often `$addison-signin` or `$addison-start`.
+- If not signed in: still list opportunities; first step is often `$summation-signin` or `$summation-start`.

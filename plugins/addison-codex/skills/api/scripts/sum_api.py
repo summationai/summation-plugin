@@ -41,10 +41,10 @@ ENV_OVERRIDE: str | None = None
 MCP_SERVER_NAME = "summation"
 
 # One artifact for everyone. Internal features (environment selection, M2M, profiles) unlock at
-# runtime via the ADDISON_PLUGIN_INTERNAL shell env var — NOT a build flag. This is only safe
+# runtime via SUMMATION_PLUGIN_INTERNAL (ADDISON_PLUGIN_INTERNAL still accepted) — NOT a build flag. This is only safe
 # because the environment allowlist below is enforced unconditionally in resolve_request_url():
 # the flag can widen what UX is offered, never the set of hosts the bearer credential can reach.
-ADDISON_INTERNAL_ENV = "ADDISON_PLUGIN_INTERNAL"
+INTERNAL_ENV_KEYS = ("SUMMATION_PLUGIN_INTERNAL", "ADDISON_PLUGIN_INTERNAL")
 
 # Every Summation environment the credential may reach. There is no free-form host anywhere.
 ALLOWED_ENVIRONMENTS: dict[str, dict[str, str]] = {
@@ -58,8 +58,9 @@ ALLOWED_BASE_URLS = {env["api"] for env in ALLOWED_ENVIRONMENTS.values()}
 
 
 def is_internal() -> bool:
-    """Internal edition, unlocked by the ADDISON_PLUGIN_INTERNAL shell env var (1/true/yes/on)."""
-    return os.environ.get(ADDISON_INTERNAL_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+    """Internal edition, unlocked by SUMMATION_PLUGIN_INTERNAL (or legacy ADDISON_PLUGIN_INTERNAL)."""
+    truthy = ("1", "true", "yes", "on")
+    return any(os.environ.get(key, "").strip().lower() in truthy for key in INTERNAL_ENV_KEYS)
 
 
 def skill_root() -> pathlib.Path:
@@ -289,7 +290,7 @@ def selected_env() -> str:
 def base_url() -> str:
     if not is_internal() and ENV_OVERRIDE and ENV_OVERRIDE != "prod":
         raise SystemExit(
-            f"--env {ENV_OVERRIDE} needs {ADDISON_INTERNAL_ENV}=1 "
+            f"--env {ENV_OVERRIDE} needs SUMMATION_PLUGIN_INTERNAL=1 "
             f"(the plugin is production-only unless internal mode is enabled)"
         )
     return ALLOWED_ENVIRONMENTS[selected_env()]["api"]
@@ -656,7 +657,7 @@ def auth_headers(required: bool = True) -> dict[str, str]:
         token = setting("SUM_API_ACCESS_TOKEN")
     if not token and required:
         if not is_internal():
-            raise SystemExit("Not signed in to Summation. Run $addison-signin to connect.")
+            raise SystemExit("Not signed in to Summation. Run $summation-signin to connect.")
         token = exchange_m2m_token()
     if not token:
         return {}
@@ -1630,7 +1631,7 @@ def add_env_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--env",
         choices=tuple(ALLOWED_ENVIRONMENTS),
-        help=f"Summation environment (internal only; production unless {ADDISON_INTERNAL_ENV}=1)",
+        help="Summation environment (internal only; production unless SUMMATION_PLUGIN_INTERNAL=1)",
     )
 
 

@@ -4,7 +4,7 @@
 #
 # Shared source of truth: skills/
 # Codex-only transforms:
-#   - $addison- mention syntax
+#   - $summation- mention syntax
 #   - .mcp.json → Codex shape ({"mcpServers": {...}, oauth_resource})
 #   - claude mcp … → codex mcp …
 #   - .codex-plugin/plugin.json + .agents/plugins/marketplace.json
@@ -146,7 +146,7 @@ def codex_text(text: str) -> str:
         "Run `codex mcp logout summation` **before** remove so the OAuth session is cleared while the server name still resolves.",
     )
     for before, after in (
-        ("/addison:", "$addison-"),
+        ("/summation:", "$summation-"),
         ("Claude Desktop", "Codex"),
         ("Claude Code", "Codex"),
         ("Claude", "Codex"),
@@ -179,7 +179,7 @@ for path in dst.rglob("*"):
             text = strip_skill_frontmatter(text)
         path.write_text(codex_text(text), encoding="utf-8")
     elif path.suffix == ".py":
-        path.write_text(path.read_text(encoding="utf-8").replace("/addison:", "$addison-"), encoding="utf-8")
+        path.write_text(path.read_text(encoding="utf-8").replace("/summation:", "$summation-"), encoding="utf-8")
 
 mcp_path = dst / ".mcp.json"
 if mcp_path.exists():
@@ -197,10 +197,10 @@ if mcp_path.exists():
 )
 
 plugin_json = {
-    "name": "addison",
+    "name": "summation",
     "version": version,
     "description": (
-        "Addison, Summation's AI data analyst, in Codex: ask data questions, search the catalog, "
+        "Summation's AI data analyst, in Codex: ask data questions, search the catalog, "
         "run bounded SQL, generate and validate reports, and export artifacts."
     ),
     "author": {"name": "Summation", "url": "https://summation.com"},
@@ -211,10 +211,10 @@ plugin_json = {
     "skills": "./skills/",
     "mcpServers": "./.mcp.json",
     "interface": {
-        "displayName": "Addison",
-        "shortDescription": "Ask Addison data questions from Codex.",
+        "displayName": "Summation",
+        "shortDescription": "Ask Summation data questions from Codex.",
         "longDescription": (
-            "Addison brings Summation's AI data analyst into Codex for governed data questions, "
+            "The Summation plugin brings the analyst into Codex for governed data questions, "
             "catalog discovery, SQL, reports, validation, and scheduling. Skills orchestrate the "
             "hosted Summation MCP server; auth is browser OAuth on first use (same product as Claude)."
         ),
@@ -227,8 +227,8 @@ plugin_json = {
         "logo": "./assets/logo.png",
         "logoDark": "./assets/logo-dark.png",
         "defaultPrompt": [
-            "Set up Addison for Summation.",
-            "What data can Addison see?",
+            "Set up Summation.",
+            "What data can Summation see?",
             "Generate a report from my data.",
         ],
     },
@@ -240,7 +240,7 @@ for rel in ("assets/icon.png", "assets/logo.png", "assets/logo-dark.png"):
 write_json(dst / ".codex-plugin" / "plugin.json", plugin_json)
 
 entry = {
-    "name": "addison",
+    "name": "summation",
     "source": {"source": "local", "path": "./plugins/addison-codex"},
     "policy": {"installation": "AVAILABLE", "authentication": "ON_USE"},
     "category": "Data",
@@ -253,7 +253,7 @@ marketplace.setdefault("name", "summation")
 marketplace.setdefault("interface", {"displayName": "Summation"})
 plugins = marketplace.setdefault("plugins", [])
 for index, existing in enumerate(plugins):
-    if isinstance(existing, dict) and existing.get("name") == entry["name"]:
+    if isinstance(existing, dict) and existing.get("name") in {entry["name"], "addison"}:
         plugins[index] = entry
         break
 else:

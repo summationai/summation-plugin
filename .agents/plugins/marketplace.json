@@ -5,7 +5,7 @@
   },
   "plugins": [
     {
-      "name": "addison",
+      "name": "summation",
       "source": {
         "source": "local",
         "path": "./plugins/addison-codex"

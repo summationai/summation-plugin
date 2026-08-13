@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SessionStart hook: nudge (at most once/day) when a newer Addison plugin version is
+"""SessionStart hook: nudge (at most once/day) when a newer Summation plugin version is
 published. Fail-soft by contract — always exits 0 with valid hook JSON and never blocks
 session start. Uses only the stdlib (python3 is already required by the plugin's helper);
 no jq/curl dependency."""
@@ -38,7 +38,7 @@ def main() -> None:
         manifest = json.loads((pathlib.Path(root) / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     except Exception:
         emit()
-    name = manifest.get("name") or "addison"
+    name = manifest.get("name") or "summation"
     current = manifest.get("version")
     if not current:
         emit()
@@ -66,7 +66,7 @@ def main() -> None:
     except Exception:
         pass
 
-    url = os.environ.get("ADDISON_VERSION_CHECK_URL") or f"{REPO_RAW}/{market_file}"
+    url = os.environ.get("SUMMATION_VERSION_CHECK_URL") or os.environ.get("ADDISON_VERSION_CHECK_URL") or f"{REPO_RAW}/{market_file}"
     try:
         with urllib.request.urlopen(url, timeout=2, context=ssl.create_default_context()) as resp:
             market = json.loads(resp.read().decode("utf-8"))
@@ -79,7 +79,7 @@ def main() -> None:
 
     if version_tuple(latest) > version_tuple(current):
         emit(
-            f"Addison {latest} is available (you have {current}). Update with "
+            f"Summation plugin {latest} is available (you have {current}). Update with "
             f"`claude plugin marketplace update {market_name} && claude plugin update {name}@{market_name}`, "
             f"then restart Claude Code."
         )
