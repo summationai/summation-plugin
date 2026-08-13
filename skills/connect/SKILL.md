@@ -1,7 +1,6 @@
 ---
 name: connect
 description: Connect a data source (Postgres, Snowflake, BigQuery, etc.) to Summation. Use when the user wants to add a warehouse or database. Keep secrets out of chat; attach tables with clear names.
-argument-hint: "[postgres|snowflake|bigquery|... or describe the source]"
 ---
 
 # Summation Connect
@@ -60,4 +59,4 @@ Prefer `import_file_to_table` (and related file tools) when the user has files i
 
 ## Auth
 
-MCP auth failure → `/summation:signin`.
+MCP auth failure → the `signin` skill.

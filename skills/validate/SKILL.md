@@ -1,7 +1,6 @@
 ---
 name: validate
 description: Verify a Summation report against its sources before sharing. Use before external or executive distribution, or when the user asks if a report is solid.
-argument-hint: <report id or name> [--project <name|id>]
 ---
 
 # Summation Validate
@@ -21,5 +20,5 @@ MCP only. Validation can take a while — tell the user it’s running; don’t 
 
 - Never soften flags.  
 - Don’t call a report valid if validation failed.  
-- After `/summation:report`, offer this proactively.  
+- After the `report` skill, offer this proactively.  
 - No REST helper.

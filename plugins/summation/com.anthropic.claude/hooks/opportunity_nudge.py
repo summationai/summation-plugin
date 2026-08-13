@@ -83,7 +83,7 @@ def main() -> None:
 
     emit(
         "Summation can suggest workflows from recent local chats in this IDE "
-        "(scan stays on your machine). Say “suggest opportunities” or run /summation:opportunities."
+        "(scan stays on your machine). Say “suggest opportunities” or run the opportunities skill."
     )
 
 

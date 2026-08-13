@@ -13,4 +13,4 @@ This skill was **renamed to `diagnose`**. Do **not** run `python3 ../api/scripts
 2. Auth and health checks use MCP only: **`whoami`** on server **`summation`**, then list projects/connections/tables.  
 3. If not signed in → **`signin`** skill (browser OAuth). Never mint tokens with the legacy helper for day-to-day use.
 
-Slash: `/summation:diagnose` (or this alias `/summation:doctor` if the host still registers it).
+Invoke the `diagnose` skill (`doctor` is an alias if the host still registers it).

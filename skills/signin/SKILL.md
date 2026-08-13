@@ -101,7 +101,7 @@ Same browser prompt as external, for server **`summation`**. Then **`whoami`**.
 
 ### I5. Confirm
 
-Report: **environment**, identity, **org/tenant**, scopes. Note that switching either env or tenant requires `/summation:signout` then this flow again.
+Report: **environment**, identity, **org/tenant**, scopes. Note that switching either env or tenant requires the `signout` skill, then this flow again.
 
 ---
 

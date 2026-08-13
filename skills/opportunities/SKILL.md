@@ -10,7 +10,7 @@ Turn **recent local IDE chats** + **what’s already in Summation** into a short
 ## When to run
 
 - User: “what can Summation do for me?”, “workflows”, “use cases”, “how can you help my work?”
-- `/summation:opportunities`
+- the `opportunities` skill
 - Handoff from **`start`** after the data gate (only with consent)
 
 ## Privacy (say this once, plainly)
@@ -27,12 +27,12 @@ Turn **recent local IDE chats** + **what’s already in Summation** into a short
 Run the bundled scanner (local only, no network). Prefer the plugin root when the host sets it:
 
 ```bash
-# Claude Code (plugin root set):
-python3 "$CLAUDE_PLUGIN_ROOT/skills/opportunities/scripts/scan_sessions.py" \
+# Prefer the spec plugin root; fall back to Claude's name for the same path:
+python3 "${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/opportunities/scripts/scan_sessions.py" \
   --days 14 --limit-sessions 20 --json \
   --project-substr "$(basename "$(pwd)")"
 
-# Otherwise: path relative to this skill’s scripts/ directory in the installed package:
+# If neither variable is set: path relative to this skill’s scripts/ directory:
 python3 skills/opportunities/scripts/scan_sessions.py --days 14 --limit-sessions 20 --json
 ```
 
@@ -40,10 +40,10 @@ Caps are intentional. Prefer `--json` and turn themes into customer language you
 
 ### 2. Live Summation context (if signed in)
 
-MCP: `whoami` (signin if needed) → `list_data_connections` / `list_connection_datasets` / `search_tables` or `/summation:catalog` as needed.
+MCP: `whoami` (signin if needed) → `list_data_connections` / `list_connection_datasets` / `search_tables` or the `catalog` skill as needed.
 
 - **Have named tables** → ground each idea in real names.  
-- **No data yet** → opportunities that start with `/summation:connect` or import, not fake schemas.
+- **No data yet** → opportunities that start with the `connect` skill or import, not fake schemas.
 
 ### 3. Present 3–5 opportunities
 
@@ -75,4 +75,4 @@ When they choose a number → run that skill. Do not dump the whole menu again.
 - Prefer **catalog-grounded** next steps when MCP works.  
 - Product map for “is X supported?” still comes from `https://docs.summation.com/llms.txt` (see `../api/references/product.md`).  
 - Outcomes in user chat; no OpenAPI archaeology.  
-- If not signed in: still list opportunities; first step is often `/summation:signin` or `/summation:start`.
+- If not signed in: still list opportunities; first step is often the `signin` or `start` skill.

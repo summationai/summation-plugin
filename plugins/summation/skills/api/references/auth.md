@@ -29,7 +29,9 @@ printf '%s' "${SUMMATION_PLUGIN_INTERNAL:-${ADDISON_PLUGIN_INTERNAL:-}}"
 Never accept free-form hosts. Internal sign-in re-points with:
 
 ```bash
+# Claude Code:
 claude mcp add -s user --transport http summation 'https://…'
+# Codex:
 codex mcp add summation --url 'https://…'
 ```
 
@@ -64,7 +66,9 @@ Do **not** pass `--header`, an `Authorization` header, or any bearer token — t
 Old user-scope entries that inject an `Authorization` header (device-login `sm_dls_…` style) fight OAuth:
 
 ```bash
+# Claude Code:
 claude mcp remove -s user summation
+# Codex:
 codex mcp logout summation
 codex mcp remove summation
 ```
@@ -76,7 +80,7 @@ Then the `signin` skill.
 | Symptom | Fix |
 |---|---|
 | Tools missing | Enable summation; restart |
-| 401 | `/summation:signin` |
+| 401 | the `signin` skill |
 | Wrong env (internal) | Sign out; sign in; pick env again |
 | Wrong tenant | Switch org on web app; sign out; sign in |
 | Stale `Authorization` header on the MCP entry | Remove user-scope override; re-auth headerless |

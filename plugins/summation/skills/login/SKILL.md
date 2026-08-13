@@ -11,4 +11,4 @@ This skill was **renamed to `signin`**. Do **not** run `python3 ../api/scripts/s
 
 Follow the **`signin`** skill: host MCP OAuth for server **`summation`**, then confirm with **`whoami`**.
 
-Slash: `/summation:signin` (or this alias `/summation:login` if registered).
+Invoke the `signin` skill (`login` is an alias if the host still registers it).

@@ -26,7 +26,7 @@ codex mcp remove summation
 
 3. **Verify** before confirming: `claude mcp get summation` or `codex mcp get summation` should fail or show no live session / no stale `Authorization` header. If it still shows a configured server with auth material, remove that user-scope entry and re-check.
 
-4. Report **disconnected** only after host disconnect or a successful remove **and** verification. Next `/summation:signin` re-runs the connect flow.
+4. Report **disconnected** only after host disconnect or a successful remove **and** verification. Next, the `signin` skill re-runs the connect flow.
 
 ## Internal vs external
 

@@ -120,7 +120,7 @@ user approval before publishing anywhere.
 
 CI regenerates the package and fails on drift. **Never hand-edit** `plugins/summation` (see `plugins/summation/GENERATED.md`).
 
-The package is spec-only. Claude hooks live under `com.anthropic.claude/`. Codex logos live under `com.openai.codex/`. Repo-root `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` are marketplace catalogs, not plugin manifests.
+The package is spec-only. Claude hooks are authored under `packaging/com.anthropic.claude/` and copied to `hooks/` (Claude SessionStart discovery) plus `com.anthropic.claude/hooks/`. Codex listing metadata and `oauth_resource` live in `extensions.com.openai.codex`. Repo-root `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` are marketplace catalogs, not plugin manifests.
 
 ## Release
 

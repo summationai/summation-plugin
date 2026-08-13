@@ -28,7 +28,7 @@ Then give a short source map and continue.
 
 **Gate closed** only when **both** are missing — no attached datasets **and** no imported tables. Then stop and offer:
 
-1. **Connect a database/warehouse** → `/summation:connect` (confirm sources via `llms.txt` / product docs)  
+1. **Connect a database/warehouse** → the `connect` skill (confirm sources via `llms.txt` / product docs)  
 2. **Import files** into a project → file import tools, then re-list tables  
 3. **They already connected or imported in the web app** → re-list and continue  
 
@@ -47,7 +47,7 @@ After the gate is open **or** after a clear “no data yet” path, offer **once
 > I can also look at recent local chats in this IDE for workflows Summation can take over (scan stays on your machine). Want that?
 
 - **Yes** → run the **`opportunities`** skill (consent + local scan + catalog-grounded list). Prefer their pick for step 4.  
-- **No** → one line: anytime `/summation:opportunities` — then continue.  
+- **No** → one line: anytime the `opportunities` skill — then continue.  
 - Do **not** scan without consent. Do **not** dump transcripts.
 
 ### Step 4 — First report

@@ -70,7 +70,7 @@ See `signin` / `signout` and `references/auth.md`. Headerless plugin MCP; host O
 If you must run the helper (internal/debug only), **never** use relative `../api/scripts/sum_api.py` — hosts often mount skills as `summation:api` / `summation:doctor`, so `../api` resolves outside the plugin and fails. Use the plugin root:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/api/scripts/sum_api.py" doctor
+python3 "${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/api/scripts/sum_api.py" doctor
 ```
 
-If `CLAUDE_PLUGIN_ROOT` is unset, resolve from the installed package path the host shows for this skill — still under `…/skills/api/scripts/sum_api.py`, not `…/plugins/api/…`.
+If both `PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` are unset, resolve from the installed package path the host shows for this skill — still under `…/skills/api/scripts/sum_api.py`, not `…/plugins/api/…`.

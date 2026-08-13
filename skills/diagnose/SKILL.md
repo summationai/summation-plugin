@@ -14,7 +14,7 @@ Call **`whoami`** on **`summation`**.
 | Result | What to tell the user |
 |---|---|
 | Identity + org | “You’re signed in as … in org …” |
-| Needs sign-in / 401 | Hand off to `/summation:signin` |
+| Needs sign-in / 401 | Hand off to the `signin` skill |
 | Tools missing | Enable/reload the **summation** plugin and restart the host |
 
 ## 2. What’s visible
@@ -28,7 +28,7 @@ Short card:
 - Tables ready for analysis (friendly names)  
 - 2–3 sample questions that fit **those** tables  
 
-If empty: “You’re signed in, but there’s no business data yet” → `/summation:connect` or Connections in the web app.
+If empty: “You’re signed in, but there’s no business data yet” → the `connect` skill or Connections in the web app.
 
 ## 3. Interpreting problems (user language)
 

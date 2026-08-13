@@ -10,6 +10,7 @@ import pathlib
 import re
 import shutil
 import sys
+from urllib.parse import urlsplit
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SKILLS = ROOT / "skills"
@@ -80,6 +81,12 @@ def validate_spec(plugin: dict, mcp: dict) -> None:
     }
     if extra:
         die(f"plugin.json has non-portable fields: {sorted(extra)}")
+    version = plugin.get("version")
+    if not isinstance(version, str) or not version.strip():
+        die("packaging/plugin.json version must be a non-empty string")
+    description = plugin.get("description")
+    if not isinstance(description, str) or not description.strip():
+        die("packaging/plugin.json description must be a non-empty string")
     if mcp.get("$schema") != SPEC_MCP_SCHEMA:
         die("packaging/mcp.json $schema must be the Agent Plugins 1.0.0 MCP schema")
     if set(mcp) != {"$schema", "mcpServers"}:
@@ -155,22 +162,35 @@ def main() -> None:
             die(f"assets/ must include {name}")
     refuse_secrets(SKILLS)
     refuse_secrets(PACKAGING)
+    hooks_src = PACKAGING / "com.anthropic.claude" / "hooks"
+    if not hooks_src.is_dir():
+        die("missing packaging/com.anthropic.claude/hooks/")
 
     plugin = json.loads((PACKAGING / "plugin.json").read_text(encoding="utf-8"))
     spec_mcp = json.loads((PACKAGING / "mcp.json").read_text(encoding="utf-8"))
     validate_spec(plugin, spec_mcp)
     version = plugin["version"]
     url = mcp_url(spec_mcp)
+    origin = urlsplit(url)
+    expected_resource = f"{origin.scheme}://{origin.netloc}" if origin.scheme and origin.netloc else url
+    declared_resource = (
+        (plugin.get("extensions") or {}).get("com.openai.codex") or {}
+    ).get("oauth_resource")
+    if declared_resource and declared_resource != expected_resource:
+        die(
+            "extensions.com.openai.codex.oauth_resource must match the mcp.json origin "
+            f"({expected_resource})"
+        )
 
     if DST.exists():
         shutil.rmtree(DST)
     DST.mkdir(parents=True)
 
     copytree(SKILLS, DST / "skills")
-    copytree(
-        PACKAGING / "com.anthropic.claude" / "hooks",
-        DST / "com.anthropic.claude" / "hooks",
-    )
+    # Root hooks/ is what Claude Code auto-discovers today. Spec copy stays
+    # under the Claude extension namespace.
+    copytree(hooks_src, DST / "hooks")
+    copytree(hooks_src, DST / "com.anthropic.claude" / "hooks")
 
     assets_dst = DST / "com.openai.codex" / "assets"
     assets_dst.mkdir(parents=True)
@@ -188,18 +208,15 @@ def main() -> None:
         "- Author skills in **`skills/`**.\n"
         "- Bump version in **`packaging/plugin.json`**.\n"
         "- MCP URL lives in **`packaging/mcp.json`**.\n"
-        "- Claude hooks live in **`packaging/com.anthropic.claude/hooks/`**.\n"
+        "- Claude hooks live in **`packaging/com.anthropic.claude/hooks/`** "
+        "(copied to `hooks/` for Claude SessionStart discovery).\n"
         "- Run `./build-plugins.sh`.\n"
         "- CI fails if this tree drifts from source.\n",
         encoding="utf-8",
     )
 
     assert_no_legacy_shims(DST)
-    update_claude_marketplace(
-        version,
-        "Summation's AI data analyst: ask data questions, search the catalog, "
-        "run bounded SQL, generate and validate reports. MCP-native.",
-    )
+    update_claude_marketplace(version, plugin["description"])
     update_codex_marketplace()
     print(f"built {DST.relative_to(ROOT)} (version {version})")
     print("mcp:", url)

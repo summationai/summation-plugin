@@ -1,7 +1,6 @@
 ---
 name: report
 description: Generate a Summation report from a question and export it (Markdown, PDF, or DOCX). Use for analyses, board updates, or exportable documents over Summation data.
-argument-hint: <question> [--project <name|id>] [--format markdown|pdf|docx]
 ---
 
 # Summation Report
@@ -18,7 +17,7 @@ MCP tools only. Generation can take a few minutes — keep the user informed.
    - Follow status until complete (or a clear failure).  
 4. **Verify:** `export_report` (or get content) and confirm it’s **non-empty** and looks like the real report.  
 5. **Export format:** default **markdown** unless they asked pdf/docx. No internal cite markup.  
-6. **Hand back:** title, short summary, offer `/summation:validate` before external share.
+6. **Hand back:** title, short summary, offer the `validate` skill before external share.
 
 ## Rules
 
