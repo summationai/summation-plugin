@@ -14,22 +14,22 @@ https://mcp.summation.com/mcp
 
 Two different names:
 
-1. **GitHub repo** (where the marketplace catalog lives) — still `summationai/addison-plugin` until that repo is renamed to `summation-plugin`.
+1. **GitHub repo** — `summationai/summation-plugin` (hosts the marketplace catalog).
 2. **Plugin @ marketplace** — install plugin `summation` from marketplace `summationai`.
 
 ```
-/plugin marketplace add summationai/addison-plugin
+/plugin marketplace add summationai/summation-plugin
 /plugin install summation@summationai
 ```
 
 Then `/summation:signin` — or run `/summation:start` / ask a data question and complete the browser sign-in when Claude prompts you.
 
-0.11.0 renamed the plugin from `addison` to `summation` (slash commands `/summation:…`). If you still have `addison@summation`, uninstall it and install `summation@summationai`. After the GitHub repo rename, the first line becomes `summationai/summation-plugin`.
+0.11.0 renamed the plugin from `addison` to `summation` (slash commands `/summation:…`). If you still have `addison@summation` or the old `addison-plugin` marketplace, remove them and add `summationai/summation-plugin`.
 
 **claude.ai / Claude Desktop (org admins):** Admin console → Plugins → Add plugins → *Sync from GitHub* (this repo) or *Upload a file* using the latest release zip:
 
 ```
-https://github.com/summationai/addison-plugin/releases/latest/download/addison-plugin.zip
+https://github.com/summationai/summation-plugin/releases/latest/download/summation-plugin.zip
 ```
 
 Members then install from the org library.
@@ -37,7 +37,7 @@ Members then install from the org library.
 **Codex (CLI):**
 
 ```
-codex plugin marketplace add summationai/addison-plugin
+codex plugin marketplace add summationai/summation-plugin
 codex plugin install summation
 ```
 
@@ -49,7 +49,7 @@ Layout matches the `openai/plugins` convention: marketplace catalog at `.agents/
 
 | Field | Value |
 |---|---|
-| **Source** | `summationai/addison-plugin` |
+| **Source** | `summationai/summation-plugin` |
 | **Git ref** | `main` |
 | **Sparse paths** | leave **empty** (clear the default `plugins/codex` placeholder) |
 
@@ -113,7 +113,7 @@ user approval before publishing anywhere.
 ./build-plugins.sh        # Claude + Codex from skills/
 claude --plugin-dir ./plugins/addison-claude
 claude plugin validate ./plugins/addison-claude
-./build-zip.sh            # dist/addison-plugin.zip for Desktop upload
+./build-zip.sh            # dist/summation-plugin.zip for Desktop upload
 ```
 
 CI regenerates both packages and fails on drift. **Never hand-edit** `plugins/addison-*/skills` or `plugins/addison-codex` (see `plugins/addison-codex/GENERATED.md`).
@@ -122,6 +122,6 @@ CI regenerates both packages and fails on drift. **Never hand-edit** `plugins/ad
 
 1. Bump `version` in `plugins/addison-claude/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
 2. Run `./build-plugins.sh`, commit, merge to `main`.
-3. Tag matching the version (for example `v0.11.0`) and push the tag. The release workflow publishes `addison-plugin.zip` as **Latest**.
+3. Tag matching the version (for example `v0.11.0`) and push the tag. The release workflow publishes `summation-plugin.zip` as **Latest**.
 
-`https://github.com/summationai/addison-plugin/releases/latest/download/addison-plugin.zip`
+`https://github.com/summationai/summation-plugin/releases/latest/download/summation-plugin.zip`

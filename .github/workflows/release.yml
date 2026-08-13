@@ -4,7 +4,7 @@ name: Release plugin zip
 # Tag with `vX.Y.Z` (matching plugins/addison-claude/.claude-plugin/plugin.json) and push it:
 #   git tag v0.8.2 && git push origin v0.8.2
 # GitHub marks the newest release "Latest", so admins can always fetch:
-#   https://github.com/summationai/addison-plugin/releases/latest/download/addison-plugin.zip
+#   https://github.com/summationai/summation-plugin/releases/latest/download/summation-plugin.zip
 
 on:
   push:
@@ -38,7 +38,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
-            dist/addison-plugin.zip \
+            dist/summation-plugin.zip \
             --title "Summation $GITHUB_REF_NAME" \
             --generate-notes \
             --latest

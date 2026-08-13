@@ -11,7 +11,7 @@ import sys
 import time
 import urllib.request
 
-REPO_RAW = "https://raw.githubusercontent.com/summationai/addison-plugin/main/.claude-plugin"
+REPO_RAW = "https://raw.githubusercontent.com/summationai/summation-plugin/main/.claude-plugin"
 
 
 def emit(system_message: str | None = None) -> None:
