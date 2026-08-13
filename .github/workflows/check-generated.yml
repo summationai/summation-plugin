@@ -1,7 +1,7 @@
 name: Check generated plugin packages
 
-# Anti-drift guard: plugins/*/skills are GENERATED from skills/ (canonical).
-# Regenerates Claude + Codex packages and fails if committed output differs.
+# Anti-drift guard: plugins/summation is GENERATED from skills/ + packaging/.
+# Regenerates the package and fails if committed output differs.
 
 on:
   pull_request:
@@ -14,20 +14,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Regenerate Claude and Codex packages
+      - name: Regenerate plugin package
         run: |
           ./build-plugins.sh
 
-      - name: Fail if generated packages drift from skills/
+      - name: Fail if generated package drifts from skills/ + packaging/
         run: |
           find plugins -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
           # Tracked diffs and new untracked generated files both count as drift.
           # git diff alone misses a brand-new skill/reference that was never committed.
           if ! git diff --quiet || [ -n "$(git status --porcelain --untracked-files=all)" ]; then
-            echo "::error::Generated plugins are out of sync with skills/."
-            echo "Edit skills/, run ./build-plugins.sh, then commit."
+            echo "::error::Generated plugin is out of sync with skills/ + packaging/."
+            echo "Edit skills/ or packaging/, run ./build-plugins.sh, then commit."
             git --no-pager status --porcelain --untracked-files=all
             git --no-pager diff --stat
             exit 1
           fi
-          echo "Generated Claude + Codex packages match skills/."
+          echo "Generated plugins/summation matches skills/ + packaging/."

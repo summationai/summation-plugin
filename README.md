@@ -24,7 +24,9 @@ Two different names:
 
 Then `/summation:signin` — or run `/summation:start` / ask a data question and complete the browser sign-in when Claude prompts you.
 
-0.11.0 renamed the plugin from `addison` to `summation` (slash commands `/summation:…`). If you still have `addison@summation` or the old `addison-plugin` marketplace, remove them and add `summationai/summation-plugin`.
+**1.0.0 is a breaking package change.** The installable tree is an [Agent Plugins](https://agent-plugins.org/) 1.0.0 directory (`plugin.json` + `mcp.json` + `skills/`). There is no `.claude-plugin` / `.codex-plugin` manifest inside the package, and no `addison` plugin id. Hosts that only load those older manifests cannot install this version.
+
+Two host-discovery files ride along until the hosts read the spec files directly: root `hooks/` (Claude SessionStart) and root `.mcp.json` (Claude MCP registration). Both are generated from `packaging/`. Claude Code loads `skills/` from the spec tree but does not yet register servers from `mcp.json`, so without `.mcp.json` the skills appear and then fail at their first tool call.
 
 **claude.ai / Claude Desktop (org admins):** Admin console → Plugins → Add plugins → *Sync from GitHub* (this repo) or *Upload a file* using the latest release zip:
 
@@ -43,11 +45,11 @@ codex plugin install summation
 
 Marketplace id is **summationai**; plugin id is **summation** (same as Claude: `summation@summationai`).
 
-Then `$summation-signin` or any data ask. Skills use `$summation-…` mentions (not `/summation:…`). MCP is packaged with the plugin; auth is the same browser flow (`codex mcp login summation` if needed).
+Then `$summation-signin` or any data ask. Skills are the same portable tree; Codex mentions are `$summation-…`. MCP is `mcp.json` (streamable HTTP). Auth is the same browser flow (`codex mcp login summation` if needed).
 
 **Codex desktop app (Add plugin marketplace):**
 
-Layout matches the `openai/plugins` convention: marketplace catalog at `.agents/plugins/marketplace.json`, plugin package at `plugins/summation-codex/`.
+Layout matches the `openai/plugins` convention: marketplace catalog at `.agents/plugins/marketplace.json`, plugin package at `plugins/summation/`.
 
 | Field | Value |
 |---|---|
@@ -61,27 +63,29 @@ If you must sparse-checkout, include **both** the catalog and the package (not t
 
 ```text
 .agents/plugins
-plugins/summation-codex
+plugins/summation
 ```
 
-Sparse path `plugins/summation-codex` alone fails with “marketplace root does not contain a supported manifest” — that directory is the plugin, not the marketplace.
+Sparse path `plugins/summation` alone fails with “marketplace root does not contain a supported manifest” — that directory is the plugin, not the marketplace.
 
 ## Contents
 
-| Skill | Invoke | Does |
-|---|---|---|
-| `start` | `/summation:start` | guided onboarding: connect → map data → meet the analyst → first report |
-| `opportunities` | `/summation:opportunities` | suggest workflows from recent local chats + live catalog (consent first) |
-| `api` | model-invoked | MCP tool map + safety rules |
-| `signin` | `/summation:signin` | connect or re-authenticate Summation (`login` is an alias) |
-| `signout` | `/summation:signout` | disconnect Summation (`logout` is an alias) |
-| `diagnose` | `/summation:diagnose` | check connectivity and what data is visible (`doctor` is an alias) |
-| `report` | `/summation:report` | generate a report → export markdown/PDF/DOCX |
-| `validate` | `/summation:validate` | verify a report before sharing |
-| `query` | `/summation:query` | read-only query or open-ended analysis |
-| `catalog` | `/summation:catalog` | search tables, views, catalog |
-| `connect` | `/summation:connect` | add a data source (secrets stay in the Summation web app) |
-| `schedule` | `/summation:schedule` | recurring playbook runs with email delivery |
+Claude Code invokes a skill as `/summation:<name>`; Codex invokes it as `$summation-<name>`. `api` is model-invoked only.
+
+| Skill | Does |
+|---|---|
+| `start` | guided onboarding: connect → map data → meet the analyst → first report |
+| `opportunities` | suggest workflows from recent local chats + live catalog (consent first) |
+| `api` | MCP tool map + safety rules |
+| `signin` | connect or re-authenticate Summation (`login` is an alias) |
+| `signout` | disconnect Summation (`logout` is an alias) |
+| `diagnose` | check connectivity and what data is visible (`doctor` is an alias) |
+| `report` | generate a report → export markdown/PDF/DOCX |
+| `validate` | verify a report before sharing |
+| `query` | read-only query or open-ended analysis |
+| `catalog` | search tables, views, catalog |
+| `connect` | add a data source (secrets stay in the Summation web app) |
+| `schedule` | recurring playbook runs with email delivery |
 
 Credentials for the happy path live in the host MCP client, not in this repo. Do not commit config files or tokens.
 
@@ -95,35 +99,37 @@ Credentials for the happy path live in the host MCP client, not in this repo. Do
 When working on data analysis, metrics, or report commentary, use the Summation
 plugin first (catalog discovery before SQL; never guess table names). Prefer
 exported report content over raw internals, cite request_ids on failures, and
-run /summation:validate before any report is shared externally. Drafts need explicit
+run the `validate` skill before any report is shared externally. Drafts need explicit
 user approval before publishing anywhere.
 ```
 
 ## Development
 
-**One skill tree, two packages** (DRY authoring):
+**One skill tree, one package** ([Agent Plugins](https://agent-plugins.org/) 1.0.0):
 
 | Path | Role |
 |---|---|
 | **`skills/`** | **Source of truth** — edit skills here only |
-| **`assets/`** | Brand images for Codex (`logo.png`, `logo-dark.png`, `icon.png`) — copied into the Codex package by `./build-codex.sh` |
-| `plugins/summation-claude/` | Claude package (skills copied in by `./build-claude.sh`) |
-| `plugins/summation-codex/` | Codex package (generated: mention syntax + MCP shape + assets) |
+| **`packaging/plugin.json`** | Portable manifest + version |
+| **`packaging/mcp.json`** | Portable MCP URL (`streamable-http`) |
+| **`packaging/com.anthropic.claude/`** | Claude hooks |
+| **`assets/`** | Brand images (`logo.png`, `logo-dark.png`, `icon.png`) |
+| `plugins/summation/` | Generated Agent Plugins 1.0.0 package |
 
 ```bash
-# edit skills/…
-./build-plugins.sh        # Claude + Codex from skills/
-claude --plugin-dir ./plugins/summation-claude
-claude plugin validate ./plugins/summation-claude
-./build-zip.sh            # dist/summation-plugin.zip for Desktop upload
+# edit skills/ or packaging/…
+./build-plugins.sh        # plugins/summation from skills/ + packaging/
+./build-zip.sh            # dist/summation-plugin.zip
 ```
 
-CI regenerates both packages and fails on drift. **Never hand-edit** `plugins/summation-*/skills` or `plugins/summation-codex` (see `plugins/summation-codex/GENERATED.md`).
+CI regenerates the package and fails on drift. **Never hand-edit** `plugins/summation` (see `plugins/summation/GENERATED.md`).
+
+The package is spec-only. Claude hooks are authored under `packaging/com.anthropic.claude/` and copied to `hooks/` (Claude SessionStart discovery) plus `com.anthropic.claude/hooks/`. Codex listing metadata and `oauth_resource` live in `extensions.com.openai.codex`. Repo-root `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` are marketplace catalogs, not plugin manifests.
 
 ## Release
 
-1. Bump `version` in `plugins/summation-claude/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
+1. Bump `version` in `packaging/plugin.json`.
 2. Run `./build-plugins.sh`, commit, merge to `main`.
-3. Tag matching the version (for example `v0.11.0`) and push the tag. The release workflow publishes `summation-plugin.zip` as **Latest**.
+3. Tag matching the version (for example `v1.0.0`) and push the tag. The release workflow publishes `summation-plugin.zip` as **Latest**.
 
 `https://github.com/summationai/summation-plugin/releases/latest/download/summation-plugin.zip`

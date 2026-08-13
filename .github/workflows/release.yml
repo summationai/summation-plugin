@@ -1,7 +1,7 @@
 name: Release plugin zip
 
 # Publish the Claude Desktop "Upload a file" artifact on every version tag.
-# Tag with `vX.Y.Z` (matching plugins/summation-claude/.claude-plugin/plugin.json) and push it:
+# Tag with `vX.Y.Z` (matching packaging/plugin.json) and push it:
 #   git tag v0.8.2 && git push origin v0.8.2
 # GitHub marks the newest release "Latest", so admins can always fetch:
 #   https://github.com/summationai/summation-plugin/releases/latest/download/summation-plugin.zip
@@ -22,7 +22,7 @@ jobs:
 
       - name: Verify tag matches plugin version
         run: |
-          version=$(python3 -c "import json; print(json.load(open('plugins/summation-claude/.claude-plugin/plugin.json'))['version'])")
+          version=$(python3 -c "import json; print(json.load(open('packaging/plugin.json'))['version'])")
           tag="${GITHUB_REF_NAME#v}"
           if [ "$version" != "$tag" ]; then
             echo "::error::tag v$tag does not match plugin.json version $version"
