@@ -7,7 +7,7 @@ The host MCP client authenticates to the hosted Summation MCP server. The plugin
 | | External (default) | Internal |
 |---|---|---|
 | Gate | (none) | Shell: `SUMMATION_PLUGIN_INTERNAL=1` (or `ADDISON_PLUGIN_INTERNAL`) when launching the host CLI |
-| Environments | One — plugin `.mcp.json` URL | User picks **prod** / **staging** / **sandbox** at sign-in |
+| Environments | One — plugin `mcp.json` URL | User picks **prod** / **staging** / **sandbox** at sign-in |
 | Tenant | Org approved in browser | Same; skill tells user to switch org on the web app first if needed |
 | MCP URL | Bundled headerless entry | User-scope headerless `summation` pointed at the chosen env’s allowlisted URL |
 | Skill prompts | Never ask env or tenant | Ask env; explain tenant binding |
@@ -30,17 +30,18 @@ Never accept free-form hosts. Internal sign-in re-points with:
 
 ```bash
 claude mcp add -s user --transport http summation 'https://…'
+codex mcp add summation --url 'https://…'
 ```
 
 Do **not** pass `--header`, an `Authorization` header, or any bearer token — the host’s OAuth flow owns the credential.
 
 ## Happy path (both)
 
-1. Plugin loads headerless `.mcp.json` (default env for external).
+1. Plugin loads headerless `mcp.json` (default env for external).
 2. First tool call / explicit authenticate → MCP OAuth → browser → host stores token.
 3. Tools run; identity/tenant from server-side claims.
 
-**Default:** bundled `.mcp.json` points at production (`https://mcp.summation.com/mcp`).
+**Default:** bundled `mcp.json` points at production (`https://mcp.summation.com/mcp`).
 
 ## Sign-in / sign-out
 
@@ -64,9 +65,11 @@ Old user-scope entries that inject an `Authorization` header (device-login `sm_d
 
 ```bash
 claude mcp remove -s user summation
+codex mcp logout summation
+codex mcp remove summation
 ```
 
-Then `/summation:signin`.
+Then the `signin` skill.
 
 ## Troubleshooting
 

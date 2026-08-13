@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build dist/summation-plugin.zip for claude.ai org "Add plugins → Upload a file".
-# Zip root = plugin root (.claude-plugin/plugin.json and plugin.json at top level).
+# Zip root = plugin root (plugin.json + mcp.json + skills/ at top level).
 set -euo pipefail
 cd "$(dirname "$0")"
 ./build-plugins.sh

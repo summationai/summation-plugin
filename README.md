@@ -24,7 +24,7 @@ Two different names:
 
 Then `/summation:signin` — or run `/summation:start` / ask a data question and complete the browser sign-in when Claude prompts you.
 
-0.11.0 renamed the plugin from `addison` to `summation` (slash commands `/summation:…`). 0.12.0 is one Agent Plugins package (`plugins/summation`) for both hosts. If you still have `addison@summation` or the old `addison-plugin` marketplace, remove them and add `summationai/summation-plugin`.
+**1.0.0 is a breaking package change.** The installable tree is an [Agent Plugins](https://agent-plugins.org/) 1.0.0 directory (`plugin.json` + `mcp.json` + `skills/`). There is no `.claude-plugin` / `.codex-plugin` / `.mcp.json` inside the package, and no `addison` plugin id. Hosts that only load those older manifests cannot install this version.
 
 **claude.ai / Claude Desktop (org admins):** Admin console → Plugins → Add plugins → *Sync from GitHub* (this repo) or *Upload a file* using the latest release zip:
 
@@ -43,7 +43,7 @@ codex plugin install summation
 
 Marketplace id is **summationai**; plugin id is **summation** (same as Claude: `summation@summationai`).
 
-Then `$summation-signin` or any data ask. Skills use `$summation-…` mentions (not `/summation:…`). MCP is packaged with the plugin; auth is the same browser flow (`codex mcp login summation` if needed).
+Then `$summation-signin` or any data ask. Skills are the same portable tree; Codex mentions are `$summation-…`. MCP is `mcp.json` (streamable HTTP). Auth is the same browser flow (`codex mcp login summation` if needed).
 
 **Codex desktop app (Add plugin marketplace):**
 
@@ -110,22 +110,22 @@ user approval before publishing anywhere.
 | **`packaging/mcp.json`** | Portable MCP URL (`streamable-http`) |
 | **`packaging/com.anthropic.claude/`** | Claude hooks |
 | **`assets/`** | Brand images (`logo.png`, `logo-dark.png`, `icon.png`) |
-| `plugins/summation/` | Generated package (spec core + Claude/Codex shims) |
+| `plugins/summation/` | Generated Agent Plugins 1.0.0 package |
 
 ```bash
 # edit skills/ or packaging/…
 ./build-plugins.sh        # plugins/summation from skills/ + packaging/
-claude --plugin-dir ./plugins/summation
-claude plugin validate ./plugins/summation
-./build-zip.sh            # dist/summation-plugin.zip for Desktop upload
+./build-zip.sh            # dist/summation-plugin.zip
 ```
 
-CI regenerates the package and fails on drift. **Never hand-edit** `plugins/summation` (see `plugins/summation/GENERATED.md`). Claude still reads `.claude-plugin/` + `hooks/` + `.mcp.json`. Codex still reads `.codex-plugin/` and rewritten skills under `com.openai.codex/`. Clients that load Agent Plugins use root `plugin.json`, `mcp.json`, and `skills/`.
+CI regenerates the package and fails on drift. **Never hand-edit** `plugins/summation` (see `plugins/summation/GENERATED.md`).
+
+The package is spec-only. Claude hooks live under `com.anthropic.claude/`. Codex logos live under `com.openai.codex/`. Repo-root `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` are marketplace catalogs, not plugin manifests.
 
 ## Release
 
 1. Bump `version` in `packaging/plugin.json`.
 2. Run `./build-plugins.sh`, commit, merge to `main`.
-3. Tag matching the version (for example `v0.12.0`) and push the tag. The release workflow publishes `summation-plugin.zip` as **Latest**.
+3. Tag matching the version (for example `v1.0.0`) and push the tag. The release workflow publishes `summation-plugin.zip` as **Latest**.
 
 `https://github.com/summationai/summation-plugin/releases/latest/download/summation-plugin.zip`

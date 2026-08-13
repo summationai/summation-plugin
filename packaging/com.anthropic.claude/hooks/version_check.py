@@ -35,7 +35,7 @@ def main() -> None:
     if not root:
         emit()
     try:
-        manifest = json.loads((pathlib.Path(root) / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        manifest = json.loads((pathlib.Path(root) / "plugin.json").read_text(encoding="utf-8"))
     except Exception:
         emit()
     name = manifest.get("name") or "summation"

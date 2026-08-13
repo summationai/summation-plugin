@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "summation",
-  "version": "0.12.0",
+  "version": "1.0.0",
   "description": "Summation's AI data analyst: ask data questions, search the catalog, run bounded SQL, generate and validate reports, export PDF/DOCX/Markdown. MCP-native auth and tools.",
   "author": {
     "name": "Summation",
@@ -19,12 +19,14 @@
     "summation"
   ],
   "extensions": {
-    "com.anthropic.claude": {
-      "hooks": "./hooks/"
-    },
+    "com.anthropic.claude": {},
     "com.openai.codex": {
-      "skills": "./com.openai.codex/skills/",
-      "mcpServers": "./com.openai.codex/mcp.json"
+      "displayName": "Summation",
+      "category": "Data",
+      "brandColor": "#2F6FEB",
+      "logo": "./com.openai.codex/assets/logo.png",
+      "logoDark": "./com.openai.codex/assets/logo-dark.png",
+      "composerIcon": "./com.openai.codex/assets/icon.png"
     }
   }
 }

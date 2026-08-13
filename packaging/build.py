@@ -1,15 +1,7 @@
 #!/usr/bin/env python3
-"""Assemble the one portable plugin package at plugins/summation/.
+"""Assemble the Agent Plugins 1.0.0 package at plugins/summation/.
 
-Source of truth:
-  skills/                         skill markdown
-  assets/                         brand images
-  packaging/plugin.json           Agent Plugins 1.0.0 manifest + version
-  packaging/mcp.json              Agent Plugins MCP config
-  packaging/com.anthropic.claude/ Claude hooks
-
-The generated tree is spec-compliant (plugin.json, mcp.json, skills/) and still
-carries today's Claude/Codex shims so marketplace installs keep working.
+Breaking: this tree is spec-only. No .claude-plugin, .codex-plugin, or .mcp.json.
 """
 from __future__ import annotations
 
@@ -18,7 +10,6 @@ import pathlib
 import re
 import shutil
 import sys
-from urllib.parse import urlsplit
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SKILLS = ROOT / "skills"
@@ -32,6 +23,7 @@ REQUIRED_ASSETS = ("logo.png", "logo-dark.png", "icon.png")
 SPEC_PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 SPEC_MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
 NAME_RE = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
+FORBIDDEN_IN_PACKAGE = (".claude-plugin", ".codex-plugin", ".mcp.json")
 
 
 def die(message: str) -> None:
@@ -47,116 +39,16 @@ def write_json(path: pathlib.Path, payload: dict) -> None:
 def copytree(src: pathlib.Path, dst: pathlib.Path) -> None:
     if dst.exists():
         shutil.rmtree(dst)
-    shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__", ".DS_Store", ".summation-config*"))
+    shutil.copytree(
+        src,
+        dst,
+        ignore=shutil.ignore_patterns("__pycache__", ".DS_Store", ".summation-config*"),
+    )
 
 
 def refuse_secrets(root: pathlib.Path) -> None:
     if any(root.rglob(".summation-config*")):
         die(f"credential file inside {root.relative_to(ROOT)}")
-
-
-def strip_skill_frontmatter(text: str, skill_name: str) -> str:
-    """Keep only name + a single-line description (Codex requires a value)."""
-    if not text.startswith("---\n"):
-        return text
-    end = text.find("\n---", 4)
-    if end == -1:
-        return text
-    lines = text[4:end].splitlines()
-    name: str | None = None
-    description = ""
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        if line.startswith("name:"):
-            name = line.split(":", 1)[1].strip().strip("\"'")
-            i += 1
-            continue
-        if line.startswith("description:"):
-            rest = line.split(":", 1)[1].strip()
-            i += 1
-            if rest in {">", "|", ">-", "|-", ">+", "|+"}:
-                parts: list[str] = []
-                while i < len(lines) and (lines[i].startswith(" ") or lines[i].startswith("\t")):
-                    parts.append(lines[i].strip())
-                    i += 1
-                description = " ".join(parts)
-            else:
-                description = rest.strip("\"'")
-                while i < len(lines) and (lines[i].startswith(" ") or lines[i].startswith("\t")):
-                    description = f"{description} {lines[i].strip()}".strip()
-                    i += 1
-            continue
-        i += 1
-    if not name:
-        name = skill_name
-    description = " ".join(description.split())
-    if not description:
-        die(f"skill {name!r}: empty description after frontmatter strip")
-    desc_yaml = json.dumps(description, ensure_ascii=False)
-    return f"---\nname: {name}\ndescription: {desc_yaml}\n---" + text[end + len("\n---") :]
-
-
-def codex_text(text: str) -> str:
-    text = re.sub(
-        r"claude mcp remove -s user summation(?:\s+2>/dev/null\s*\|\|\s*true)?",
-        "codex mcp logout summation\n"
-        "codex mcp remove summation",
-        text,
-    )
-    text = re.sub(
-        r"claude mcp remove summation -s user(?:\s+2>/dev/null\s*\|\|\s*true)?",
-        "codex mcp logout summation\n"
-        "codex mcp remove summation",
-        text,
-    )
-    text = re.sub(
-        r"claude mcp add -s user --transport http summation '([^']+)'",
-        r"codex mcp add summation --url '\1'",
-        text,
-    )
-    text = re.sub(
-        r"claude mcp add --transport http summation '([^']+)' -s user",
-        r"codex mcp add summation --url '\1'",
-        text,
-    )
-    text = text.replace("claude mcp get summation", "codex mcp get summation")
-    text = text.replace("claude mcp list", "codex mcp list")
-    text = text.replace("claude mcp remove", "codex mcp remove")
-    text = text.replace("claude mcp add", "codex mcp add")
-    text = text.replace(
-        "Prefer `/mcp` → Authenticate if the host shows that control.",
-        "Prefer `codex mcp login summation` (or the host Authenticate control) if tools are not yet authed.",
-    )
-    text = text.replace(
-        "Also clear auth / disconnect **summation** in `/mcp` if the host keeps a session after remove. Prefer the host’s “disconnect / re-authenticate” when available.",
-        "Run `codex mcp logout summation` **before** remove so the OAuth session is cleared while the server name still resolves.",
-    )
-    for before, after in (
-        ("/summation:", "$summation-"),
-        ("Claude Desktop", "Codex"),
-        ("Claude Code", "Codex"),
-        ("Claude", "Codex"),
-    ):
-        text = text.replace(before, after)
-    return text
-
-
-def write_codex_skills(src_skills: pathlib.Path, dst_skills: pathlib.Path) -> None:
-    copytree(src_skills, dst_skills)
-    for path in dst_skills.rglob("*"):
-        if not path.is_file():
-            continue
-        if path.suffix in {".md", ".html"}:
-            text = path.read_text(encoding="utf-8")
-            if path.name == "SKILL.md":
-                text = strip_skill_frontmatter(text, path.parent.name)
-            path.write_text(codex_text(text), encoding="utf-8")
-        elif path.suffix == ".py":
-            path.write_text(
-                path.read_text(encoding="utf-8").replace("/summation:", "$summation-"),
-                encoding="utf-8",
-            )
 
 
 def mcp_url(spec_mcp: dict) -> str:
@@ -216,7 +108,7 @@ def update_claude_marketplace(version: str, description: str) -> None:
         "category": "data",
     }
     for index, existing in enumerate(plugins):
-        if isinstance(existing, dict) and existing.get("name") in {entry["name"], "addison"}:
+        if isinstance(existing, dict) and existing.get("name") == entry["name"]:
             plugins[index] = entry
             break
     else:
@@ -239,12 +131,18 @@ def update_codex_marketplace() -> None:
         "category": "Data",
     }
     for index, existing in enumerate(plugins):
-        if isinstance(existing, dict) and existing.get("name") in {entry["name"], "addison"}:
+        if isinstance(existing, dict) and existing.get("name") == entry["name"]:
             plugins[index] = entry
             break
     else:
         plugins.append(entry)
     write_json(CODEX_MARKET, market)
+
+
+def assert_no_legacy_shims(root: pathlib.Path) -> None:
+    for name in FORBIDDEN_IN_PACKAGE:
+        if (root / name).exists():
+            die(f"legacy shim {name} must not be in the generated package")
 
 
 def main() -> None:
@@ -263,105 +161,30 @@ def main() -> None:
     validate_spec(plugin, spec_mcp)
     version = plugin["version"]
     url = mcp_url(spec_mcp)
-    origin = urlsplit(url)
-    oauth_resource = f"{origin.scheme}://{origin.netloc}" if origin.scheme and origin.netloc else url
 
     if DST.exists():
         shutil.rmtree(DST)
     DST.mkdir(parents=True)
 
     copytree(SKILLS, DST / "skills")
-    hooks_src = PACKAGING / "com.anthropic.claude" / "hooks"
-    copytree(hooks_src, DST / "hooks")
-    copytree(hooks_src, DST / "com.anthropic.claude" / "hooks")
+    copytree(
+        PACKAGING / "com.anthropic.claude" / "hooks",
+        DST / "com.anthropic.claude" / "hooks",
+    )
 
-    assets_dst = DST / "assets"
-    assets_dst.mkdir()
+    assets_dst = DST / "com.openai.codex" / "assets"
+    assets_dst.mkdir(parents=True)
     for name in REQUIRED_ASSETS:
         shutil.copy2(ASSETS / name, assets_dst / name)
-    copytree(assets_dst, DST / "com.openai.codex" / "assets")
 
     write_json(DST / "plugin.json", plugin)
     write_json(DST / "mcp.json", spec_mcp)
-    write_json(
-        DST / ".mcp.json",
-        {"summation": {"type": "http", "url": url}},
-    )
-    write_json(
-        DST / ".claude-plugin" / "plugin.json",
-        {
-            "name": plugin["name"],
-            "displayName": "Summation",
-            "version": version,
-            "description": (
-                "Summation's AI data analyst in Claude Code: ask data questions, search the catalog, "
-                "run bounded SQL, generate + validate reports, export PDF/DOCX/Markdown. MCP-native auth and tools."
-            ),
-            "author": {"name": "Summation"},
-            "homepage": plugin["homepage"],
-            "license": plugin["license"],
-            "repository": plugin["repository"],
-            "keywords": plugin.get("keywords", []),
-        },
-    )
-
-    write_codex_skills(SKILLS, DST / "com.openai.codex" / "skills")
-    write_json(
-        DST / "com.openai.codex" / "mcp.json",
-        {
-            "mcpServers": {
-                "summation": {
-                    "type": "http",
-                    "url": url,
-                    "oauth_resource": oauth_resource,
-                }
-            }
-        },
-    )
-    write_json(
-        DST / ".codex-plugin" / "plugin.json",
-        {
-            "name": plugin["name"],
-            "version": version,
-            "description": (
-                "Summation's AI data analyst, in Codex: ask data questions, search the catalog, "
-                "run bounded SQL, generate and validate reports, and export artifacts."
-            ),
-            "author": {"name": "Summation", "url": "https://summation.com"},
-            "homepage": plugin["homepage"],
-            "repository": plugin["repository"],
-            "license": plugin["license"],
-            "keywords": sorted(set(plugin.get("keywords", []) + ["codex"])),
-            "skills": "./com.openai.codex/skills/",
-            "mcpServers": "./com.openai.codex/mcp.json",
-            "interface": {
-                "displayName": "Summation",
-                "shortDescription": "Ask Summation data questions from Codex.",
-                "longDescription": (
-                    "The Summation plugin brings the analyst into Codex for governed data questions, "
-                    "catalog discovery, SQL, reports, validation, and scheduling. Skills orchestrate the "
-                    "hosted Summation MCP server; auth is browser OAuth on first use (same product as Claude)."
-                ),
-                "developerName": "Summation",
-                "category": "Data",
-                "capabilities": ["Interactive", "Data analysis", "Reports", "MCP"],
-                "websiteURL": "https://summation.com",
-                "brandColor": "#2F6FEB",
-                "composerIcon": "./assets/icon.png",
-                "logo": "./assets/logo.png",
-                "logoDark": "./assets/logo-dark.png",
-                "defaultPrompt": [
-                    "Set up Summation.",
-                    "What data can Summation see?",
-                    "Generate a report from my data.",
-                ],
-            },
-        },
-    )
 
     (DST / "GENERATED.md").write_text(
         "# Generated package\n\n"
         "Do **not** edit files under `plugins/summation` by hand.\n\n"
+        "This directory is an Agent Plugins 1.0.0 package. There is no\n"
+        "`.claude-plugin`, `.codex-plugin`, or `.mcp.json`.\n\n"
         "- Author skills in **`skills/`**.\n"
         "- Bump version in **`packaging/plugin.json`**.\n"
         "- MCP URL lives in **`packaging/mcp.json`**.\n"
@@ -371,10 +194,11 @@ def main() -> None:
         encoding="utf-8",
     )
 
+    assert_no_legacy_shims(DST)
     update_claude_marketplace(
         version,
-        "Summation's AI data analyst in Claude Code: ask data questions, search the catalog, "
-        "run bounded SQL, generate + validate reports. MCP-native.",
+        "Summation's AI data analyst: ask data questions, search the catalog, "
+        "run bounded SQL, generate and validate reports. MCP-native.",
     )
     update_codex_marketplace()
     print(f"built {DST.relative_to(ROOT)} (version {version})")

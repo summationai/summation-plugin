@@ -24,16 +24,18 @@ That index lists current docs (connectors, integrations, features). Then:
 
 ## Plugin behavior vs product catalog
 
+Claude invokes `/summation:name`. Codex invokes `$summation-name`. Same skills.
+
 | Need | In this plugin |
 |---|---|
-| Ask a business question | `/summation:query` or `ask_analyst` |
-| Explore tables | `/summation:catalog` |
-| Leadership write-up | `/summation:report` → export |
-| Check a report | `/summation:validate` |
-| Add a warehouse/database | `/summation:connect` (passwords in Summation **Connections**) |
-| Recurring emailed analysis | playbooks + `/summation:schedule` |
-| Workflow ideas from recent IDE chats | `/summation:opportunities` (local scan + catalog) |
-| Sign in / health | `/summation:signin`, `/summation:diagnose` |
+| Ask a business question | `query` skill or `ask_analyst` |
+| Explore tables | `catalog` |
+| Leadership write-up | `report` → export |
+| Check a report | `validate` |
+| Add a warehouse/database | `connect` (passwords in Summation **Connections**) |
+| Recurring emailed analysis | playbooks + `schedule` |
+| Workflow ideas from recent IDE chats | `opportunities` (local scan + catalog) |
+| Sign in / health | `signin`, `diagnose` |
 
 The **list of warehouses and features** still comes from `llms.txt` + linked docs, not from hardcoding here.
 

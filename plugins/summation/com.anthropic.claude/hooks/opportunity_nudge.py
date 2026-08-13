@@ -37,7 +37,7 @@ def main() -> None:
     )
     try:
         name = "summation"
-        manifest = pathlib.Path(root) / ".claude-plugin" / "plugin.json"
+        manifest = pathlib.Path(root) / "plugin.json"
         if manifest.is_file():
             name = json.loads(manifest.read_text(encoding="utf-8")).get("name") or name
     except Exception:

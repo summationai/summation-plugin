@@ -1,6 +1,0 @@
-{
-  "summation": {
-    "type": "http",
-    "url": "https://mcp.summation.com/mcp"
-  }
-}
