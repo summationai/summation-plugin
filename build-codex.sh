@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Assemble plugins/addison-codex from shared skills/ + Claude packaging (version, MCP URL).
-# plugins/addison-codex is GENERATED — edit skills/ or this builder, never plugins/addison-codex.
+# Assemble plugins/summation-codex from shared skills/ + Claude packaging (version, MCP URL).
+# plugins/summation-codex is GENERATED — edit skills/ or this builder, never plugins/summation-codex.
 #
 # Shared source of truth: skills/
 # Codex-only transforms:
@@ -15,8 +15,8 @@ cd "$(dirname "$0")"
 ./build-claude.sh
 
 SKILLS=skills
-CLAUDE=plugins/addison-claude
-DST=plugins/addison-codex
+CLAUDE=plugins/summation-claude
+DST=plugins/summation-codex
 MARKETPLACE=.agents/plugins/marketplace.json
 
 if find "$SKILLS" -name ".summation-config*" | grep -q .; then
@@ -189,7 +189,7 @@ if mcp_path.exists():
 # Marker so humans do not edit the generated tree.
 (dst / "GENERATED.md").write_text(
     "# Generated package\n\n"
-    "Do **not** edit files under `plugins/addison-codex` by hand.\n\n"
+    "Do **not** edit files under `plugins/summation-codex` by hand.\n\n"
     "- Author skills in **`skills/`** (shared).\n"
     "- Run `./build-codex.sh` (also refreshes Claude’s `skills/` copy via `./build-claude.sh`).\n"
     "- CI fails if this tree drifts from source.\n",
@@ -241,7 +241,7 @@ write_json(dst / ".codex-plugin" / "plugin.json", plugin_json)
 
 entry = {
     "name": "summation",
-    "source": {"source": "local", "path": "./plugins/addison-codex"},
+    "source": {"source": "local", "path": "./plugins/summation-codex"},
     "policy": {"installation": "AVAILABLE", "authentication": "ON_USE"},
     "category": "Data",
 }
