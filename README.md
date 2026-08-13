@@ -41,6 +41,8 @@ codex plugin marketplace add summationai/summation-plugin
 codex plugin install summation
 ```
 
+Marketplace id is **summationai**; plugin id is **summation** (same as Claude: `summation@summationai`).
+
 Then `$summation-signin` or any data ask. Skills use `$summation-…` mentions (not `/summation:…`). MCP is packaged with the plugin; auth is the same browser flow (`codex mcp login summation` if needed).
 
 **Codex desktop app (Add plugin marketplace):**

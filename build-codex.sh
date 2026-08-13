@@ -248,8 +248,8 @@ entry = {
 if marketplace_path.exists():
     marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
 else:
-    marketplace = {"name": "summation", "interface": {"displayName": "Summation"}, "plugins": []}
-marketplace.setdefault("name", "summation")
+    marketplace = {"name": "summationai", "interface": {"displayName": "Summation"}, "plugins": []}
+marketplace["name"] = "summationai"
 marketplace.setdefault("interface", {"displayName": "Summation"})
 plugins = marketplace.setdefault("plugins", [])
 for index, existing in enumerate(plugins):
