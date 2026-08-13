@@ -12,7 +12,7 @@ MCP only. Schedules email real people — confirm carefully.
 **List:** `list_schedules` → plain table: what, when (with timezone), who gets email, status. History via run tools as needed.
 
 **Create / update:**
-1. Needs a **playbook** (`list_playbooks` / create or update via available playbook tools if the user is authoring one). One-off docs without a playbook → `$addison-report`.  
+1. Needs a **playbook** (`list_playbooks` / create or update via available playbook tools if the user is authoring one). One-off docs without a playbook → `$summation-report`.  
 2. Cadence with **explicit timezone** (ask; never assume).  
 3. Recipients exactly as named.  
 4. **Read back** what / when / who → explicit yes → `create_schedule` or the update/patch tool if changing an existing schedule.  

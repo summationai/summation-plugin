@@ -11,4 +11,4 @@ This skill was **renamed to `signout`**. Do **not** run `python3 ../api/scripts/
 
 Follow the **`signout`** skill: host `/mcp` disconnect or `claude mcp remove` for **summation**, verify, then report disconnected.
 
-Slash: `/addison:signout` (or this alias `/addison:logout` if registered).
+Slash: `/summation:signout` (or this alias `/summation:logout` if registered).

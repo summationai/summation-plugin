@@ -59,4 +59,4 @@ Prefer `import_file_to_table` (and related file tools) when the user has files i
 
 ## Auth
 
-MCP auth failure → `$addison-signin`.
+MCP auth failure → `$summation-signin`.

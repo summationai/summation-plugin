@@ -20,5 +20,5 @@ MCP only. Validation can take a while — tell the user it’s running; don’t 
 
 - Never soften flags.  
 - Don’t call a report valid if validation failed.  
-- After `$addison-report`, offer this proactively.  
+- After `$summation-report`, offer this proactively.  
 - No REST helper.

@@ -6,7 +6,7 @@ The host MCP client authenticates to the hosted Summation MCP server. The plugin
 
 | | External (default) | Internal |
 |---|---|---|
-| Gate | (none) | Shell: `ADDISON_PLUGIN_INTERNAL=1` (or `true` / `yes` / `on`) when launching the host CLI |
+| Gate | (none) | Shell: `SUMMATION_PLUGIN_INTERNAL=1` (or `ADDISON_PLUGIN_INTERNAL`) when launching the host CLI |
 | Environments | One — plugin `.mcp.json` URL | User picks **prod** / **staging** / **sandbox** at sign-in |
 | Tenant | Org approved in browser | Same; skill tells user to switch org on the web app first if needed |
 | MCP URL | Bundled headerless entry | User-scope headerless `summation` pointed at the chosen env’s allowlisted URL |
@@ -15,7 +15,7 @@ The host MCP client authenticates to the hosted Summation MCP server. The plugin
 Detect mode in skills:
 
 ```bash
-printf '%s' "${ADDISON_PLUGIN_INTERNAL:-}"
+printf '%s' "${SUMMATION_PLUGIN_INTERNAL:-${ADDISON_PLUGIN_INTERNAL:-}}"
 ```
 
 ## Allowlisted MCP URLs only
@@ -67,14 +67,14 @@ codex mcp logout summation
 codex mcp remove summation
 ```
 
-Then `$addison-signin`.
+Then `$summation-signin`.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| Tools missing | Enable addison; restart |
-| 401 | `$addison-signin` |
+| Tools missing | Enable summation; restart |
+| 401 | `$summation-signin` |
 | Wrong env (internal) | Sign out; sign in; pick env again |
 | Wrong tenant | Switch org on web app; sign out; sign in |
 | Stale `Authorization` header on the MCP entry | Remove user-scope override; re-auth headerless |

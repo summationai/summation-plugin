@@ -14,8 +14,8 @@ Call **`whoami`** on **`summation`**.
 | Result | What to tell the user |
 |---|---|
 | Identity + org | “You’re signed in as … in org …” |
-| Needs sign-in / 401 | Hand off to `/addison:signin` |
-| Tools missing | Enable/reload the **addison** plugin and restart the host |
+| Needs sign-in / 401 | Hand off to `/summation:signin` |
+| Tools missing | Enable/reload the **summation** plugin and restart the host |
 
 ## 2. What’s visible
 
@@ -28,7 +28,7 @@ Short card:
 - Tables ready for analysis (friendly names)  
 - 2–3 sample questions that fit **those** tables  
 
-If empty: “You’re signed in, but there’s no business data yet” → `/addison:connect` or Connections in the web app.
+If empty: “You’re signed in, but there’s no business data yet” → `/summation:connect` or Connections in the web app.
 
 ## 3. Interpreting problems (user language)
 
@@ -42,5 +42,5 @@ If empty: “You’re signed in, but there’s no business data yet” → `/add
 
 - Do **not** download OpenAPI or debug connector key names here.  
 - Do **not** dump internal tool ids into chat.  
-- Do **not** run `python3 ../api/scripts/sum_api.py doctor` (or any relative `../api/...` path). Health checks are MCP-only; relative paths break when skills mount as `addison:api`.  
+- Do **not** run `python3 ../api/scripts/sum_api.py doctor` (or any relative `../api/...` path). Health checks are MCP-only; relative paths break when skills mount as `summation:api`.  
 - If they ask “is X supported?”, fetch **`https://docs.summation.com/llms.txt`** then the linked page (see `../api/references/product.md`).

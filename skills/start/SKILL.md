@@ -1,6 +1,6 @@
 ---
 name: start
-description: Summation onboarding — sign in, map data, meet Addison, first report. Use when the user says set up Summation, get started, or is clearly new.
+description: Summation onboarding — sign in, map data, meet the analyst, first report. Use when the user says set up Summation, get started, or is clearly new.
 ---
 
 # Summation Start
@@ -9,7 +9,7 @@ Walk a new user from zero to a first useful answer **in plain language**. No HTM
 
 ## Checklist (optional one-liner in chat)
 
-`1 Connect → 2 Discover → 3 Meet Addison → 4 First report`
+`1 Connect → 2 Discover → 3 Meet the analyst → 4 First report`
 
 ### Step 1 — Connect (sign in)
 
@@ -28,17 +28,17 @@ Then give a short source map and continue.
 
 **Gate closed** only when **both** are missing — no attached datasets **and** no imported tables. Then stop and offer:
 
-1. **Connect a database/warehouse** → `/addison:connect` (confirm sources via `llms.txt` / product docs)  
+1. **Connect a database/warehouse** → `/summation:connect` (confirm sources via `llms.txt` / product docs)  
 2. **Import files** into a project → file import tools, then re-list tables  
 3. **They already connected or imported in the web app** → re-list and continue  
 
 **Connection exists but nothing attached and no imports →** browse and attach with **friendly names** (table names), or import. Do not claim readiness until the gate opens.
 
-### Step 3 — Meet Addison
+### Step 3 — Meet the analyst
 
 1. Ensure a project (`list_projects` / `get_default_project` / create with consent).  
 2. Project catalog: attach agreed business tables if empty.  
-3. `ask_analyst`: introduce what you see + 3 concrete report ideas from **real** table names. Tell the user Addison is working.
+3. `ask_analyst`: introduce what you see + 3 concrete report ideas from **real** table names. Tell the user the analyst is working.
 
 ### Step 3b — Opportunities from recent chats (optional, once)
 
@@ -47,7 +47,7 @@ After the gate is open **or** after a clear “no data yet” path, offer **once
 > I can also look at recent local chats in this IDE for workflows Summation can take over (scan stays on your machine). Want that?
 
 - **Yes** → run the **`opportunities`** skill (consent + local scan + catalog-grounded list). Prefer their pick for step 4.  
-- **No** → one line: anytime `/addison:opportunities` — then continue.  
+- **No** → one line: anytime `/summation:opportunities` — then continue.  
 - Do **not** scan without consent. Do **not** dump transcripts.
 
 ### Step 4 — First report
