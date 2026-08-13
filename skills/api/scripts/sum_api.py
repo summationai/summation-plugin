@@ -58,9 +58,17 @@ ALLOWED_BASE_URLS = {env["api"] for env in ALLOWED_ENVIRONMENTS.values()}
 
 
 def is_internal() -> bool:
-    """Internal edition, unlocked by SUMMATION_PLUGIN_INTERNAL (or legacy ADDISON_PLUGIN_INTERNAL)."""
+    """Internal edition via SUMMATION_PLUGIN_INTERNAL, else legacy ADDISON_PLUGIN_INTERNAL.
+
+    If the new key is set (including to 0/false/off), it wins. Only fall back when it is unset
+    or empty — so SUMMATION_PLUGIN_INTERNAL=0 plus a leftover ADDISON_PLUGIN_INTERNAL=1 stays
+    external, matching ``${SUMMATION_PLUGIN_INTERNAL:-${ADDISON_PLUGIN_INTERNAL:-}}``.
+    """
     truthy = ("1", "true", "yes", "on")
-    return any(os.environ.get(key, "").strip().lower() in truthy for key in INTERNAL_ENV_KEYS)
+    preferred = os.environ.get("SUMMATION_PLUGIN_INTERNAL")
+    if preferred is not None and preferred.strip() != "":
+        return preferred.strip().lower() in truthy
+    return os.environ.get("ADDISON_PLUGIN_INTERNAL", "").strip().lower() in truthy
 
 
 def skill_root() -> pathlib.Path:
