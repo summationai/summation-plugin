@@ -24,7 +24,7 @@ Two different names:
 
 Then `/summation:signin` — or run `/summation:start` / ask a data question and complete the browser sign-in when Claude prompts you.
 
-0.11.0 renamed the plugin from `addison` to `summation` (slash commands `/summation:…`). If you still have `addison@summation` or the old `addison-plugin` marketplace, remove them and add `summationai/summation-plugin`.
+0.11.0 renamed the plugin from `addison` to `summation` (slash commands `/summation:…`). 0.12.0 is one Agent Plugins package (`plugins/summation`) for both hosts. If you still have `addison@summation` or the old `addison-plugin` marketplace, remove them and add `summationai/summation-plugin`.
 
 **claude.ai / Claude Desktop (org admins):** Admin console → Plugins → Add plugins → *Sync from GitHub* (this repo) or *Upload a file* using the latest release zip:
 
@@ -47,7 +47,7 @@ Then `$summation-signin` or any data ask. Skills use `$summation-…` mentions (
 
 **Codex desktop app (Add plugin marketplace):**
 
-Layout matches the `openai/plugins` convention: marketplace catalog at `.agents/plugins/marketplace.json`, plugin package at `plugins/summation-codex/`.
+Layout matches the `openai/plugins` convention: marketplace catalog at `.agents/plugins/marketplace.json`, plugin package at `plugins/summation/`.
 
 | Field | Value |
 |---|---|
@@ -61,10 +61,10 @@ If you must sparse-checkout, include **both** the catalog and the package (not t
 
 ```text
 .agents/plugins
-plugins/summation-codex
+plugins/summation
 ```
 
-Sparse path `plugins/summation-codex` alone fails with “marketplace root does not contain a supported manifest” — that directory is the plugin, not the marketplace.
+Sparse path `plugins/summation` alone fails with “marketplace root does not contain a supported manifest” — that directory is the plugin, not the marketplace.
 
 ## Contents
 
@@ -101,29 +101,31 @@ user approval before publishing anywhere.
 
 ## Development
 
-**One skill tree, two packages** (DRY authoring):
+**One skill tree, one package** ([Agent Plugins](https://agent-plugins.org/) 1.0.0):
 
 | Path | Role |
 |---|---|
 | **`skills/`** | **Source of truth** — edit skills here only |
-| **`assets/`** | Brand images for Codex (`logo.png`, `logo-dark.png`, `icon.png`) — copied into the Codex package by `./build-codex.sh` |
-| `plugins/summation-claude/` | Claude package (skills copied in by `./build-claude.sh`) |
-| `plugins/summation-codex/` | Codex package (generated: mention syntax + MCP shape + assets) |
+| **`packaging/plugin.json`** | Portable manifest + version |
+| **`packaging/mcp.json`** | Portable MCP URL (`streamable-http`) |
+| **`packaging/com.anthropic.claude/`** | Claude hooks |
+| **`assets/`** | Brand images (`logo.png`, `logo-dark.png`, `icon.png`) |
+| `plugins/summation/` | Generated package (spec core + Claude/Codex shims) |
 
 ```bash
-# edit skills/…
-./build-plugins.sh        # Claude + Codex from skills/
-claude --plugin-dir ./plugins/summation-claude
-claude plugin validate ./plugins/summation-claude
+# edit skills/ or packaging/…
+./build-plugins.sh        # plugins/summation from skills/ + packaging/
+claude --plugin-dir ./plugins/summation
+claude plugin validate ./plugins/summation
 ./build-zip.sh            # dist/summation-plugin.zip for Desktop upload
 ```
 
-CI regenerates both packages and fails on drift. **Never hand-edit** `plugins/summation-*/skills` or `plugins/summation-codex` (see `plugins/summation-codex/GENERATED.md`).
+CI regenerates the package and fails on drift. **Never hand-edit** `plugins/summation` (see `plugins/summation/GENERATED.md`). Claude still reads `.claude-plugin/` + `hooks/` + `.mcp.json`. Codex still reads `.codex-plugin/` and rewritten skills under `com.openai.codex/`. Clients that load Agent Plugins use root `plugin.json`, `mcp.json`, and `skills/`.
 
 ## Release
 
-1. Bump `version` in `plugins/summation-claude/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
+1. Bump `version` in `packaging/plugin.json`.
 2. Run `./build-plugins.sh`, commit, merge to `main`.
-3. Tag matching the version (for example `v0.11.0`) and push the tag. The release workflow publishes `summation-plugin.zip` as **Latest**.
+3. Tag matching the version (for example `v0.12.0`) and push the tag. The release workflow publishes `summation-plugin.zip` as **Latest**.
 
 `https://github.com/summationai/summation-plugin/releases/latest/download/summation-plugin.zip`

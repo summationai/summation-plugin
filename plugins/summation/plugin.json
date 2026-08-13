@@ -1,0 +1,30 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "summation",
+  "version": "0.12.0",
+  "description": "Summation's AI data analyst: ask data questions, search the catalog, run bounded SQL, generate and validate reports, export PDF/DOCX/Markdown. MCP-native auth and tools.",
+  "author": {
+    "name": "Summation",
+    "url": "https://summation.com"
+  },
+  "homepage": "https://summation.com",
+  "repository": "https://github.com/summationai/summation-plugin",
+  "license": "MIT",
+  "keywords": [
+    "analytics",
+    "data",
+    "mcp",
+    "reports",
+    "sum-api",
+    "summation"
+  ],
+  "extensions": {
+    "com.anthropic.claude": {
+      "hooks": "./hooks/"
+    },
+    "com.openai.codex": {
+      "skills": "./com.openai.codex/skills/",
+      "mcpServers": "./com.openai.codex/mcp.json"
+    }
+  }
+}

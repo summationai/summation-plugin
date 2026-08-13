@@ -1,6 +1,6 @@
 {
   "name": "summation",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Summation's AI data analyst, in Codex: ask data questions, search the catalog, run bounded SQL, generate and validate reports, and export artifacts.",
   "author": {
     "name": "Summation",
@@ -18,8 +18,8 @@
     "sum-api",
     "summation"
   ],
-  "skills": "./skills/",
-  "mcpServers": "./.mcp.json",
+  "skills": "./com.openai.codex/skills/",
+  "mcpServers": "./com.openai.codex/mcp.json",
   "interface": {
     "displayName": "Summation",
     "shortDescription": "Ask Summation data questions from Codex.",

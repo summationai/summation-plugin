@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Build both plugin packages from the shared skills/ tree.
+# Assemble plugins/summation from skills/ + packaging/ (Agent Plugins 1.0.0 + host shims).
 set -euo pipefail
 cd "$(dirname "$0")"
-./build-claude.sh
-./build-codex.sh
-echo "built Claude + Codex plugins"
+python3 packaging/build.py
+echo "built Summation plugin"

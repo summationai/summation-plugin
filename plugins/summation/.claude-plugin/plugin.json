@@ -1,7 +1,7 @@
 {
   "name": "summation",
   "displayName": "Summation",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Summation's AI data analyst in Claude Code: ask data questions, search the catalog, run bounded SQL, generate + validate reports, export PDF/DOCX/Markdown. MCP-native auth and tools.",
   "author": {
     "name": "Summation"
@@ -10,11 +10,11 @@
   "license": "MIT",
   "repository": "https://github.com/summationai/summation-plugin",
   "keywords": [
-    "data",
     "analytics",
+    "data",
+    "mcp",
     "reports",
-    "summation",
     "sum-api",
-    "mcp"
+    "summation"
   ]
 }

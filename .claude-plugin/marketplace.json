@@ -6,9 +6,9 @@
   "plugins": [
     {
       "name": "summation",
-      "source": "./plugins/summation-claude",
+      "source": "./plugins/summation",
       "description": "Summation's AI data analyst in Claude Code: ask data questions, search the catalog, run bounded SQL, generate + validate reports. MCP-native.",
-      "version": "0.11.0",
+      "version": "0.12.0",
       "author": {
         "name": "Summation"
       },
