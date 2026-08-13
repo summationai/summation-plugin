@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """Assemble the Agent Plugins 1.0.0 package at plugins/summation/.
 
-Breaking: this tree is spec-only. No .claude-plugin, .codex-plugin, or .mcp.json.
+Breaking: no .claude-plugin or .codex-plugin manifests. Spec files (plugin.json,
+mcp.json, skills/) are the source of truth.
+
+Two host-discovery copies ride along because Claude Code does not read the spec
+files yet: root hooks/ (SessionStart) and root .mcp.json (server registration).
+Verified 2026-08-13: with only spec mcp.json present, Claude Code loads all
+skills but registers no MCP server, so every skill fails at its first tool call.
+Drop these once Claude Code reads mcp.json directly.
 """
 from __future__ import annotations
 
@@ -24,7 +31,7 @@ REQUIRED_ASSETS = ("logo.png", "logo-dark.png", "icon.png")
 SPEC_PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 SPEC_MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
 NAME_RE = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
-FORBIDDEN_IN_PACKAGE = (".claude-plugin", ".codex-plugin", ".mcp.json")
+FORBIDDEN_IN_PACKAGE = (".claude-plugin", ".codex-plugin")
 
 
 def die(message: str) -> None:
@@ -199,17 +206,22 @@ def main() -> None:
 
     write_json(DST / "plugin.json", plugin)
     write_json(DST / "mcp.json", spec_mcp)
+    # Claude Code registers servers from .mcp.json only, and expects the
+    # plugin-scoped shape: bare server map, transport "http".
+    write_json(DST / ".mcp.json", {"summation": {"type": "http", "url": url}})
 
     (DST / "GENERATED.md").write_text(
         "# Generated package\n\n"
         "Do **not** edit files under `plugins/summation` by hand.\n\n"
         "This directory is an Agent Plugins 1.0.0 package. There is no\n"
-        "`.claude-plugin`, `.codex-plugin`, or `.mcp.json`.\n\n"
+        "`.claude-plugin` or `.codex-plugin`.\n\n"
         "- Author skills in **`skills/`**.\n"
         "- Bump version in **`packaging/plugin.json`**.\n"
         "- MCP URL lives in **`packaging/mcp.json`**.\n"
         "- Claude hooks live in **`packaging/com.anthropic.claude/hooks/`** "
         "(copied to `hooks/` for Claude SessionStart discovery).\n"
+        "- Root `.mcp.json` is generated from `packaging/mcp.json` because "
+        "Claude Code does not read the spec `mcp.json` yet.\n"
         "- Run `./build-plugins.sh`.\n"
         "- CI fails if this tree drifts from source.\n",
         encoding="utf-8",

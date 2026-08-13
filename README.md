@@ -24,7 +24,9 @@ Two different names:
 
 Then `/summation:signin` — or run `/summation:start` / ask a data question and complete the browser sign-in when Claude prompts you.
 
-**1.0.0 is a breaking package change.** The installable tree is an [Agent Plugins](https://agent-plugins.org/) 1.0.0 directory (`plugin.json` + `mcp.json` + `skills/`). There is no `.claude-plugin` / `.codex-plugin` / `.mcp.json` inside the package, and no `addison` plugin id. Hosts that only load those older manifests cannot install this version.
+**1.0.0 is a breaking package change.** The installable tree is an [Agent Plugins](https://agent-plugins.org/) 1.0.0 directory (`plugin.json` + `mcp.json` + `skills/`). There is no `.claude-plugin` / `.codex-plugin` manifest inside the package, and no `addison` plugin id. Hosts that only load those older manifests cannot install this version.
+
+Two host-discovery files ride along until the hosts read the spec files directly: root `hooks/` (Claude SessionStart) and root `.mcp.json` (Claude MCP registration). Both are generated from `packaging/`. Claude Code loads `skills/` from the spec tree but does not yet register servers from `mcp.json`, so without `.mcp.json` the skills appear and then fail at their first tool call.
 
 **claude.ai / Claude Desktop (org admins):** Admin console → Plugins → Add plugins → *Sync from GitHub* (this repo) or *Upload a file* using the latest release zip:
 
@@ -68,20 +70,22 @@ Sparse path `plugins/summation` alone fails with “marketplace root does not co
 
 ## Contents
 
-| Skill | Invoke | Does |
-|---|---|---|
-| `start` | `/summation:start` | guided onboarding: connect → map data → meet the analyst → first report |
-| `opportunities` | `/summation:opportunities` | suggest workflows from recent local chats + live catalog (consent first) |
-| `api` | model-invoked | MCP tool map + safety rules |
-| `signin` | `/summation:signin` | connect or re-authenticate Summation (`login` is an alias) |
-| `signout` | `/summation:signout` | disconnect Summation (`logout` is an alias) |
-| `diagnose` | `/summation:diagnose` | check connectivity and what data is visible (`doctor` is an alias) |
-| `report` | `/summation:report` | generate a report → export markdown/PDF/DOCX |
-| `validate` | `/summation:validate` | verify a report before sharing |
-| `query` | `/summation:query` | read-only query or open-ended analysis |
-| `catalog` | `/summation:catalog` | search tables, views, catalog |
-| `connect` | `/summation:connect` | add a data source (secrets stay in the Summation web app) |
-| `schedule` | `/summation:schedule` | recurring playbook runs with email delivery |
+Claude Code invokes a skill as `/summation:<name>`; Codex invokes it as `$summation-<name>`. `api` is model-invoked only.
+
+| Skill | Does |
+|---|---|
+| `start` | guided onboarding: connect → map data → meet the analyst → first report |
+| `opportunities` | suggest workflows from recent local chats + live catalog (consent first) |
+| `api` | MCP tool map + safety rules |
+| `signin` | connect or re-authenticate Summation (`login` is an alias) |
+| `signout` | disconnect Summation (`logout` is an alias) |
+| `diagnose` | check connectivity and what data is visible (`doctor` is an alias) |
+| `report` | generate a report → export markdown/PDF/DOCX |
+| `validate` | verify a report before sharing |
+| `query` | read-only query or open-ended analysis |
+| `catalog` | search tables, views, catalog |
+| `connect` | add a data source (secrets stay in the Summation web app) |
+| `schedule` | recurring playbook runs with email delivery |
 
 Credentials for the happy path live in the host MCP client, not in this repo. Do not commit config files or tokens.
 
@@ -95,7 +99,7 @@ Credentials for the happy path live in the host MCP client, not in this repo. Do
 When working on data analysis, metrics, or report commentary, use the Summation
 plugin first (catalog discovery before SQL; never guess table names). Prefer
 exported report content over raw internals, cite request_ids on failures, and
-run /summation:validate before any report is shared externally. Drafts need explicit
+run the `validate` skill before any report is shared externally. Drafts need explicit
 user approval before publishing anywhere.
 ```
 
