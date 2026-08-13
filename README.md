@@ -12,14 +12,19 @@ https://mcp.summation.com/mcp
 
 **Claude Code (CLI/IDE):**
 
+Two different names:
+
+1. **GitHub repo** (where the marketplace catalog lives) — still `summationai/addison-plugin` until that repo is renamed to `summation-plugin`.
+2. **Plugin @ marketplace** — install plugin `summation` from marketplace `summationai`.
+
 ```
 /plugin marketplace add summationai/addison-plugin
-/plugin install summation@summation
+/plugin install summation@summationai
 ```
 
 Then `/summation:signin` — or run `/summation:start` / ask a data question and complete the browser sign-in when Claude prompts you.
 
-0.11.0 renamed the plugin from `addison` to `summation` (slash commands `/summation:…`). If you still have `addison@summation` installed, uninstall it and install `summation@summation`.
+0.11.0 renamed the plugin from `addison` to `summation` (slash commands `/summation:…`). If you still have `addison@summation`, uninstall it and install `summation@summationai`. After the GitHub repo rename, the first line becomes `summationai/summation-plugin`.
 
 **claude.ai / Claude Desktop (org admins):** Admin console → Plugins → Add plugins → *Sync from GitHub* (this repo) or *Upload a file* using the latest release zip:
 

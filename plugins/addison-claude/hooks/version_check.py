@@ -45,7 +45,7 @@ def main() -> None:
 
     internal = name.endswith("-internal")
     market_file = "marketplace.internal.json" if internal else "marketplace.json"
-    market_name = "summation-internal" if internal else "summation"
+    market_name = "summationai-internal" if internal else "summationai"
 
     # At most one network check per calendar day, per edition.
     data_dir = os.environ.get("CLAUDE_PLUGIN_DATA") or str(pathlib.Path.home() / ".summation")
