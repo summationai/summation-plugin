@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Assemble plugins/addison-claude skills from the shared skills/ tree (source of truth).
-# Edit skills/ — never hand-edit plugins/addison-claude/skills (generated copy).
+# Assemble plugins/summation-claude skills from the shared skills/ tree (source of truth).
+# Edit skills/ — never hand-edit plugins/summation-claude/skills (generated copy).
 set -euo pipefail
 cd "$(dirname "$0")"
 
 SKILLS=skills
-DST=plugins/addison-claude
+DST=plugins/summation-claude
 
 if [[ ! -d "$SKILLS" ]]; then
   echo "refusing to build: missing $SKILLS/ (canonical skill source)" >&2

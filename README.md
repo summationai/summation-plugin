@@ -47,7 +47,7 @@ Then `$summation-signin` or any data ask. Skills use `$summation-…` mentions (
 
 **Codex desktop app (Add plugin marketplace):**
 
-Layout matches the `openai/plugins` convention: marketplace catalog at `.agents/plugins/marketplace.json`, plugin package at `plugins/addison-codex/`.
+Layout matches the `openai/plugins` convention: marketplace catalog at `.agents/plugins/marketplace.json`, plugin package at `plugins/summation-codex/`.
 
 | Field | Value |
 |---|---|
@@ -61,10 +61,10 @@ If you must sparse-checkout, include **both** the catalog and the package (not t
 
 ```text
 .agents/plugins
-plugins/addison-codex
+plugins/summation-codex
 ```
 
-Sparse path `plugins/addison-codex` alone fails with “marketplace root does not contain a supported manifest” — that directory is the plugin, not the marketplace.
+Sparse path `plugins/summation-codex` alone fails with “marketplace root does not contain a supported manifest” — that directory is the plugin, not the marketplace.
 
 ## Contents
 
@@ -107,22 +107,22 @@ user approval before publishing anywhere.
 |---|---|
 | **`skills/`** | **Source of truth** — edit skills here only |
 | **`assets/`** | Brand images for Codex (`logo.png`, `logo-dark.png`, `icon.png`) — copied into the Codex package by `./build-codex.sh` |
-| `plugins/addison-claude/` | Claude package (skills copied in by `./build-claude.sh`) |
-| `plugins/addison-codex/` | Codex package (generated: mention syntax + MCP shape + assets) |
+| `plugins/summation-claude/` | Claude package (skills copied in by `./build-claude.sh`) |
+| `plugins/summation-codex/` | Codex package (generated: mention syntax + MCP shape + assets) |
 
 ```bash
 # edit skills/…
 ./build-plugins.sh        # Claude + Codex from skills/
-claude --plugin-dir ./plugins/addison-claude
-claude plugin validate ./plugins/addison-claude
+claude --plugin-dir ./plugins/summation-claude
+claude plugin validate ./plugins/summation-claude
 ./build-zip.sh            # dist/summation-plugin.zip for Desktop upload
 ```
 
-CI regenerates both packages and fails on drift. **Never hand-edit** `plugins/addison-*/skills` or `plugins/addison-codex` (see `plugins/addison-codex/GENERATED.md`).
+CI regenerates both packages and fails on drift. **Never hand-edit** `plugins/summation-*/skills` or `plugins/summation-codex` (see `plugins/summation-codex/GENERATED.md`).
 
 ## Release
 
-1. Bump `version` in `plugins/addison-claude/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
+1. Bump `version` in `plugins/summation-claude/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
 2. Run `./build-plugins.sh`, commit, merge to `main`.
 3. Tag matching the version (for example `v0.11.0`) and push the tag. The release workflow publishes `summation-plugin.zip` as **Latest**.
 

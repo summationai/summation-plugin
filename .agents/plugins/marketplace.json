@@ -8,7 +8,7 @@
       "name": "summation",
       "source": {
         "source": "local",
-        "path": "./plugins/addison-codex"
+        "path": "./plugins/summation-codex"
       },
       "policy": {
         "installation": "AVAILABLE",
