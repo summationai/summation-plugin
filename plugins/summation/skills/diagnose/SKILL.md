@@ -38,6 +38,10 @@ If empty: “You’re signed in, but there’s no business data yet” → the `
 - **Long report / analysis** → still normal for several minutes; keep the user informed.  
 - If support is needed and a `request_id` exists, include it **after** a plain explanation.
 
+## 4. CLI (optional)
+
+If the user is scripting or `sumcli` failed: follow `../api/references/sumcli.md`. Plugin minimum is **0.1.3**; SessionStart auto-installs on Claude Code. On Windows use the PowerShell or cmd.exe bootstrap, never `curl | sh`.
+
 ## Rules
 
 - Do **not** download OpenAPI or debug connector key names here.  

@@ -1,0 +1,9 @@
+{
+  "minVersion": "0.1.3",
+  "upgradePolicy": "latest-is-compatible",
+  "bootstrap": {
+    "posix": "curl -fsSL https://install.summation.com/sumcli | sh",
+    "powershell": "irm https://install.summation.com/sumcli.ps1 | iex",
+    "cmd": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://install.summation.com/sumcli.ps1 | iex\""
+  }
+}

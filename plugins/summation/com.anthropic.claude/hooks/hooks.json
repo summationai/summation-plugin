@@ -6,11 +6,16 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/version_check.py\""
+            "timeout": 180,
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ensure_sumcli.py\" || python \"${CLAUDE_PLUGIN_ROOT}/hooks/ensure_sumcli.py\" || py -3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ensure_sumcli.py\""
           },
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/opportunity_nudge.py\""
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/version_check.py\" || python \"${CLAUDE_PLUGIN_ROOT}/hooks/version_check.py\" || py -3 \"${CLAUDE_PLUGIN_ROOT}/hooks/version_check.py\""
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/opportunity_nudge.py\" || python \"${CLAUDE_PLUGIN_ROOT}/hooks/opportunity_nudge.py\" || py -3 \"${CLAUDE_PLUGIN_ROOT}/hooks/opportunity_nudge.py\""
           }
         ]
       }
