@@ -9,7 +9,7 @@ The host MCP client authenticates to the hosted Summation MCP server. The plugin
 | Gate | (none) | Shell: `SUMMATION_PLUGIN_INTERNAL=1` (or `ADDISON_PLUGIN_INTERNAL`) when launching the host CLI |
 | Environments | One — plugin `mcp.json` URL | User picks **prod** / **staging** / **sandbox** at sign-in |
 | Tenant | Org approved in browser | Same; skill tells user to switch org on the web app first if needed |
-| MCP URL | Bundled headerless entry | User-scope headerless `summation` pointed at the chosen env’s allowlisted URL |
+| MCP URL | Bundled entry, no credential header | User-scope headerless `summation` pointed at the chosen env’s allowlisted URL |
 | Skill prompts | Never ask env or tenant | Ask env; explain tenant binding |
 
 Detect mode in skills:
@@ -39,7 +39,9 @@ Do **not** pass `--header`, an `Authorization` header, or any bearer token — t
 
 ## Happy path (both)
 
-1. Plugin loads headerless `mcp.json` (default env for external).
+1. Plugin loads the bundled MCP entry (default env for external). It carries no
+   credential — only `x-summation-client-context`, an analytics token. OAuth owns
+   `Authorization`.
 2. First tool call / explicit authenticate → MCP OAuth → browser → host stores token.
 3. Tools run; identity/tenant from server-side claims.
 
