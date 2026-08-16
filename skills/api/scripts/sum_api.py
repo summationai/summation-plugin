@@ -569,6 +569,33 @@ def _urlopen(req: urllib.request.Request, timeout: int):
     return opener.open(req, timeout=timeout)
 
 
+def client_user_agent() -> str:
+    """User-Agent carrying the surface token sum-api uses for analytics.
+
+    sum-api classifies on the token alone: "claude-plugin" anywhere -> claude-plugin,
+    "codex-plugin" anywhere -> codex-plugin. Analytics only, never authorization.
+    Best-effort: any failure falls back to a bare token rather than raising in the
+    request path.
+    """
+    token = "claude-plugin"
+    try:
+        if os.environ.get("CODEX_PLUGIN_ROOT") or os.environ.get("CODEX_APP"):
+            token = "codex-plugin"
+        version = "0"
+        root = os.environ.get("PLUGIN_ROOT") or os.environ.get("CLAUDE_PLUGIN_ROOT")
+        if not root:
+            # <root>/skills/api/scripts/sum_api.py -> <root>
+            root = str(pathlib.Path(__file__).resolve().parents[3])
+        manifest = pathlib.Path(root) / "plugin.json"
+        if manifest.is_file():
+            declared = json.loads(manifest.read_text(encoding="utf-8")).get("version")
+            if isinstance(declared, str) and declared.strip():
+                version = declared.strip()
+        return f"{token}/{version}"
+    except Exception:
+        return token
+
+
 def request_json(
     method: str,
     path_or_url: str,
@@ -590,7 +617,7 @@ def request_json(
         url = f"{url}{separator}{urllib.parse.urlencode(clean_query)}"
 
     data = None
-    request_headers = {"Accept": "application/json"}
+    request_headers = {"Accept": "application/json", "User-Agent": client_user_agent()}
     if headers:
         request_headers.update(headers)
     if body is not None:
@@ -707,7 +734,7 @@ def request_stream(
             separator = "&" if "?" in url else "?"
             url = f"{url}{separator}{urllib.parse.urlencode(clean_query)}"
 
-    request_headers = {"Accept": "text/event-stream"}
+    request_headers = {"Accept": "text/event-stream", "User-Agent": client_user_agent()}
     if headers:
         for key, value in headers.items():
             if key.lower() != "accept":
