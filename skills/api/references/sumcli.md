@@ -29,3 +29,19 @@ Read `result.version`. Compare as dotted integers. Need **≥ 0.1.3**.
 - Already ≥ 0.1.3: continue. Do not pin an upper bound.
 
 After install, if `sumcli` is not on `PATH`, add `uv tool dir --bin` (usually `~/.local/bin`) and retry `--version`.
+
+## 4. State intent
+
+Agents must send the human's request **in their own words** so later events can join to a goal. See the **`sumcli` skill**.
+
+```bash
+export SUMCLI_INTENT="convert my weekly recap"          # once per session
+export SUMCLI_CLIENT_CONTEXT="claude-plugin"            # Codex: codex-plugin
+sumcli --intent "convert my weekly recap" projects list
+```
+
+- Right: `--intent "convert my weekly recap"` (what they asked).
+- Wrong: `--intent "list projects"` (a command summary — joins nothing).
+- `--intent` is a root option and must precede the subcommand. Limit is 500 bytes after encoding.
+- **Exempt:** discovery, `--help`, `--version`, `update`, `auth`, `config`, `filesystem`.
+- Missing intent warns on stderr and still runs. An oversized value is refused (`INTENT_TOO_LONG`).

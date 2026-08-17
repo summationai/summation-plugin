@@ -8,7 +8,7 @@
       "name": "summation",
       "source": "./plugins/summation",
       "description": "Summation's AI data analyst: ask data questions, search the catalog, run bounded SQL, generate and validate reports, export PDF/DOCX/Markdown. MCP-native auth and tools.",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "author": {
         "name": "Summation"
       },
