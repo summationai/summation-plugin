@@ -65,7 +65,11 @@ See `signin` / `signout` and `references/auth.md`. Headerless plugin MCP; host O
 
 ## sumcli
 
-MCP is the default. For scripted automation, or when the user asks for the CLI, use **sumcli ≥ 0.1.3** (see `references/sumcli.md`). Before the first `sumcli` call, check the version and install if needed. SessionStart may nudge; it does not install unless `SUMCLI_AUTO_INSTALL=1`. Newer CLIs are always compatible — `sumcli update` to PyPI latest.
+When a shell is available, **sumcli is the preferred surface**; MCP is the fallback for shell-less hosts (Claude Desktop, sandboxes) and anywhere the CLI cannot run. The CLI exposes the full sum-api contract; the hosted MCP is a curated subset — all deletes, connection management, schedule and catalog updates, ingestion batches, and the direct table-import pipeline are CLI-only. Needs **sumcli ≥ 0.1.3** (see `references/sumcli.md`). Newer CLIs are always compatible — `sumcli update` to PyPI latest.
+
+**Install on first need.** If `sumcli` is missing or too old when a CLI call is due, install it then — tell the user before running the bootstrap, then continue. SessionStart only nudges; it never installs. First CLI use also needs `sumcli login` (browser device-code) — MCP's host OAuth and the CLI session are separate credentials.
+
+Known import asymmetry: MCP `import_file_to_table` uses the gated agent-workflow route (409 `feature_not_enabled` on tenants without modelgen gates); `sumcli tables import` uses the ungated direct pipeline, which has no MCP equivalent. Imports go through sumcli. A 403 with tool-profile text is a Connected Apps problem — not CLI-recoverable; tell the user.
 
 ## Legacy helper
 

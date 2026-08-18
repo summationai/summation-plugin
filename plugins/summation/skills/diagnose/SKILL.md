@@ -38,9 +38,9 @@ If empty: “You’re signed in, but there’s no business data yet” → the `
 - **Long report / analysis** → still normal for several minutes; keep the user informed.  
 - If support is needed and a `request_id` exists, include it **after** a plain explanation.
 
-## 4. CLI (optional)
+## 4. CLI
 
-If the user is scripting or `sumcli` failed: follow `../api/references/sumcli.md`. Plugin minimum is **0.1.3**. Check the version and install before the first call. On Windows use the PowerShell or cmd.exe bootstrap, never `curl | sh`.
+sumcli is the preferred surface when a shell is available (plugin minimum **0.1.3**); MCP is the fallback for shell-less hosts. If sumcli is missing or failed: follow `../api/references/sumcli.md` — install at first need, telling the user first. On Windows use the PowerShell or cmd.exe bootstrap, never `curl | sh`.
 
 ## Rules
 

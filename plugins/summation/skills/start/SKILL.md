@@ -5,7 +5,7 @@ description: Summation onboarding — sign in, map data, meet the analyst, first
 
 # Summation Start
 
-Walk a new user from zero to a first useful answer **in plain language**. No HTML artifacts or welcome steppers. Prefer MCP tools + domain skills. For “what’s supported?”, always fetch **`https://docs.summation.com/llms.txt`** (see `../api/references/product.md`). Scripted CLI use needs **sumcli ≥ 0.1.3** — check the version and install before the first call (`../api/references/sumcli.md`).
+Walk a new user from zero to a first useful answer **in plain language**. No HTML artifacts or welcome steppers. Prefer **sumcli** when a shell is available (≥ 0.1.3, install at first need — `../api/references/sumcli.md`); MCP tools + domain skills are the fallback for shell-less hosts. For “what’s supported?”, always fetch **`https://docs.summation.com/llms.txt`** (see `../api/references/product.md`).
 
 ## Checklist (optional one-liner in chat)
 

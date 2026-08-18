@@ -1,8 +1,8 @@
 # sumcli (plugin ↔ CLI)
 
-The plugin's day-to-day work is MCP. **sumcli** is the scripted/automation CLI and needs **≥ 0.1.3**. Newer CLI releases are always compatible (`sumcli update` → PyPI latest). MCP work does not require sumcli.
+**sumcli is the plugin's preferred surface when a shell is available.** MCP is the fallback for shell-less hosts (Claude Desktop, sandboxes) and anywhere the CLI cannot run. Needs **≥ 0.1.3**; newer CLI releases are always compatible (`sumcli update` → PyPI latest).
 
-Claude Code **SessionStart** nudges once a day if sumcli is missing or too old; it does not install. Opt in to auto-install with `SUMCLI_AUTO_INSTALL=1`. Before any `sumcli` command (every host, including Codex), check the version here and install if needed.
+Install on **first need**: before the first `sumcli` command (every host, including Codex), check the version here and install if needed — tell the user before running a bootstrap. Claude Code **SessionStart** nudges once a day if sumcli is missing or too old; it does not install (opt in to auto-install with `SUMCLI_AUTO_INSTALL=1`).
 
 ## 1. Detect the shell
 
@@ -29,3 +29,7 @@ Read `result.version`. Compare as dotted integers. Need **≥ 0.1.3**.
 - Already ≥ 0.1.3: continue. Do not pin an upper bound.
 
 After install, if `sumcli` is not on `PATH`, add `uv tool dir --bin` (usually `~/.local/bin`) and retry `--version`.
+
+## 4. Sign in
+
+First CLI use needs `sumcli login` (browser device-code). This credential is separate from the MCP host OAuth session — being signed in over MCP does not sign in the CLI, and vice versa. Config lives in `~/.summation/summation-config`; never paste tokens into chat.

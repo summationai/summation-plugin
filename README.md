@@ -1,6 +1,6 @@
 # Summation plugin for Claude Code and Codex
 
-Plugin marketplace for Summation. One plugin, `summation`, brings the analyst into Claude Code, Claude Desktop, and OpenAI Codex: data questions over the hosted Summation MCP server, report generation and export (PDF/DOCX/Markdown), catalog discovery, and bounded SQL.
+Plugin marketplace for Summation. One plugin, `summation`, brings the analyst into Claude Code, Claude Desktop, and OpenAI Codex: data questions, report generation and export (PDF/DOCX/Markdown), catalog discovery, and bounded SQL — through sumcli when a shell is available, over the hosted Summation MCP server otherwise.
 
 Install the plugin, approve Summation in the browser once, then ask in plain English. No API keys and no secrets pasted into chat. Auth is host-managed MCP OAuth; the plugin ships a headerless connection to production:
 
@@ -26,7 +26,7 @@ Then `/summation:signin` — or run `/summation:start` / ask a data question and
 
 ## sumcli
 
-Day-to-day work is MCP. Scripted automation uses [sumcli](https://github.com/summationai/summation-cli) **≥ 0.1.3**. Newer CLI releases are always compatible (`sumcli update` to PyPI latest). The plugin itself does not require sumcli for MCP work.
+When a shell is available, [sumcli](https://github.com/summationai/summation-cli) (**≥ 0.1.3**) is the plugin's preferred surface — it exposes the full sum-api contract, where the hosted MCP server is a curated subset. MCP is the fallback for shell-less hosts (Claude Desktop, sandboxes). Skills install sumcli at first need; newer CLI releases are always compatible (`sumcli update` to PyPI latest).
 
 Claude Code **SessionStart** detects a missing or too-old binary and prints the install command. It does not run the installer. Opt in with `SUMCLI_AUTO_INSTALL=1`.
 
