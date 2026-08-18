@@ -1,4 +1,6 @@
-# Auth Reference (MCP-native)
+# Auth Reference (MCP)
+
+This file covers the **MCP session** (host OAuth). The **CLI session** is separate — `sumcli login`, see `sumcli.md` §4. Being signed in on one does not sign in the other.
 
 The host MCP client authenticates to the hosted Summation MCP server. The plugin does not mint or store customer credentials for the happy path.
 
