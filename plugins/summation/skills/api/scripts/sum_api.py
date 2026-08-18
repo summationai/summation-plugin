@@ -582,7 +582,11 @@ def client_user_agent() -> str:
         if os.environ.get("CODEX_PLUGIN_ROOT") or os.environ.get("CODEX_APP"):
             token = "codex-plugin"
         version = "0"
-        root = os.environ.get("PLUGIN_ROOT") or os.environ.get("CLAUDE_PLUGIN_ROOT")
+        root = (
+            os.environ.get("PLUGIN_ROOT")
+            or os.environ.get("CLAUDE_PLUGIN_ROOT")
+            or os.environ.get("CODEX_PLUGIN_ROOT")
+        )
         if not root:
             # <root>/skills/api/scripts/sum_api.py -> <root>
             root = str(pathlib.Path(__file__).resolve().parents[3])

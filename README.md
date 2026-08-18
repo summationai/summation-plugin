@@ -26,7 +26,7 @@ Then `/summation:signin` — or run `/summation:start` / ask a data question and
 
 ## sumcli
 
-Day-to-day work is MCP. Scripted automation uses [sumcli](https://github.com/summationai/summation-cli) **≥ 0.1.3**. Newer CLI releases are always compatible (`sumcli update` to PyPI latest). The plugin itself does not require sumcli for MCP work.
+Day-to-day work is MCP. Scripted automation uses [sumcli](https://github.com/summationai/summation-cli) **≥ 0.1.4**. Newer CLI releases are always compatible (`sumcli update` to PyPI latest). The plugin itself does not require sumcli for MCP work.
 
 Claude Code **SessionStart** detects a missing or too-old binary and prints the install command. It does not run the installer. Opt in with `SUMCLI_AUTO_INSTALL=1`.
 

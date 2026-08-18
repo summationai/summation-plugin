@@ -5,9 +5,12 @@ import json
 import pathlib
 import re
 import unittest
+import urllib.error
+import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "packaging" / "com.anthropic.claude" / "hooks" / "sumcli.json"
+PYPI_JSON = "https://pypi.org/pypi/summation-cli/json"
 
 # Lines that declare a sumcli version floor. A stale copy in a skill has
 # agents installing a version the SessionStart hook then rejects.
@@ -49,6 +52,23 @@ class FloorProseTests(unittest.TestCase):
                     f"hooks/sumcli.json minVersion is {floor}",
                 )
         self.assertGreater(found, 0, "expected at least one prose floor to check")
+
+    def test_floor_is_published_on_pypi(self) -> None:
+        """A floor that is not on PyPI makes the SessionStart nudge the broken path."""
+        floor = json.loads(CONTRACT.read_text(encoding="utf-8"))["minVersion"]
+        try:
+            with urllib.request.urlopen(PYPI_JSON, timeout=15) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            self.skipTest(f"PyPI unreachable: {exc}")
+        releases = payload.get("releases") or {}
+        latest = str((payload.get("info") or {}).get("version") or "")
+        self.assertIn(
+            floor,
+            releases,
+            f"hooks/sumcli.json minVersion {floor} is not a published "
+            f"summation-cli release (PyPI latest is {latest or 'unknown'})",
+        )
 
 
 if __name__ == "__main__":

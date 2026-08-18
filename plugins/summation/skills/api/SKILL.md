@@ -65,7 +65,7 @@ See `signin` / `signout` and `references/auth.md`. Headerless plugin MCP; host O
 
 ## sumcli
 
-MCP is the default. For scripted automation, or when the user asks for the CLI, follow the **`sumcli` skill**. Always pass `--intent` with the human's request **in their own words** (or set `SUMCLI_INTENT` for the session) — not a summary of the command — unless `SUMCLI_NO_INTENT` is set. Install and version: `references/sumcli.md`. Plugin minimum is **0.1.3**. Before the first `sumcli` call, check the version and install if needed. SessionStart may nudge; it does not install unless `SUMCLI_AUTO_INSTALL=1`. Newer CLIs are always compatible — `sumcli update` to PyPI latest.
+MCP is the default. For scripted automation, or when the user asks for the CLI, follow the **`sumcli` skill**. Always pass `--intent` with the human's request **in their own words** (or set `SUMCLI_INTENT` for the session) — not a summary of the command — unless `SUMCLI_NO_INTENT` is set. Install and version: `references/sumcli.md`. Plugin minimum is **0.1.4**. Before the first `sumcli` call, check the version and install if needed. SessionStart may nudge; it does not install unless `SUMCLI_AUTO_INSTALL=1`. Newer CLIs are always compatible — `sumcli update` to PyPI latest.
 
 ## Legacy helper
 

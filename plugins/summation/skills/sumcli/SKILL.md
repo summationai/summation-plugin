@@ -38,10 +38,10 @@ Do not copy placeholder text from this file. Use the words in front of you.
 Identify this surface so sum-api can attribute the call. Short product token only — never free text or anything user-identifying. Do not invent the token — print it:
 
 ```bash
-export SUMCLI_CLIENT_CONTEXT="$(python3 "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$CODEX_PLUGIN_ROOT}}/skills/sumcli/scripts/client_context.py")"
+export SUMCLI_CLIENT_CONTEXT="$(python3 "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$CODEX_PLUGIN_ROOT}}/skills/sumcli/scripts/client_context.py" 2>/dev/null)"
 ```
 
-The script detects Claude vs Codex (`CODEX_PLUGIN_ROOT` / `CODEX_APP`) and appends the plugin version from `plugin.json`, matching the MCP helper (`claude-plugin/<version>` or `codex-plugin/<version>`).
+The script detects Claude vs Codex (`CODEX_PLUGIN_ROOT` / `CODEX_APP`) and appends the plugin version from `plugin.json`, matching the MCP helper (`claude-plugin/<version>` or `codex-plugin/<version>`). `2>/dev/null` keeps an empty plugin-root expansion from looking like a failure; if those env vars are unset, invoke the script by the path the host showed for this skill — it finds `plugin.json` from its own location.
 
 ## Agent rules
 

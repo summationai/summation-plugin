@@ -47,9 +47,9 @@ class VersionTests(unittest.TestCase):
 
 
 class ContractTests(unittest.TestCase):
-    def test_shipped_floor_is_013(self) -> None:
+    def test_shipped_floor_is_014(self) -> None:
         spec = es.load_contract()
-        self.assertEqual(spec["minVersion"], "0.1.3")
+        self.assertEqual(spec["minVersion"], "0.1.4")
         self.assertEqual(spec["upgradePolicy"], "latest-is-compatible")
         self.assertIn("curl", spec["bootstrap"]["posix"])
         self.assertIn("sumcli.ps1", spec["bootstrap"]["powershell"])
@@ -110,7 +110,7 @@ class EnsureTests(unittest.TestCase):
     def test_silent_when_new_enough(self) -> None:
         with (
             patch.object(es, "which_sumcli", return_value="/bin/sumcli"),
-            patch.object(es, "read_version", return_value="0.1.3"),
+            patch.object(es, "read_version", return_value="0.1.4"),
             patch.object(es, "run_bootstrap") as boot,
             patch.object(es, "run_update") as upd,
         ):
@@ -163,7 +163,7 @@ class EnsureTests(unittest.TestCase):
         os.environ["SUMCLI_AUTO_INSTALL"] = "1"
         with (
             patch.object(es, "which_sumcli", return_value="/bin/sumcli"),
-            patch.object(es, "read_version", side_effect=["0.1.1", "0.1.3"]),
+            patch.object(es, "read_version", side_effect=["0.1.1", "0.1.4"]),
             patch.object(es, "run_update", return_value=(True, "")),
             patch.object(es, "run_bootstrap") as boot,
             patch.object(es, "prepend_tool_bins"),
@@ -174,13 +174,13 @@ class EnsureTests(unittest.TestCase):
         self.assertIsNotNone(msg)
         assert msg is not None
         self.assertIn("0.1.1", msg)
-        self.assertIn("0.1.3", msg)
+        self.assertIn("0.1.4", msg)
 
     def test_opt_in_install_when_missing(self) -> None:
         os.environ["SUMCLI_AUTO_INSTALL"] = "1"
         with (
             patch.object(es, "which_sumcli", side_effect=[None, "/bin/sumcli"]),
-            patch.object(es, "read_version", return_value="0.1.3"),
+            patch.object(es, "read_version", return_value="0.1.4"),
             patch.object(es, "run_bootstrap", return_value=(True, "")),
             patch.object(es, "prepend_tool_bins"),
             patch.object(es, "_on_login_path", return_value=True),
@@ -189,7 +189,7 @@ class EnsureTests(unittest.TestCase):
         self.assertIsNotNone(msg)
         assert msg is not None
         self.assertIn("Installed", msg)
-        self.assertIn("0.1.3", msg)
+        self.assertIn("0.1.4", msg)
 
     def test_not_uv_managed_does_not_bootstrap(self) -> None:
         os.environ["SUMCLI_AUTO_INSTALL"] = "1"
@@ -211,7 +211,7 @@ class EnsureTests(unittest.TestCase):
         os.environ["SUMCLI_AUTO_INSTALL"] = "1"
         with (
             patch.object(es, "which_sumcli", side_effect=[None, "/tmp/uv/sumcli"]),
-            patch.object(es, "read_version", return_value="0.1.3"),
+            patch.object(es, "read_version", return_value="0.1.4"),
             patch.object(es, "run_bootstrap", return_value=(True, "")),
             patch.object(es, "prepend_tool_bins"),
             patch.object(es, "_on_login_path", return_value=False),
@@ -226,7 +226,7 @@ class EnsureTests(unittest.TestCase):
         os.environ["SUMCLI_AUTO_INSTALL"] = "1"
         with (
             patch.object(es, "which_sumcli", return_value="/bin/sumcli"),
-            patch.object(es, "read_version", side_effect=["0.1.1", "0.1.3"]),
+            patch.object(es, "read_version", side_effect=["0.1.1", "0.1.4"]),
             patch.object(es, "run_update", return_value=(True, "")) as upd,
             patch.object(es, "run_bootstrap") as boot,
             patch.object(es, "prepend_tool_bins"),
