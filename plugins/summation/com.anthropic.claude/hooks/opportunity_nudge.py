@@ -28,12 +28,14 @@ def emit(system_message: str | None = None) -> None:
 
 
 def main() -> None:
-    root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    root = os.environ.get("PLUGIN_ROOT") or os.environ.get("CLAUDE_PLUGIN_ROOT")
     if not root:
         emit()
 
     data_dir = pathlib.Path(
-        os.environ.get("CLAUDE_PLUGIN_DATA") or (pathlib.Path.home() / ".summation")
+        os.environ.get("PLUGIN_DATA")
+        or os.environ.get("CLAUDE_PLUGIN_DATA")
+        or (pathlib.Path.home() / ".summation" / "plugin")
     )
     try:
         name = "summation"

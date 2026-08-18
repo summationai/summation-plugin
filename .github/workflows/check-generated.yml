@@ -18,6 +18,9 @@ jobs:
         run: |
           ./build-plugins.sh
 
+      - name: Test sumcli ensure hook
+        run: python3 tests/test_ensure_sumcli.py
+
       - name: Fail if generated package drifts from skills/ + packaging/
         run: |
           find plugins -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true

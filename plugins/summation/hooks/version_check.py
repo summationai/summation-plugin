@@ -31,7 +31,7 @@ def version_tuple(value: str) -> tuple[int, ...]:
 
 
 def main() -> None:
-    root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    root = os.environ.get("PLUGIN_ROOT") or os.environ.get("CLAUDE_PLUGIN_ROOT")
     if not root:
         emit()
     try:
@@ -48,7 +48,11 @@ def main() -> None:
     market_name = "summationai-internal" if internal else "summationai"
 
     # At most one network check per calendar day, per edition.
-    data_dir = os.environ.get("CLAUDE_PLUGIN_DATA") or str(pathlib.Path.home() / ".summation")
+    data_dir = (
+        os.environ.get("PLUGIN_DATA")
+        or os.environ.get("CLAUDE_PLUGIN_DATA")
+        or str(pathlib.Path.home() / ".summation" / "plugin")
+    )
     stamp = pathlib.Path(data_dir) / f".version-check-{name}"
     today = time.strftime("%Y-%m-%d")
     try:
