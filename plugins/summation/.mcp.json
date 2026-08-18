@@ -3,7 +3,7 @@
     "type": "http",
     "url": "https://mcp.summation.com/mcp",
     "headers": {
-      "x-summation-client-context": "claude-plugin/1.0.1"
+      "x-summation-client-context": "claude-plugin/1.1.0"
     }
   }
 }
