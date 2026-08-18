@@ -5,7 +5,7 @@ description: Search and describe Summation tables, views, and catalog metadata. 
 
 # Summation Catalog
 
-MCP only. Show **human-readable names** first.
+Execute via **sumcli** when a shell is available (see `../api/references/sumcli.md`); the MCP tools below are the shell-less fallback. Show **human-readable names** first.
 
 ## Flow
 

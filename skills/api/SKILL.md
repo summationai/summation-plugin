@@ -45,7 +45,7 @@ Prefer the **live server’s tool list** over this doc if names differ.
 ## Client behaviors (required)
 
 - **Long tools** (`ask_analyst`, `start_report`, `validate_report`, `import_file_to_table`): tell the user you’re working; **reports can take a few minutes** — brief progress every ~30–45s until status is terminal.  
-- **Auth errors** → signin.  
+- **Auth errors** → CLI: `sumcli login`; MCP: signin.  
 - **Views** may 404 on ids from search — fall back to tables.  
 - **Schedules** that email people — confirm recipients + cadence (with timezone) first.  
 - **Secrets:** never in tool args or chat; **connect** skill + web app for passwords.  
@@ -74,7 +74,7 @@ Known import asymmetry: MCP `import_file_to_table` uses the gated agent-workflow
 
 ## Legacy helper
 
-`scripts/sum_api.py` is **not** for normal customer flows. Prefer MCP + domain skills (`signin`, `diagnose`, …).
+`scripts/sum_api.py` is **not** for normal customer flows. Prefer sumcli / MCP + domain skills (`signin`, `diagnose`, …).
 
 If you must run the helper (internal/debug only), **never** use relative `../api/scripts/sum_api.py` — hosts often mount skills as `summation:api` / `summation:doctor`, so `../api` resolves outside the plugin and fails. Use the plugin root:
 

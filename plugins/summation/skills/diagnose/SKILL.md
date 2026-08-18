@@ -46,5 +46,5 @@ sumcli is the preferred surface when a shell is available (plugin minimum **0.1.
 
 - Do **not** download OpenAPI or debug connector key names here.  
 - Do **not** dump internal tool ids into chat.  
-- Do **not** run `python3 ../api/scripts/sum_api.py doctor` (or any relative `../api/...` path). Health checks are MCP-only; relative paths break when skills mount as `summation:api`.  
+- Do **not** run `python3 ../api/scripts/sum_api.py doctor` (or any relative `../api/...` path) — relative paths break when skills mount as `summation:api`.  
 - If they ask “is X supported?”, fetch **`https://docs.summation.com/llms.txt`** then the linked page (see `../api/references/product.md`).

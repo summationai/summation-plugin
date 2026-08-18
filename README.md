@@ -26,7 +26,7 @@ Then `/summation:signin` — or run `/summation:start` / ask a data question and
 
 ## sumcli
 
-When a shell is available, [sumcli](https://github.com/summationai/summation-cli) (**≥ 0.1.3**) is the plugin's preferred surface — it exposes the full sum-api contract, where the hosted MCP server is a curated subset. MCP is the fallback for shell-less hosts (Claude Desktop, sandboxes). Skills install sumcli at first need; newer CLI releases are always compatible (`sumcli update` to PyPI latest).
+When a shell is available, [sumcli](https://github.com/summationai/summation-cli) (**≥ 0.1.3**) is the plugin's preferred surface — it exposes the full sum-api contract, where the hosted MCP server is a curated subset. MCP is the fallback for shell-less hosts (Claude Desktop, sandboxes). Skills install sumcli at first need, after an explicit yes; newer CLI releases are always compatible (`sumcli update` to PyPI latest).
 
 Claude Code **SessionStart** detects a missing or too-old binary and prints the install command. It does not run the installer. Opt in with `SUMCLI_AUTO_INSTALL=1`.
 
