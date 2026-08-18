@@ -32,11 +32,11 @@ After install, if `sumcli` is not on `PATH`, add `uv tool dir --bin` (usually `~
 
 ## 4. State intent
 
-Agents must send the human's request **in their own words** so later events can join to a goal. See the **`sumcli` skill**.
+Agents must send the human's request **in their own words** so later events can join to a goal. See the **`sumcli` skill**. If `SUMCLI_NO_INTENT` is set, skip `--intent` / `SUMCLI_INTENT` — the CLI will not send the header.
 
 ```bash
 export SUMCLI_INTENT="convert my weekly recap"          # once per session
-export SUMCLI_CLIENT_CONTEXT="claude-plugin"            # Codex: codex-plugin
+export SUMCLI_CLIENT_CONTEXT="$(python3 "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$CODEX_PLUGIN_ROOT}}/skills/sumcli/scripts/client_context.py")"
 sumcli --intent "convert my weekly recap" projects list
 ```
 
@@ -45,3 +45,4 @@ sumcli --intent "convert my weekly recap" projects list
 - `--intent` is a root option and must precede the subcommand. Limit is 500 bytes after encoding.
 - **Exempt:** discovery, `--help`, `--version`, `update`, `auth`, `config`, `filesystem`.
 - Missing intent warns on stderr and still runs. An oversized value is refused (`INTENT_TOO_LONG`).
+- Caller context is a versioned product token (`claude-plugin/<version>` or `codex-plugin/<version>`). Print it from the script above — do not invent one.

@@ -18,8 +18,8 @@ jobs:
         run: |
           ./build-plugins.sh
 
-      - name: Test sumcli ensure hook
-        run: python3 tests/test_ensure_sumcli.py
+      - name: Test sumcli contracts
+        run: python3 -m unittest discover -s tests -v
 
       - name: Fail if generated package drifts from skills/ + packaging/
         run: |

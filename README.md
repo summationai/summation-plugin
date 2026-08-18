@@ -91,7 +91,7 @@ Claude Code invokes a skill as `/summation:<name>`; Codex invokes it as `$summat
 | `start` | guided onboarding: connect → map data → meet the analyst → first report |
 | `opportunities` | suggest workflows from recent local chats + live catalog (consent first) |
 | `api` | MCP tool map + safety rules |
-| `sumcli` | scripted CLI; always pass `--intent` with the human's words |
+| `sumcli` | scripted CLI; always pass `--intent` with the human's words unless `SUMCLI_NO_INTENT` is set |
 | `signin` | connect or re-authenticate Summation (`login` is an alias) |
 | `signout` | disconnect Summation (`logout` is an alias) |
 | `diagnose` | check connectivity and what data is visible (`doctor` is an alias) |
@@ -116,7 +116,8 @@ plugin first (catalog discovery before SQL; never guess table names). Prefer
 exported report content over raw internals, cite request_ids on failures, and
 run the `validate` skill before any report is shared externally. Drafts need explicit
 user approval before publishing anywhere. When using sumcli, pass `--intent` with
-the human's request in their own words (or set SUMCLI_INTENT for the session).
+the human's request in their own words (or set SUMCLI_INTENT for the session),
+unless SUMCLI_NO_INTENT is set.
 ```
 
 ## Development

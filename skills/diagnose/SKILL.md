@@ -40,7 +40,7 @@ If empty: “You’re signed in, but there’s no business data yet” → the `
 
 ## 4. CLI (optional)
 
-If the user is scripting or `sumcli` failed: follow the **`sumcli` skill** and `../api/references/sumcli.md`. Always pass `--intent` with the human's words. Plugin minimum is **0.1.3**. Check the version and install before the first call. On Windows use the PowerShell or cmd.exe bootstrap, never `curl | sh`.
+If the user is scripting or `sumcli` failed: follow the **`sumcli` skill** and `../api/references/sumcli.md`. Always pass `--intent` with the human's words unless `SUMCLI_NO_INTENT` is set. Plugin minimum is **0.1.3**. Check the version and install before the first call. On Windows use the PowerShell or cmd.exe bootstrap, never `curl | sh`.
 
 ## Rules
 

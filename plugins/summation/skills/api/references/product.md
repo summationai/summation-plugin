@@ -36,7 +36,7 @@ Claude invokes `/summation:name`. Codex invokes `$summation-name`. Same skills.
 | Recurring emailed analysis | playbooks + `schedule` |
 | Workflow ideas from recent IDE chats | `opportunities` (local scan + catalog) |
 | Sign in / health | `signin`, `diagnose` |
-| Scripted CLI / automation | `sumcli` skill — pass `--intent` with the human's words |
+| Scripted CLI / automation | `sumcli` skill — pass `--intent` with the human's words unless `SUMCLI_NO_INTENT` is set |
 
 The **list of warehouses and features** still comes from `llms.txt` + linked docs, not from hardcoding here.
 
