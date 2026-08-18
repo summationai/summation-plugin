@@ -2,7 +2,7 @@
 
 **sumcli is the plugin's preferred surface when a shell is available.** MCP is the fallback for shell-less hosts (Claude Desktop, sandboxes) and anywhere the CLI cannot run. Needs **≥ 0.1.3**; newer CLI releases are always compatible (`sumcli update` → PyPI latest).
 
-Install on **first need**: before the first `sumcli` command (every host, including Codex), check the version here and install if needed — tell the user before running a bootstrap. Claude Code **SessionStart** nudges once a day if sumcli is missing or too old; it does not install (opt in to auto-install with `SUMCLI_AUTO_INSTALL=1`).
+Install on **first need**: before the first `sumcli` command (every host, including Codex), check the version here; if an install or upgrade is needed, ask the user and wait for a yes before running a bootstrap (on no, fall back to MCP for that request). Claude Code **SessionStart** nudges once a day if sumcli is missing or too old; it does not install (opt in to auto-install with `SUMCLI_AUTO_INSTALL=1`).
 
 ## 1. Detect the shell
 
