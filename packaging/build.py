@@ -208,7 +208,24 @@ def main() -> None:
     write_json(DST / "mcp.json", spec_mcp)
     # Claude Code registers servers from .mcp.json only, and expects the
     # plugin-scoped shape: bare server map, transport "http".
-    write_json(DST / ".mcp.json", {"summation": {"type": "http", "url": url}})
+    # x-summation-client-context is analytics attribution, not a credential:
+    # sum-api-mcp echoes it onward as User-Agent so plugin-driven MCP traffic
+    # classifies as claude-plugin instead of plain mcp. The OAuth flow still
+    # owns the Authorization header; nothing here carries a token.
+    #
+    # Claude-only file, so the token is safe to bake in. The portable mcp.json
+    # stays header-free: one package now serves both hosts, and stamping
+    # claude-plugin there would misattribute Codex traffic.
+    write_json(
+        DST / ".mcp.json",
+        {
+            "summation": {
+                "type": "http",
+                "url": url,
+                "headers": {"x-summation-client-context": f"claude-plugin/{version}"},
+            }
+        },
+    )
 
     (DST / "GENERATED.md").write_text(
         "# Generated package\n\n"
