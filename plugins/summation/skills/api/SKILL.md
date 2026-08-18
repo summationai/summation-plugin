@@ -65,7 +65,7 @@ See `signin` / `signout` and `references/auth.md`. Headerless plugin MCP; host O
 
 ## sumcli
 
-MCP is the default. For scripted automation, or when the user asks for the CLI, use **sumcli ≥ 0.1.3** (see `references/sumcli.md`). Claude Code SessionStart installs or upgrades it; otherwise detect the shell and install (PowerShell / cmd.exe / posix) before the first `sumcli` call. Newer CLIs are always compatible — `sumcli update` to PyPI latest.
+MCP is the default. For scripted automation, or when the user asks for the CLI, use **sumcli ≥ 0.1.3** (see `references/sumcli.md`). Before the first `sumcli` call, check the version and install if needed. SessionStart may nudge; it does not install unless `SUMCLI_AUTO_INSTALL=1`. Newer CLIs are always compatible — `sumcli update` to PyPI latest.
 
 ## Legacy helper
 

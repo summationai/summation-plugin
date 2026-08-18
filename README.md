@@ -26,9 +26,9 @@ Then `/summation:signin` — or run `/summation:start` / ask a data question and
 
 ## sumcli
 
-Day-to-day work is MCP. Scripted automation uses [sumcli](https://github.com/summationai/summation-cli). **This plugin requires sumcli ≥ 0.1.3.** Newer CLI releases are always compatible (`sumcli update` to PyPI latest).
+Day-to-day work is MCP. Scripted automation uses [sumcli](https://github.com/summationai/summation-cli) **≥ 0.1.3**. Newer CLI releases are always compatible (`sumcli update` to PyPI latest). The plugin itself does not require sumcli for MCP work.
 
-Claude Code **SessionStart** detects a missing or too-old binary and installs or upgrades it:
+Claude Code **SessionStart** detects a missing or too-old binary and prints the install command. It does not run the installer. Opt in with `SUMCLI_AUTO_INSTALL=1`.
 
 | Shell | Bootstrap |
 |---|---|
@@ -36,7 +36,7 @@ Claude Code **SessionStart** detects a missing or too-old binary and installs or
 | Windows PowerShell | `irm https://install.summation.com/sumcli.ps1 \| iex` |
 | Windows cmd.exe | `powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://install.summation.com/sumcli.ps1 \| iex"` |
 
-Opt out with `SUMCLI_NO_AUTO_INSTALL=1`. The floor lives in `packaging/com.anthropic.claude/hooks/sumcli.json` (`minVersion`). A plugin release that needs a higher floor bumps that value; it does not pin an upper bound.
+The floor lives in `packaging/com.anthropic.claude/hooks/sumcli.json` (`minVersion`). A plugin release that needs a higher floor bumps that value; it does not pin an upper bound.
 
 **1.0.0 is a breaking package change.** The installable tree is an [Agent Plugins](https://agent-plugins.org/) 1.0.0 directory (`plugin.json` + `mcp.json` + `skills/`). There is no `.claude-plugin` / `.codex-plugin` manifest inside the package, and no `addison` plugin id. Hosts that only load those older manifests cannot install this version.
 

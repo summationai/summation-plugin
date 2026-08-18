@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
-"""SessionStart hook: install or upgrade sumcli to the plugin's minimum version.
+"""SessionStart hook: detect a missing or too-old sumcli and nudge.
+
+Default is detect-and-tell — same posture as version_check.py. MCP is the
+default transport; this hook does not curl|sh on every session. Set
+SUMCLI_AUTO_INSTALL=1 to opt into install/upgrade.
 
 Fail-soft by contract — always exits 0 with valid hook JSON and never blocks
 session start. Stdlib only. Installer stdout is captured so it cannot corrupt
 the hook envelope.
 
 Contract (hooks/sumcli.json):
-  minVersion 0.1.3; newer PyPI releases are always compatible.
-  Missing or too-old → bootstrap / `sumcli update`. Already new enough → silent.
+  minVersion from that file; newer PyPI releases are always compatible.
+  Already new enough → silent. Otherwise print the bootstrap / update command.
+  Opt-in install: missing → bootstrap; too-old uv-managed → `sumcli update`.
+  A non-uv install is never bootstrapped over.
 """
 from __future__ import annotations
 
@@ -23,10 +29,13 @@ import time
 HOOK_DIR = pathlib.Path(__file__).resolve().parent
 CONTRACT_NAME = "sumcli.json"
 FAILURE_TTL_SECONDS = 60 * 60
-INSTALL_TIMEOUT = 180
+# Shared across update + bootstrap so the pair cannot exceed the hook timeout.
+# hooks.json SessionStart timeout is 240s, leaving margin for emit() / stamp.
+INSTALL_BUDGET = 150
 VERSION_TIMEOUT = 8
 _TRUTHY = frozenset({"1", "true", "yes"})
 _POSIX_SHELL_HINTS = ("bash", "zsh", "sh", "fish", "ksh")
+_NOT_UV_MANAGED_MARKERS = ("NOT_UV_MANAGED", "not installed with uv")
 
 
 def emit(system_message: str | None = None) -> None:
@@ -37,16 +46,23 @@ def emit(system_message: str | None = None) -> None:
     sys.exit(0)
 
 
-def version_tuple(value: str) -> tuple[int, ...]:
-    parts = []
-    for chunk in str(value).split("."):
-        digits = "".join(ch for ch in chunk if ch.isdigit())
-        parts.append(int(digits) if digits else 0)
-    return tuple(parts) or (0,)
+def version_tuple(value: str) -> tuple[int, ...] | None:
+    """All-digit dotted parts only — same rule as sumcli's ``_parse_version``.
+
+    ``0.1.3rc1`` is not current; stripping non-digits would treat it as 0.1.3.
+    """
+    parts = str(value).split(".")
+    if not parts or not all(p.isdigit() for p in parts):
+        return None
+    return tuple(int(p) for p in parts)
 
 
 def meets_min(current: str, minimum: str) -> bool:
-    return version_tuple(current) >= version_tuple(minimum)
+    cur = version_tuple(current)
+    floor = version_tuple(minimum)
+    if cur is None or floor is None:
+        return False
+    return cur >= floor
 
 
 def load_contract(path: pathlib.Path | None = None) -> dict:
@@ -78,9 +94,9 @@ def is_windows() -> bool:
 def detect_shell() -> str:
     """Return 'powershell', 'cmd', or 'posix' for the copy-paste install command.
 
-    The hook always *runs* the PowerShell bootstrap on Windows (works from
-    cmd.exe by launching powershell.exe). This only picks the command shown
-    to the user if install fails.
+    The opt-in installer always *runs* the PowerShell bootstrap on Windows
+    (works from cmd.exe by launching powershell.exe). This picks the command
+    shown to the user on the default nudge path.
     """
     shell = (os.environ.get("SHELL") or "").lower()
     if any(name in shell for name in _POSIX_SHELL_HINTS) or os.environ.get("MSYSTEM"):
@@ -184,8 +200,15 @@ def _powershell_prefix() -> list[str] | None:
     return None
 
 
-def run_bootstrap(contract: dict) -> tuple[bool, str]:
+def _remaining(deadline: float) -> float:
+    return max(0.0, deadline - time.monotonic())
+
+
+def run_bootstrap(contract: dict, *, timeout: float | None = None) -> tuple[bool, str]:
     """Install latest sumcli via the OS bootstrap. Returns (ok, detail)."""
+    budget = INSTALL_BUDGET if timeout is None else timeout
+    if budget <= 0:
+        return False, "sumcli install timed out."
     if is_windows():
         prefix = _powershell_prefix()
         if prefix is None:
@@ -198,7 +221,7 @@ def run_bootstrap(contract: dict) -> tuple[bool, str]:
             argv,
             capture_output=True,
             text=True,
-            timeout=INSTALL_TIMEOUT,
+            timeout=budget,
         )
     except subprocess.TimeoutExpired:
         return False, "sumcli install timed out."
@@ -211,7 +234,10 @@ def run_bootstrap(contract: dict) -> tuple[bool, str]:
     return True, detail
 
 
-def run_update(binary: str) -> tuple[bool, str]:
+def run_update(binary: str, *, timeout: float | None = None) -> tuple[bool, str]:
+    budget = INSTALL_BUDGET if timeout is None else timeout
+    if budget <= 0:
+        return False, "sumcli update timed out."
     env = os.environ.copy()
     env["SUMCLI_OUTPUT"] = "json"
     env["SUMCLI_NO_UPDATE_CHECK"] = "1"
@@ -220,10 +246,10 @@ def run_update(binary: str) -> tuple[bool, str]:
             [binary, "update"],
             capture_output=True,
             text=True,
-            timeout=INSTALL_TIMEOUT,
+            timeout=budget,
             env=env,
         )
-    except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired) as exc:
+    except (OSError, subprocess.SubprocessError) as exc:
         return False, str(exc)
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()[-400:]
@@ -231,17 +257,64 @@ def run_update(binary: str) -> tuple[bool, str]:
     return True, (proc.stdout or "").strip()
 
 
-def _opted_out() -> bool:
-    return os.environ.get("SUMCLI_NO_AUTO_INSTALL", "").strip().lower() in _TRUTHY
+def not_uv_managed(detail: str) -> bool:
+    """sumcli update refused because this binary is brew/pip/pipx, not uv."""
+    text = detail or ""
+    return any(marker in text for marker in _NOT_UV_MANAGED_MARKERS)
+
+
+def _auto_install() -> bool:
+    """Opt-in only. Default SessionStart never runs the installer."""
+    return os.environ.get("SUMCLI_AUTO_INSTALL", "").strip().lower() in _TRUTHY
 
 
 def _data_dir() -> pathlib.Path:
-    raw = os.environ.get("CLAUDE_PLUGIN_DATA") or str(pathlib.Path.home() / ".summation")
-    return pathlib.Path(raw)
+    """Plugin data dir for the fail-stamp. Never sumcli's config home.
+
+    Prefer the Agent Plugins spec variable, then the Claude-prefixed alias,
+    then a plugin-owned subdirectory of ``~/.summation``.
+    """
+    raw = os.environ.get("PLUGIN_DATA") or os.environ.get("CLAUDE_PLUGIN_DATA")
+    if raw:
+        return pathlib.Path(raw)
+    return pathlib.Path.home() / ".summation" / "plugin"
 
 
 def _fail_stamp() -> pathlib.Path:
     return _data_dir() / ".sumcli-ensure-fail"
+
+
+def _nudge_stamp() -> pathlib.Path:
+    return _data_dir() / ".sumcli-ensure-nudge"
+
+
+def _recent_nudge() -> bool:
+    today = time.strftime("%Y-%m-%d")
+    try:
+        return _nudge_stamp().read_text(encoding="utf-8").strip() == today
+    except OSError:
+        return False
+
+
+def _record_nudge() -> None:
+    path = _nudge_stamp()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(time.strftime("%Y-%m-%d"), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _nudge(minimum: str, current: str | None, cmd: str) -> str:
+    if current:
+        return (
+            f"sumcli {current} is below the plugin minimum {minimum}. "
+            f"Day-to-day work is MCP. For scripted CLI, run: sumcli update"
+        )
+    return (
+        f"sumcli is not installed (plugin requires ≥ {minimum}). "
+        f"Day-to-day work is MCP. For scripted CLI, run: {cmd}"
+    )
 
 
 def _recent_failure() -> bool:
@@ -267,6 +340,30 @@ def _clear_failure() -> None:
         _fail_stamp().unlink(missing_ok=True)
     except OSError:
         pass
+    try:
+        _nudge_stamp().unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _on_login_path(login_path: str) -> bool:
+    """True when sumcli is resolvable without the hook mutating PATH."""
+    if shutil.which("sumcli", path=login_path):
+        return True
+    return bool(is_windows() and shutil.which("sumcli.exe", path=login_path))
+
+
+def _path_hint() -> str:
+    return (
+        "If the next `sumcli` call fails, add `uv tool dir --bin` "
+        "(usually ~/.local/bin) to PATH."
+    )
+
+
+def _with_path_note(message: str, login_path: str) -> str:
+    if _on_login_path(login_path):
+        return message
+    return f"{message} {_path_hint()}"
 
 
 def ensure(contract: dict | None = None) -> str | None:
@@ -277,6 +374,8 @@ def ensure(contract: dict | None = None) -> str | None:
     spec = contract or load_contract()
     minimum = spec["minVersion"]
     cmd = install_command_for_user(spec)
+    login_path = os.environ.get("PATH", "")
+    deadline = time.monotonic() + INSTALL_BUDGET
     binary = which_sumcli()
     current = read_version(binary) if binary else None
 
@@ -284,16 +383,11 @@ def ensure(contract: dict | None = None) -> str | None:
         _clear_failure()
         return None
 
-    if _opted_out():
-        if current:
-            return (
-                f"sumcli {current} is below the plugin minimum {minimum}. "
-                f"Auto-install is off (SUMCLI_NO_AUTO_INSTALL). Run: sumcli update"
-            )
-        return (
-            f"sumcli is not installed (plugin requires ≥ {minimum}). "
-            f"Auto-install is off (SUMCLI_NO_AUTO_INSTALL). Run: {cmd}"
-        )
+    if not _auto_install():
+        if _recent_nudge():
+            return None
+        _record_nudge()
+        return _nudge(minimum, current, cmd)
 
     if _recent_failure():
         if current:
@@ -304,27 +398,40 @@ def ensure(contract: dict | None = None) -> str | None:
         return None  # already told them this hour; stay quiet
 
     if current and binary:
-        ok, _detail = run_update(binary)
+        ok, detail = run_update(binary, timeout=_remaining(deadline))
+        if not ok and not_uv_managed(detail):
+            _record_failure()
+            return (
+                f"sumcli {current} is below the plugin minimum {minimum} and was "
+                f"not installed with uv, so this hook will not bootstrap a second "
+                f"copy. Upgrade with the same installer you used (brew / pip / pipx)."
+            )
         if not ok:
-            ok, _detail = run_bootstrap(spec)
+            ok, _detail = run_bootstrap(spec, timeout=_remaining(deadline))
         prepend_tool_bins()
         latest = read_version(which_sumcli() or binary)
         if latest and meets_min(latest, minimum):
             _clear_failure()
-            return f"Upgraded sumcli {current} → {latest} (plugin requires ≥ {minimum})."
+            return _with_path_note(
+                f"Upgraded sumcli {current} → {latest} (plugin requires ≥ {minimum}).",
+                login_path,
+            )
         _record_failure()
         return (
             f"sumcli {current} is below the plugin minimum {minimum} and upgrade failed. "
             f"Run: sumcli update   or   {cmd}"
         )
 
-    ok, _detail = run_bootstrap(spec)
+    ok, _detail = run_bootstrap(spec, timeout=_remaining(deadline))
     prepend_tool_bins()
     installed = which_sumcli()
     latest = read_version(installed) if installed else None
     if ok and latest and meets_min(latest, minimum):
         _clear_failure()
-        return f"Installed sumcli {latest} (plugin requires ≥ {minimum})."
+        return _with_path_note(
+            f"Installed sumcli {latest} (plugin requires ≥ {minimum}).",
+            login_path,
+        )
     _record_failure()
     if latest and not meets_min(latest, minimum):
         return (
