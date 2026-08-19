@@ -66,11 +66,11 @@ See `signin` / `signout` and `references/auth.md`. Headerless plugin MCP; host O
 
 ## sumcli
 
-When a shell is available, **sumcli is the preferred surface**; MCP is the fallback for shell-less hosts (Claude Desktop, sandboxes) and anywhere the CLI cannot run. The CLI exposes the full sum-api contract; the hosted MCP is a curated subset — all deletes, connection management, schedule and catalog updates, ingestion batches, and the direct table-import pipeline are CLI-only. Needs **sumcli ≥ 0.1.3** (see `references/sumcli.md`). Newer CLIs are always compatible — `sumcli update` to PyPI latest.
+When a shell is available, **sumcli is the preferred surface**; MCP is the fallback for shell-less hosts (Claude Desktop, sandboxes) and anywhere the CLI cannot run. The CLI exposes the full sum-api contract; the hosted MCP is a curated subset — all deletes, connection management, schedule and catalog updates, and ingestion batches are CLI-only. Needs **sumcli ≥ 0.1.3** (see `references/sumcli.md`). Newer CLIs are always compatible — `sumcli update` to PyPI latest.
 
 **Install on first need.** If `sumcli` is missing or too old when a CLI call is due, ask the user and **wait for a yes** before running the bootstrap — the same consent bar as `SUMCLI_AUTO_INSTALL`. On no, fall back to MCP for that request. SessionStart only nudges; it never installs. First CLI use also needs `sumcli auth login` (browser device-code) — MCP's host OAuth and the CLI session are separate credentials.
 
-Known import asymmetry: MCP `import_file_to_table` uses the gated agent-workflow route (409 `feature_not_enabled` on tenants without modelgen gates); `sumcli tables import` uses the ungated direct pipeline, which has no MCP equivalent. Imports go through sumcli. A 403 with tool-profile text is a Connected Apps problem — not CLI-recoverable; tell the user.
+Two import routes: `import_file_to_table` is the agent-workflow route, gated on some tenants (409 `feature_not_enabled`); the **direct pipeline** is ungated and available on both surfaces — `sumcli tables import` (CLI) or `create_asset_upload_url` → `preview_import_asset` → `create_table_import` (MCP). On a 409, switch to the direct pipeline on whichever surface you are already using. A 403 with tool-profile text is a Connected Apps problem — not recoverable by switching surface; tell the user.
 
 ## Legacy helper
 
