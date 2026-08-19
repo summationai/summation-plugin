@@ -206,23 +206,29 @@ def main() -> None:
 
     write_json(DST / "plugin.json", plugin)
     write_json(DST / "mcp.json", spec_mcp)
-    # Claude Code registers servers from .mcp.json only, and expects the
-    # plugin-scoped shape: bare server map, transport "http".
+    # Claude Code registers servers from .mcp.json only. Wrapped in
+    # "mcpServers" because Grok reads only that form (SUM-5784), and Claude
+    # Code accepts both — verified 2026-08-19 on 2.1.229 via local-marketplace
+    # install with a stdio probe server: bare and wrapped both register.
     # x-summation-client-context is analytics attribution, not a credential:
-    # sum-api-mcp echoes it onward as User-Agent so plugin-driven MCP traffic
-    # classifies as claude-plugin instead of plain mcp. The OAuth flow still
-    # owns the Authorization header; nothing here carries a token.
+    # sum-api-mcp echoes it onward as User-Agent. The OAuth flow still owns
+    # the Authorization header; nothing here carries a token.
     #
-    # Claude-only file, so the token is safe to bake in. The portable mcp.json
-    # stays header-free: one package now serves both hosts, and stamping
-    # claude-plugin there would misattribute Codex traffic.
+    # The token is host-NEUTRAL on purpose. This file is read by every host
+    # that understands plugin .mcp.json (Claude Code today, Grok per
+    # SUM-5784, possibly others), so a host-named token would lie on all but
+    # one of them. The host split comes from the inbound MCP client UA,
+    # which sum-api-mcp logs alongside the declared context. The portable
+    # spec mcp.json stays header-free.
     write_json(
         DST / ".mcp.json",
         {
-            "summation": {
-                "type": "http",
-                "url": url,
-                "headers": {"x-summation-client-context": f"claude-plugin/{version}"},
+            "mcpServers": {
+                "summation": {
+                    "type": "http",
+                    "url": url,
+                    "headers": {"x-summation-client-context": f"summation-plugin/{version}"},
+                }
             }
         },
     )
