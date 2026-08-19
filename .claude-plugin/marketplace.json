@@ -8,7 +8,7 @@
       "name": "summation",
       "source": "./plugins/summation",
       "description": "Summation's AI data analyst: ask data questions, search the catalog, run bounded SQL, generate and validate reports, export PDF/DOCX/Markdown. CLI-first via sumcli when a shell is available, hosted MCP otherwise; host-managed auth.",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "author": {
         "name": "Summation"
       },

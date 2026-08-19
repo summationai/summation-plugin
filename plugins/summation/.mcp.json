@@ -4,7 +4,7 @@
       "type": "http",
       "url": "https://mcp.summation.com/mcp",
       "headers": {
-        "x-summation-client-context": "summation-plugin/1.1.0"
+        "x-summation-client-context": "summation-plugin/1.1.1"
       }
     }
   }

@@ -49,7 +49,7 @@ If they already have a connection: skip create; go to attach.
 
 Shell available: prefer **`sumcli tables import`** (the direct pipeline; needs the CLI session — `../api/references/sumcli.md`). Shell-less: `import_file_to_table` (and related file tools) via MCP. Confirm with catalog/list after import.
 
-If the MCP import fails with 409 "not enabled for this workspace" (`feature_not_enabled`): that gates only the MCP agent-workflow route — `sumcli tables import` still works. Offer the CLI path when a shell exists; otherwise explain that a Summation admin must enable the workspace feature. Other failures: say so plainly and offer to connect a warehouse, or retry after fixing the issue — no internal tool names.
+If the MCP import fails with 409 "not enabled for this workspace" (`feature_not_enabled`): that gates only the agent-workflow route. The **direct pipeline** still works on both surfaces — `sumcli tables import`, or over MCP: `create_asset_upload_url` → PUT the bytes to the presigned URL → `preview_import_asset` → `create_table_import`. Use whichever surface you are already on; no admin action needed. Other failures: say so plainly and offer to connect a warehouse, or retry after fixing the issue — no internal tool names.
 
 ## Hard bans (user chat)
 

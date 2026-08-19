@@ -105,6 +105,10 @@ Report: **environment**, identity, **org/tenant**, scopes. Note that switching e
 
 ---
 
+## After sign-in (both modes)
+
+Sign-in only connects MCP. Before any data work, load the **api** skill — surface routing (sumcli when a shell is available, MCP otherwise), the CLI's separate `sumcli auth login` credential, and safety rules live there, and nothing else puts them in context. For first-time users, suggest the `start` skill.
+
 ## Rules (both modes)
 
 - Never print, log, or commit tokens.
