@@ -18,6 +18,16 @@
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/opportunity_nudge.py\" || python \"${CLAUDE_PLUGIN_ROOT}/hooks/opportunity_nudge.py\" || py -3 \"${CLAUDE_PLUGIN_ROOT}/hooks/opportunity_nudge.py\""
           }
         ]
+      },
+      {
+        "matcher": "resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 240,
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ensure_sumcli.py\" || python \"${CLAUDE_PLUGIN_ROOT}/hooks/ensure_sumcli.py\" || py -3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ensure_sumcli.py\""
+          }
+        ]
       }
     ]
   }
