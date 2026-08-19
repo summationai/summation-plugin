@@ -206,8 +206,10 @@ def main() -> None:
 
     write_json(DST / "plugin.json", plugin)
     write_json(DST / "mcp.json", spec_mcp)
-    # Claude Code registers servers from .mcp.json only, and expects the
-    # plugin-scoped shape: bare server map, transport "http".
+    # Claude Code registers servers from .mcp.json only. Wrapped in
+    # "mcpServers" because Grok reads only that form (SUM-5784), and Claude
+    # Code accepts both — verified 2026-08-19 on 2.1.229 via local-marketplace
+    # install with a stdio probe server: bare and wrapped both register.
     # x-summation-client-context is analytics attribution, not a credential:
     # sum-api-mcp echoes it onward as User-Agent so plugin-driven MCP traffic
     # classifies as claude-plugin instead of plain mcp. The OAuth flow still
@@ -219,10 +221,12 @@ def main() -> None:
     write_json(
         DST / ".mcp.json",
         {
-            "summation": {
-                "type": "http",
-                "url": url,
-                "headers": {"x-summation-client-context": f"claude-plugin/{version}"},
+            "mcpServers": {
+                "summation": {
+                    "type": "http",
+                    "url": url,
+                    "headers": {"x-summation-client-context": f"claude-plugin/{version}"},
+                }
             }
         },
     )

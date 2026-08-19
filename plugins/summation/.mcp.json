@@ -1,9 +1,11 @@
 {
-  "summation": {
-    "type": "http",
-    "url": "https://mcp.summation.com/mcp",
-    "headers": {
-      "x-summation-client-context": "claude-plugin/1.1.0"
+  "mcpServers": {
+    "summation": {
+      "type": "http",
+      "url": "https://mcp.summation.com/mcp",
+      "headers": {
+        "x-summation-client-context": "claude-plugin/1.1.0"
+      }
     }
   }
 }
