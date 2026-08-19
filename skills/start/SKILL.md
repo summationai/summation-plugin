@@ -5,7 +5,7 @@ description: Summation onboarding — sign in, map data, meet the analyst, first
 
 # Summation Start
 
-Walk a new user from zero to a first useful answer **in plain language**. No HTML artifacts or welcome steppers. **Onboarding is MCP**: the `signin` skill (host OAuth) is the product sign-in, and discovery below uses MCP tools. CLI-first applies **after** sign-in whenever a shell is available — data work then prefers **sumcli** (≥ 0.1.3, install at first need after an explicit yes — `../api/references/sumcli.md`), which needs its own one-time `sumcli login`; MCP stays the fallback for shell-less hosts. For “what’s supported?”, always fetch **`https://docs.summation.com/llms.txt`** (see `../api/references/product.md`).
+Walk a new user from zero to a first useful answer **in plain language**. No HTML artifacts or welcome steppers. **Onboarding is MCP**: the `signin` skill (host OAuth) is the product sign-in, and discovery below uses MCP tools. CLI-first applies **after** sign-in whenever a shell is available — data work then prefers **sumcli** (≥ 0.1.3, install at first need after an explicit yes — `../api/references/sumcli.md`), which needs its own one-time `sumcli auth login`; MCP stays the fallback for shell-less hosts. For “what’s supported?”, always fetch **`https://docs.summation.com/llms.txt`** (see `../api/references/product.md`).
 
 ## Checklist (optional one-liner in chat)
 

@@ -40,7 +40,7 @@ If empty: “You’re signed in, but there’s no business data yet” → the `
 
 ## 4. CLI
 
-sumcli is the preferred surface when a shell is available (plugin minimum **0.1.3**); MCP is the fallback for shell-less hosts. When a shell is present, also check the CLI session: `sumcli whoami` — 401 → `sumcli login` (separate credential; a successful MCP sign-in does not sign in the CLI). If sumcli is missing or failed: follow `../api/references/sumcli.md` — install at first need, after an explicit yes. On Windows use the PowerShell or cmd.exe bootstrap, never `curl | sh`.
+sumcli is the preferred surface when a shell is available (plugin minimum **0.1.3**); MCP is the fallback for shell-less hosts. When a shell is present, also check the CLI session: `sumcli auth whoami` — 401 → `sumcli auth login` (separate credential; a successful MCP sign-in does not sign in the CLI). If sumcli is missing or failed: follow `../api/references/sumcli.md` — install at first need, after an explicit yes. On Windows use the PowerShell or cmd.exe bootstrap, never `curl | sh`.
 
 ## Rules
 

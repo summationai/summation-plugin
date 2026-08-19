@@ -2,7 +2,7 @@
 
 Plugin marketplace for Summation. One plugin, `summation`, brings the analyst into Claude Code, Claude Desktop, and OpenAI Codex: data questions, report generation and export (PDF/DOCX/Markdown), catalog discovery, and bounded SQL — through sumcli when a shell is available, over the hosted Summation MCP server otherwise.
 
-Install the plugin, approve Summation in the browser (host OAuth for MCP), then ask in plain English. CLI work signs in separately, once, via `sumcli login` (browser device-code) — the two sessions are independent. No API keys and no secrets pasted into chat. Auth is host-managed MCP OAuth; the plugin ships a headerless connection to production:
+Install the plugin, approve Summation in the browser (host OAuth for MCP), then ask in plain English. CLI work signs in separately, once, via `sumcli auth login` (browser device-code) — the two sessions are independent. No API keys and no secrets pasted into chat. Auth is host-managed MCP OAuth; the plugin ships a headerless connection to production:
 
 ```text
 https://mcp.summation.com/mcp

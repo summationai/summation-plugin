@@ -10,7 +10,7 @@ This skill was **renamed to `diagnose`**. Do **not** run `python3 ../api/scripts
 ## What to do
 
 1. Follow the **`diagnose`** skill end-to-end.  
-2. Auth and health checks: **`whoami`** on server **`summation`**, then list projects/connections/tables; when a shell is present, also `sumcli whoami` (401 → `sumcli login`).  
+2. Auth and health checks: **`whoami`** on server **`summation`**, then list projects/connections/tables; when a shell is present, also `sumcli auth whoami` (401 → `sumcli auth login`).  
 3. If not signed in → **`signin`** skill (browser OAuth). Never mint tokens with the legacy helper for day-to-day use.
 
 Invoke the `diagnose` skill (`doctor` is an alias if the host still registers it).
