@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""SessionStart hook: detect a missing or too-old sumcli and nudge.
+"""SessionStart hook: detect sumcli, inject the surface routing, nudge if needed.
 
-Default is detect-and-tell — same posture as version_check.py. MCP is the
-default transport; this hook does not curl|sh on every session. Set
-SUMCLI_AUTO_INSTALL=1 to opt into install/upgrade.
+The plugin is CLI-first when a shell has sumcli at or above the floor; MCP
+covers the session until the user consents to an install or upgrade. Default
+is detect-and-tell — this hook does not curl|sh on every session. Set
+SUMCLI_AUTO_INSTALL=1 to opt into install/upgrade. Every session also gets
+one line of model context (routing_context) stating which surface applies.
 
 Fail-soft by contract — always exits 0 with valid hook JSON and never blocks
 session start. Stdlib only. Installer stdout is captured so it cannot corrupt
@@ -38,10 +40,15 @@ _POSIX_SHELL_HINTS = ("bash", "zsh", "sh", "fish", "ksh")
 _NOT_UV_MANAGED_MARKERS = ("NOT_UV_MANAGED", "not installed with uv")
 
 
-def emit(system_message: str | None = None) -> None:
+def emit(system_message: str | None = None, context: str | None = None) -> None:
     payload: dict = {"continue": True}
     if system_message:
         payload["systemMessage"] = system_message
+    if context:
+        payload["hookSpecificOutput"] = {
+            "hookEventName": "SessionStart",
+            "additionalContext": context,
+        }
     sys.stdout.write(json.dumps(payload))
     sys.exit(0)
 
@@ -309,11 +316,11 @@ def _nudge(minimum: str, current: str | None, cmd: str) -> str:
     if current:
         return (
             f"sumcli {current} is below the plugin minimum {minimum}. "
-            f"Day-to-day work is MCP. For scripted CLI, run: sumcli update"
+            f"The plugin prefers sumcli for data work — upgrade with: sumcli update"
         )
     return (
         f"sumcli is not installed (plugin requires ≥ {minimum}). "
-        f"Day-to-day work is MCP. For scripted CLI, run: {cmd}"
+        f"The plugin prefers sumcli for data work — install with: {cmd}"
     )
 
 
@@ -441,9 +448,52 @@ def ensure(contract: dict | None = None) -> str | None:
     return f"Could not install sumcli (plugin requires ≥ {minimum}). Run: {cmd}"
 
 
+def routing_context(contract: dict | None = None) -> str:
+    """One line of model context stating the surface preference for this session.
+
+    The CLI-first funnel lives in skill text, but MCP tools are ambient — a
+    session that never loads a skill never sees the preference (proven by a
+    live session importing a CSV entirely over MCP with a shell available).
+    This is the one mechanism guaranteed to be in context every session.
+    Computed after ensure() so a just-installed binary is reported correctly.
+    Never raises.
+    """
+    try:
+        spec = contract or load_contract()
+        minimum = spec["minVersion"]
+        binary = which_sumcli()
+        current = read_version(binary) if binary else None
+        if current and meets_min(current, minimum):
+            return (
+                f"Summation plugin routing: sumcli {current} is installed and meets "
+                f"the plugin minimum ({minimum}). Prefer sumcli for Summation data "
+                "work in this shell; the Summation MCP tools are the fallback. Load "
+                "the summation:api skill before data work — routing and safety "
+                "rules live there. The CLI session is separate from MCP OAuth: "
+                "check `sumcli auth whoami`, sign in with `sumcli auth login`."
+            )
+        if current:
+            return (
+                f"Summation plugin routing: sumcli {current} is installed but below "
+                f"the plugin minimum {minimum}, so Summation data work uses the MCP "
+                "tools for now. Upgrading requires the user's explicit yes "
+                "(`sumcli update`, or their original installer if not uv-managed) — "
+                "see the summation:api skill."
+            )
+        return (
+            "Summation plugin routing: sumcli is not installed, so Summation data "
+            "work uses the MCP tools. Installing sumcli requires the user's "
+            "explicit yes — see the summation:api skill before offering."
+        )
+    except Exception:
+        return ""
+
+
 def main() -> None:
     try:
-        emit(ensure())
+        spec = load_contract()
+        message = ensure(spec)
+        emit(message, context=routing_context(spec))
     except Exception:
         emit()
 
