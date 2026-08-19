@@ -5,7 +5,7 @@ description: Generate a Summation report from a question and export it (Markdown
 
 # Summation Report
 
-MCP tools only. Generation can take a few minutes — keep the user informed.
+Execute via **sumcli** when a shell is available (see `../api/references/sumcli.md`); the MCP tools below are the shell-less fallback. Generation can take a few minutes — keep the user informed.
 
 ## Flow
 

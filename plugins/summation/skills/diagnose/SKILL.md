@@ -38,13 +38,13 @@ If empty: “You’re signed in, but there’s no business data yet” → the `
 - **Long report / analysis** → still normal for several minutes; keep the user informed.  
 - If support is needed and a `request_id` exists, include it **after** a plain explanation.
 
-## 4. CLI (optional)
+## 4. CLI
 
-If the user is scripting or `sumcli` failed: follow `../api/references/sumcli.md`. Plugin minimum is **0.1.3**. Check the version and install before the first call. On Windows use the PowerShell or cmd.exe bootstrap, never `curl | sh`.
+sumcli is the preferred surface when a shell is available (plugin minimum **0.1.3**); MCP is the fallback for shell-less hosts. When a shell is present, also check the CLI session: `sumcli whoami` — 401 → `sumcli login` (separate credential; a successful MCP sign-in does not sign in the CLI). If sumcli is missing or failed: follow `../api/references/sumcli.md` — install at first need, after an explicit yes. On Windows use the PowerShell or cmd.exe bootstrap, never `curl | sh`.
 
 ## Rules
 
 - Do **not** download OpenAPI or debug connector key names here.  
 - Do **not** dump internal tool ids into chat.  
-- Do **not** run `python3 ../api/scripts/sum_api.py doctor` (or any relative `../api/...` path). Health checks are MCP-only; relative paths break when skills mount as `summation:api`.  
+- Do **not** run `python3 ../api/scripts/sum_api.py doctor` (or any relative `../api/...` path) — relative paths break when skills mount as `summation:api`.  
 - If they ask “is X supported?”, fetch **`https://docs.summation.com/llms.txt`** then the linked page (see `../api/references/product.md`).

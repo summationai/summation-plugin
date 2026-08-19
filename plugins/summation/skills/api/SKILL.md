@@ -1,15 +1,15 @@
 ---
 name: api
-description: Use Summation through the hosted summation MCP server and Summation skills. Product questions, data work, reports, connections, and auth.
+description: Use Summation through sumcli (preferred when a shell is available) or the hosted summation MCP server (shell-less fallback), plus Summation skills. Product questions, data work, reports, connections, and auth.
 metadata:
-  short-description: Work with Summation via MCP
+  short-description: Work with Summation via sumcli or MCP
 ---
 
-# Summation (MCP-native)
+# Summation
 
-All day-to-day data work goes through the hosted **`summation` MCP server** and domain skills. Browser sign-in owns auth. Do **not** call sum-api or invent REST for normal work.
+When a shell is available, day-to-day data work goes through **sumcli** (full sum-api contract — see `references/sumcli.md`). Shell-less hosts (Claude Desktop, sandboxes) use the hosted **`summation` MCP server** (curated subset) and domain skills. Browser sign-in owns MCP auth; `sumcli login` owns the CLI session. Do **not** invent REST for normal work.
 
-**Default MCP:** `https://mcp.summation.com/mcp`
+**Default MCP (fallback):** `https://mcp.summation.com/mcp`
 
 ## Before you answer “what’s supported?”
 
@@ -20,12 +20,13 @@ All day-to-day data work goes through the hosted **`summation` MCP server** and 
 
 ## Core workflow
 
-1. Auth: **`whoami`**. If needed → **signin** skill.  
-2. Prefer a domain skill: `start`, `opportunities`, `report`, `validate`, `query`, `catalog`, `schedule`, `connect`, `diagnose`.  
-3. Else use MCP tools (below). Speak in outcomes to the user.  
-4. Auth errors → signin; never ask for tokens in chat.
+1. Pick the surface: shell available → **sumcli**; shell-less → MCP.  
+2. Auth: CLI → `sumcli whoami` (401 → `sumcli login`); MCP → **`whoami`** (if needed → **signin** skill).  
+3. Prefer a domain skill: `start`, `opportunities`, `report`, `validate`, `query`, `catalog`, `schedule`, `connect`, `diagnose`.  
+4. Else: sumcli commands (discover live: `sumcli | jq '.result.resources'`) or MCP tools (below). Speak in outcomes to the user.  
+5. Auth errors → `sumcli login` / signin; never ask for tokens in chat.
 
-## MCP tools (curated)
+## MCP tools (curated — shell-less fallback)
 
 Identity / projects: `whoami`, `get_org`, `list_projects`, `get_default_project`, `get_project`, `create_project`
 
@@ -44,7 +45,7 @@ Prefer the **live server’s tool list** over this doc if names differ.
 ## Client behaviors (required)
 
 - **Long tools** (`ask_analyst`, `start_report`, `validate_report`, `import_file_to_table`): tell the user you’re working; **reports can take a few minutes** — brief progress every ~30–45s until status is terminal.  
-- **Auth errors** → signin.  
+- **Auth errors** → CLI: `sumcli login`; MCP: signin.  
 - **Views** may 404 on ids from search — fall back to tables.  
 - **Schedules** that email people — confirm recipients + cadence (with timezone) first.  
 - **Secrets:** never in tool args or chat; **connect** skill + web app for passwords.  
@@ -65,11 +66,15 @@ See `signin` / `signout` and `references/auth.md`. Headerless plugin MCP; host O
 
 ## sumcli
 
-MCP is the default. For scripted automation, or when the user asks for the CLI, use **sumcli ≥ 0.1.3** (see `references/sumcli.md`). Before the first `sumcli` call, check the version and install if needed. SessionStart may nudge; it does not install unless `SUMCLI_AUTO_INSTALL=1`. Newer CLIs are always compatible — `sumcli update` to PyPI latest.
+When a shell is available, **sumcli is the preferred surface**; MCP is the fallback for shell-less hosts (Claude Desktop, sandboxes) and anywhere the CLI cannot run. The CLI exposes the full sum-api contract; the hosted MCP is a curated subset — all deletes, connection management, schedule and catalog updates, ingestion batches, and the direct table-import pipeline are CLI-only. Needs **sumcli ≥ 0.1.3** (see `references/sumcli.md`). Newer CLIs are always compatible — `sumcli update` to PyPI latest.
+
+**Install on first need.** If `sumcli` is missing or too old when a CLI call is due, ask the user and **wait for a yes** before running the bootstrap — the same consent bar as `SUMCLI_AUTO_INSTALL`. On no, fall back to MCP for that request. SessionStart only nudges; it never installs. First CLI use also needs `sumcli login` (browser device-code) — MCP's host OAuth and the CLI session are separate credentials.
+
+Known import asymmetry: MCP `import_file_to_table` uses the gated agent-workflow route (409 `feature_not_enabled` on tenants without modelgen gates); `sumcli tables import` uses the ungated direct pipeline, which has no MCP equivalent. Imports go through sumcli. A 403 with tool-profile text is a Connected Apps problem — not CLI-recoverable; tell the user.
 
 ## Legacy helper
 
-`scripts/sum_api.py` is **not** for normal customer flows. Prefer MCP + domain skills (`signin`, `diagnose`, …).
+`scripts/sum_api.py` is **not** for normal customer flows. Prefer sumcli / MCP + domain skills (`signin`, `diagnose`, …).
 
 If you must run the helper (internal/debug only), **never** use relative `../api/scripts/sum_api.py` — hosts often mount skills as `summation:api` / `summation:doctor`, so `../api` resolves outside the plugin and fails. Use the plugin root:
 

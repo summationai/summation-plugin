@@ -5,7 +5,7 @@ description: Schedule recurring Summation playbook runs with email delivery — 
 
 # Summation Schedule
 
-MCP only. Schedules email real people — confirm carefully.
+Execute via **sumcli** when a shell is available (see `../api/references/sumcli.md`); the MCP tools below are the shell-less fallback. Schedules email real people — confirm carefully.
 
 ## Flows
 

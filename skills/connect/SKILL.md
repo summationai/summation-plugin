@@ -47,7 +47,9 @@ If they already have a connection: skip create; go to attach.
 
 ## File / CSV import
 
-Prefer `import_file_to_table` (and related file tools) when the user has files in the project. Confirm with catalog/list after import. If import fails, say so plainly and offer: connect a warehouse, or retry after fixing the issue — no internal tool names.
+Shell available: prefer **`sumcli tables import`** (the direct pipeline; needs the CLI session — `../api/references/sumcli.md`). Shell-less: `import_file_to_table` (and related file tools) via MCP. Confirm with catalog/list after import.
+
+If the MCP import fails with 409 "not enabled for this workspace" (`feature_not_enabled`): that gates only the MCP agent-workflow route — `sumcli tables import` still works. Offer the CLI path when a shell exists; otherwise explain that a Summation admin must enable the workspace feature. Other failures: say so plainly and offer to connect a warehouse, or retry after fixing the issue — no internal tool names.
 
 ## Hard bans (user chat)
 

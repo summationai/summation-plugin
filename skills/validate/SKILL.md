@@ -5,7 +5,7 @@ description: Verify a Summation report against its sources before sharing. Use b
 
 # Summation Validate
 
-MCP only. Validation can take a while — tell the user it’s running; don’t give up at ~2 minutes if still in progress.
+Execute via **sumcli** when a shell is available (see `../api/references/sumcli.md`); the MCP tools below are the shell-less fallback. Validation can take a while — tell the user it’s running; don’t give up at ~2 minutes if still in progress.
 
 ## Flow
 

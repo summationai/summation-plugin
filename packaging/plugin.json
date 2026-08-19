@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "summation",
-  "version": "1.0.1",
-  "description": "Summation's AI data analyst: ask data questions, search the catalog, run bounded SQL, generate and validate reports, export PDF/DOCX/Markdown. MCP-native auth and tools.",
+  "version": "1.1.0",
+  "description": "Summation's AI data analyst: ask data questions, search the catalog, run bounded SQL, generate and validate reports, export PDF/DOCX/Markdown. CLI-first via sumcli when a shell is available, hosted MCP otherwise; host-managed auth.",
   "author": {
     "name": "Summation",
     "url": "https://summation.com"
