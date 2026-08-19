@@ -238,10 +238,6 @@ class EnsureTests(unittest.TestCase):
         self.assertGreater(upd.call_args.kwargs["timeout"], 0)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class RoutingContextTests(unittest.TestCase):
     CONTRACT = {"minVersion": "0.1.3", "upgradePolicy": "latest-is-compatible",
                 "bootstrap": {"posix": "x", "powershell": "y", "cmd": "z"}}
@@ -283,3 +279,19 @@ class RoutingContextTests(unittest.TestCase):
         hso = payload["hookSpecificOutput"]
         self.assertEqual(hso["hookEventName"], "SessionStart")
         self.assertEqual(hso["additionalContext"], "route hint")
+
+    def test_emit_context_only_no_system_message(self) -> None:
+        import io, json as _json
+        buf = io.StringIO()
+        with patch.object(es.sys, "stdout", buf), self.assertRaises(SystemExit):
+            es.emit(None, context="route hint")
+        payload = _json.loads(buf.getvalue())
+        self.assertTrue(payload["continue"])
+        self.assertNotIn("systemMessage", payload)
+        self.assertEqual(
+            payload["hookSpecificOutput"]["additionalContext"], "route hint"
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""SessionStart hook: detect a missing or too-old sumcli and nudge.
+"""SessionStart hook: detect sumcli, inject the surface routing, nudge if needed.
 
-Default is detect-and-tell — same posture as version_check.py. MCP is the
-default transport; this hook does not curl|sh on every session. Set
-SUMCLI_AUTO_INSTALL=1 to opt into install/upgrade.
+The plugin is CLI-first when a shell has sumcli at or above the floor; MCP
+covers the session until the user consents to an install or upgrade. Default
+is detect-and-tell — this hook does not curl|sh on every session. Set
+SUMCLI_AUTO_INSTALL=1 to opt into install/upgrade. Every session also gets
+one line of model context (routing_context) stating which surface applies.
 
 Fail-soft by contract — always exits 0 with valid hook JSON and never blocks
 session start. Stdlib only. Installer stdout is captured so it cannot corrupt
