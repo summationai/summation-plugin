@@ -66,7 +66,7 @@ See `signin` / `signout` and `references/auth.md`. Headerless plugin MCP; host O
 
 ## sumcli
 
-When a shell is available, **sumcli is the preferred surface**; MCP is the fallback for shell-less hosts (Claude Desktop, sandboxes) and anywhere the CLI cannot run. The CLI exposes the full sum-api contract; the hosted MCP is a curated subset — all deletes, connection management, schedule and catalog updates, and ingestion batches are CLI-only. Needs **sumcli ≥ 0.1.3** (see `references/sumcli.md`). Newer CLIs are always compatible — `sumcli update` to PyPI latest.
+When a shell is available, **sumcli is the preferred surface**; MCP is the fallback for shell-less hosts (Claude Desktop, sandboxes) and anywhere the CLI cannot run. The CLI exposes the full sum-api contract as first-class commands; the hosted MCP offers a curated toolset plus a generic escape hatch (`get_api_docs` + `call_summation_api`). The curated set moves — never assert an operation is MCP-impossible from memory; check the live tool list. Curation is ergonomics: the bearer token and its scopes are the actual authorization boundary on both surfaces. Needs **sumcli ≥ 0.1.3** (see `references/sumcli.md`). Newer CLIs are always compatible — `sumcli update` to PyPI latest.
 
 **Install on first need.** If `sumcli` is missing or too old when a CLI call is due, ask the user and **wait for a yes** before running the bootstrap — the same consent bar as `SUMCLI_AUTO_INSTALL`. On no, fall back to MCP for that request. SessionStart only nudges; it never installs. First CLI use also needs `sumcli auth login` (browser device-code) — MCP's host OAuth and the CLI session are separate credentials.
 
