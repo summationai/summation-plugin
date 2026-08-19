@@ -7,7 +7,7 @@ metadata:
 
 # Summation
 
-When a shell is available, day-to-day data work goes through **sumcli** (full sum-api contract — see `references/sumcli.md`). Shell-less hosts (Claude Desktop, sandboxes) use the hosted **`summation` MCP server** (curated subset) and domain skills. Browser sign-in owns MCP auth; `sumcli login` owns the CLI session. Do **not** invent REST for normal work.
+When a shell is available, day-to-day data work goes through **sumcli** (full sum-api contract — see `references/sumcli.md`). Shell-less hosts (Claude Desktop, sandboxes) use the hosted **`summation` MCP server** (curated subset) and domain skills. Browser sign-in owns MCP auth; `sumcli auth login` owns the CLI session. Do **not** invent REST for normal work.
 
 **Default MCP (fallback):** `https://mcp.summation.com/mcp`
 
@@ -21,10 +21,10 @@ When a shell is available, day-to-day data work goes through **sumcli** (full su
 ## Core workflow
 
 1. Pick the surface: shell available → **sumcli**; shell-less → MCP.  
-2. Auth: CLI → `sumcli whoami` (401 → `sumcli login`); MCP → **`whoami`** (if needed → **signin** skill).  
+2. Auth: CLI → `sumcli auth whoami` (401 → `sumcli auth login`); MCP → **`whoami`** (if needed → **signin** skill).  
 3. Prefer a domain skill: `start`, `opportunities`, `report`, `validate`, `query`, `catalog`, `schedule`, `connect`, `diagnose`.  
 4. Else: sumcli commands (discover live: `sumcli | jq '.result.resources'`) or MCP tools (below). Speak in outcomes to the user.  
-5. Auth errors → `sumcli login` / signin; never ask for tokens in chat.
+5. Auth errors → `sumcli auth login` / signin; never ask for tokens in chat.
 
 ## MCP tools (curated — shell-less fallback)
 
@@ -45,7 +45,7 @@ Prefer the **live server’s tool list** over this doc if names differ.
 ## Client behaviors (required)
 
 - **Long tools** (`ask_analyst`, `start_report`, `validate_report`, `import_file_to_table`): tell the user you’re working; **reports can take a few minutes** — brief progress every ~30–45s until status is terminal.  
-- **Auth errors** → CLI: `sumcli login`; MCP: signin.  
+- **Auth errors** → CLI: `sumcli auth login`; MCP: signin.  
 - **Views** may 404 on ids from search — fall back to tables.  
 - **Schedules** that email people — confirm recipients + cadence (with timezone) first.  
 - **Secrets:** never in tool args or chat; **connect** skill + web app for passwords.  
@@ -68,7 +68,7 @@ See `signin` / `signout` and `references/auth.md`. Headerless plugin MCP; host O
 
 When a shell is available, **sumcli is the preferred surface**; MCP is the fallback for shell-less hosts (Claude Desktop, sandboxes) and anywhere the CLI cannot run. The CLI exposes the full sum-api contract; the hosted MCP is a curated subset — all deletes, connection management, schedule and catalog updates, ingestion batches, and the direct table-import pipeline are CLI-only. Needs **sumcli ≥ 0.1.3** (see `references/sumcli.md`). Newer CLIs are always compatible — `sumcli update` to PyPI latest.
 
-**Install on first need.** If `sumcli` is missing or too old when a CLI call is due, ask the user and **wait for a yes** before running the bootstrap — the same consent bar as `SUMCLI_AUTO_INSTALL`. On no, fall back to MCP for that request. SessionStart only nudges; it never installs. First CLI use also needs `sumcli login` (browser device-code) — MCP's host OAuth and the CLI session are separate credentials.
+**Install on first need.** If `sumcli` is missing or too old when a CLI call is due, ask the user and **wait for a yes** before running the bootstrap — the same consent bar as `SUMCLI_AUTO_INSTALL`. On no, fall back to MCP for that request. SessionStart only nudges; it never installs. First CLI use also needs `sumcli auth login` (browser device-code) — MCP's host OAuth and the CLI session are separate credentials.
 
 Known import asymmetry: MCP `import_file_to_table` uses the gated agent-workflow route (409 `feature_not_enabled` on tenants without modelgen gates); `sumcli tables import` uses the ungated direct pipeline, which has no MCP equivalent. Imports go through sumcli. A 403 with tool-profile text is a Connected Apps problem — not CLI-recoverable; tell the user.
 

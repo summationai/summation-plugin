@@ -32,4 +32,4 @@ After install, if `sumcli` is not on `PATH`, add `uv tool dir --bin` (usually `~
 
 ## 4. Sign in
 
-First CLI use needs `sumcli login` (browser device-code). This credential is separate from the MCP host OAuth session — being signed in over MCP does not sign in the CLI, and vice versa. Config lives in `~/.summation/summation-config`; never paste tokens into chat.
+First CLI use needs `sumcli auth login` (browser device-code). This credential is separate from the MCP host OAuth session — being signed in over MCP does not sign in the CLI, and vice versa. Config lives in `~/.summation/summation-config`; never paste tokens into chat.

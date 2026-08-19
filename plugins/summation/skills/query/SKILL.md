@@ -5,7 +5,7 @@ description: Answer a data question or run read-only SQL against Summation. Use 
 
 # Summation Query
 
-Execute via **sumcli** when a shell is available (see `../api/references/sumcli.md`); the MCP tools below are the shell-less fallback. Sign in first if needed (CLI: `sumcli login`; MCP: `whoami` / signin skill).
+Execute via **sumcli** when a shell is available (see `../api/references/sumcli.md`); the MCP tools below are the shell-less fallback. Sign in first if needed (CLI: `sumcli auth login`; MCP: `whoami` / signin skill).
 
 ## Flow
 
