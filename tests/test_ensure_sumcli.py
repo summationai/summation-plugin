@@ -131,7 +131,7 @@ class EnsureTests(unittest.TestCase):
         self.assertIsNotNone(msg)
         assert msg is not None
         self.assertIn("not installed", msg)
-        self.assertIn("MCP", msg)
+        self.assertIn("prefers sumcli", msg)
         self.assertNotIn("SUMCLI_AUTO_INSTALL", msg)
 
     def test_default_nudge_is_once_per_day(self) -> None:
@@ -240,3 +240,46 @@ class EnsureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RoutingContextTests(unittest.TestCase):
+    CONTRACT = {"minVersion": "0.1.3", "upgradePolicy": "latest-is-compatible",
+                "bootstrap": {"posix": "x", "powershell": "y", "cmd": "z"}}
+
+    def test_meets_floor_prefers_cli(self) -> None:
+        with patch.object(es, "which_sumcli", return_value="/x/sumcli"), \
+             patch.object(es, "read_version", return_value="0.1.4"):
+            ctx = es.routing_context(self.CONTRACT)
+        self.assertIn("Prefer sumcli", ctx)
+        self.assertIn("sumcli auth login", ctx)
+        self.assertIn("summation:api", ctx)
+
+    def test_below_floor_says_mcp_for_now(self) -> None:
+        with patch.object(es, "which_sumcli", return_value="/x/sumcli"), \
+             patch.object(es, "read_version", return_value="0.1.1"):
+            ctx = es.routing_context(self.CONTRACT)
+        self.assertIn("below", ctx)
+        self.assertIn("MCP", ctx)
+        self.assertIn("explicit yes", ctx)
+
+    def test_missing_says_mcp_and_consent(self) -> None:
+        with patch.object(es, "which_sumcli", return_value=None):
+            ctx = es.routing_context(self.CONTRACT)
+        self.assertIn("not installed", ctx)
+        self.assertIn("explicit yes", ctx)
+
+    def test_never_raises(self) -> None:
+        with patch.object(es, "which_sumcli", side_effect=RuntimeError):
+            self.assertEqual(es.routing_context(self.CONTRACT), "")
+
+    def test_emit_envelope_carries_additional_context(self) -> None:
+        import io, json as _json
+        buf = io.StringIO()
+        with patch.object(es.sys, "stdout", buf), self.assertRaises(SystemExit):
+            es.emit("hello", context="route hint")
+        payload = _json.loads(buf.getvalue())
+        self.assertTrue(payload["continue"])
+        self.assertEqual(payload["systemMessage"], "hello")
+        hso = payload["hookSpecificOutput"]
+        self.assertEqual(hso["hookEventName"], "SessionStart")
+        self.assertEqual(hso["additionalContext"], "route hint")
