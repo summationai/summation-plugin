@@ -79,8 +79,9 @@ def is_total_label(text: str) -> bool:
     return bool(re.search(r"\btotals?\b", text, flags=re.I))
 
 
-def footing_findings(tables: list[list[list[str]]]) -> list[dict]:
+def footing_findings(tables: list[list[list[str]]]) -> tuple[list[dict], int]:
     findings = []
+    checked = 0
     for table_index, table in enumerate(tables, start=1):
         if len(table) < 3:
             continue
@@ -106,6 +107,7 @@ def footing_findings(tables: list[list[list[str]]]) -> list[dict]:
             shown = parse_number(last[col])
             if shown is None:
                 continue
+            checked += 1
             computed = sum(values, Decimal("0"))
             delta = shown - computed
             # Money with cents: 1 cent. Counts: exact.
@@ -132,13 +134,13 @@ def footing_findings(tables: list[list[list[str]]]) -> list[dict]:
                     "discrepancy": float(delta),
                 },
             })
-    return findings
+    return findings, checked
 
 
-def findings_doc(report: pathlib.Path, findings: list[dict], *, html: bool) -> dict:
+def findings_doc(report: pathlib.Path, findings: list[dict], *, html: bool,
+                 arithmetic_checks: int = 0) -> dict:
     digest = hashlib.sha256(report.read_bytes()).hexdigest()
-    checked = max(len(findings), 1) if html else 0
-    reached = checked if html else 0
+    d_count = sum(1 for item in findings if item.get("tier") == "D")
     return {
         "source": {
             "path": str(report.name),
@@ -146,20 +148,19 @@ def findings_doc(report: pathlib.Path, findings: list[dict], *, html: bool) -> d
             "sha256": digest,
         },
         "coverage": {
-            "claims_in_ledger": reached,
-            "claims_reached_by_a_check": reached,
+            "claims_in_ledger": 0,
+            "claims_reached_by_a_check": 0,
             "extractor_checkable_fraction": 1.0 if html else 0.0,
             "engine_checkable_fraction": 1.0 if html else 0.0,
-            "checks_registered": checked,
+            "checks_registered": arithmetic_checks if html else 0,
             "checks_with_findings": len(findings),
-            "checks_found_nothing": max(checked - len(findings), 0),
+            "checks_found_nothing": max(arithmetic_checks - len(findings), 0) if html else 0,
             "checks_errored": 0,
         },
         "headline": {
-            "tier_d_defects": sum(1 for item in findings if item.get("tier") == "D"),
+            "tier_d_defects": d_count,
             "tier_d_per_100_claims": (
-                (100.0 * sum(1 for item in findings if item.get("tier") == "D") / reached)
-                if reached else 0
+                (100.0 * d_count / arithmetic_checks) if arithmetic_checks else 0
             ),
         },
         "findings": findings,
@@ -196,13 +197,15 @@ def main() -> int:
 
     html = args.report.suffix.lower() in {".html", ".htm"}
     findings: list[dict] = []
+    arithmetic_checks = 0
     if html:
         parser = _Tables()
         parser.feed(args.report.read_text(errors="replace"))
         parser.close()
-        findings = footing_findings(parser.tables)
+        findings, arithmetic_checks = footing_findings(parser.tables)
 
-    doc = findings_doc(args.report, findings, html=html)
+    doc = findings_doc(
+        args.report, findings, html=html, arithmetic_checks=arithmetic_checks)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(doc, indent=2) + "\n")
     print(f"html_arith: {len(findings)} footing finding(s) → {args.out}")

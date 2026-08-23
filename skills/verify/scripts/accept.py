@@ -20,6 +20,12 @@ EVIDENCE_SUFFIXES = frozenset({
     ".json", ".jsonl", ".txt", ".sql", ".csv", ".yaml", ".yml", ".md", ".html",
 })
 REPORT_ONLY_TYPES = frozenset({"internal", "logic", "arithmetic", "units", "selection"})
+KNOWN_VERDICTS = frozenset({
+    "confirmed", "contradicted", "not_checkable", "changed_since_report",
+})
+EVIDENCE_RECEIPT_VERDICTS = frozenset({
+    "confirmed", "contradicted", "changed_since_report",
+})
 
 
 def normalize(text: str) -> str:
@@ -160,31 +166,35 @@ def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list) -> tup
 
     validated, discarded = [], []
     for finding in proposed:
+        problems = []
+        receipt_updates = {}
+        verdict = finding.get("verdict")
+        if verdict not in KNOWN_VERDICTS:
+            problems.append("verdict is missing or unknown")
         finding = {
             **finding,
             "basis": finding.get("basis") or (
                 "report" if finding.get("type") in REPORT_ONLY_TYPES else "evidence"),
-            "verdict": finding.get("verdict") or "contradicted",
             "importance": finding.get("importance") or "material",
         }
-        if finding["verdict"] == "contradicted":
+        if verdict == "contradicted":
             finding["severity"] = finding.get("severity") or "medium"
         else:
             finding["severity"] = None
-        problems = []
-        receipt_updates = {}
         if not in_report(finding.get("report_quote", "")):
             problems.append("report_quote not found in visible report text")
         second = finding.get("report_quote_2")
         basis = finding.get("basis")
-        verdict = finding.get("verdict")
         if second and basis == "report" and not in_report(second):
             problems.append("report_quote_2 not found in visible report text")
         elif second and basis != "report":
             receipt_updates["report_quote_2"] = None
         if basis == "report" and verdict == "contradicted" and not second:
             problems.append("report-only contradiction has no second report receipt")
-        if basis == "evidence" and verdict in {"confirmed", "contradicted"}:
+        if verdict == "changed_since_report" and basis != "evidence":
+            problems.append(
+                "changed_since_report requires an evidence receipt for the current value")
+        if basis == "evidence" and verdict in EVIDENCE_RECEIPT_VERDICTS:
             evidence_name = str(finding.get("evidence_file") or "")
             evidence = sandbox / evidence_name if evidence_name else None
             json_receipts = finding.get("evidence_json") or []
@@ -225,10 +235,13 @@ def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list) -> tup
                             "evidence_quote is neither verbatim nor two exact JSON object fields")
         if verdict == "not_checkable" and not str(finding.get("explanation") or "").strip():
             problems.append("not_checkable outcome has no reason")
-        if verdict == "changed_since_report" and basis == "evidence":
-            evidence_name = str(finding.get("evidence_file") or "")
-            if evidence_name and not (sandbox / evidence_name).exists():
-                problems.append(f"evidence_file {evidence_name!r} missing")
+        if verdict == "changed_since_report":
+            if not str(finding.get("reconstruction_attempt") or "").strip():
+                problems.append("changed_since_report has no reconstruction attempt")
+            if finding.get("current_value") in (None, ""):
+                problems.append("changed_since_report has no current value")
+            if not str(finding.get("current_as_of") or "").strip():
+                problems.append("changed_since_report has no current as-of date")
         target = discarded if problems else validated
         target.append({**finding, **receipt_updates,
                        **({"problems": problems} if problems else {})})

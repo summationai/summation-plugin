@@ -11,13 +11,14 @@ If they name a report that already lives in Summation (no disk file), run the `v
 
 ## First two minutes
 
-1. Ask which file. If they already attached one, use it.
-2. If a nearby `evidence/` folder exists, ask once whether to use it. Do not scan their whole disk.
-3. If GitHub, Snowflake, Slack, or similar tools are already connected in this session, ask once whether to query them. Save raw tool results as files under the run `evidence/` folder. Do not ask them to sign in to Summation to get evidence.
-4. State duration, then work:
+1. Before any grading: `command -v uv` succeeds, or `python3 -c "import jsonschema"` succeeds. If neither, resolve that with the user now. Do not start a long run that dies at render.
+2. Ask which file. If they already attached one, use it.
+3. If a nearby `evidence/` folder exists, ask once whether to use it. Do not scan their whole disk.
+4. If GitHub, Snowflake, Slack, or similar tools are already connected in this session, ask once whether to query them. Save raw tool results as files under the run `evidence/` folder. Do not ask them to sign in to Summation to get evidence.
+5. State duration, then work:
    - File plus local evidence only: about 2–5 minutes.
    - Also using connections already in this session: about 10–15 minutes.
-5. Then stay quiet except for brief progress. Do not narrate layers, error codes, tenant IDs, or check names.
+6. Then stay quiet except for brief progress. Do not narrate layers, error codes, tenant IDs, or check names.
 
 ## Run directory
 
@@ -59,7 +60,7 @@ uv run --with jsonschema python3 "$VERIFY/scripts/render.py" \
   --out-dir "$RUN/artifact"
 ```
 
-If `uv` is missing, run `python3` on `render.py` when `jsonschema` is already installed. Do not `pip install` without asking.
+If `uv` is missing and `jsonschema` already imports, run `python3` on `render.py`. Do not `pip install` without asking.
 
 `html_arith.py` is best-effort table footing on HTML. Other formats still get a `findings.json` stub. Always run it.
 
@@ -84,13 +85,21 @@ After you read the report (and evidence, if they said yes), write:
 }]}
 ```
 
-- `verdict`: `confirmed` | `contradicted` | `not_checkable` only. Use `changed_since_report` only when live data moved after the report date.
+- `verdict`: `confirmed` | `contradicted` | `not_checkable`. `changed_since_report` is a last resort (see live source below). Never omit verdict.
 - `type`: `semantic` | `staleness` | `internal` | `logic` | `arithmetic` | `units` | `selection`.
 - `basis`: `evidence` or `report`. Report-only contradictions need `report_quote` and `report_quote_2`.
 - Quotes are visible text, after whitespace normalize. Never quote HTML tags.
 - Prefer `evidence_json` pointers for JSON files.
 - `not_checkable` needs a specific reason. Do not attach a fake receipt.
 - Subagents per section are optional. Hosts without subagents do the same writes in sequence.
+
+### Live source (closed period first)
+
+`changed_since_report` is never the first answer.
+
+1. If the claim names a closed period, re-query with that period filter. Verdict is `confirmed` or `contradicted` for that period. If today's warehouse shows a different value for that same closed period, that is a restatement or a report error: `contradicted`, with both values and both dates in the explanation.
+2. If the claim is point-in-time ("inventory on hand is 4,200"), reconstruct the as-of value (time travel, snapshot, history table, or a date column). If reconstruction works, verdict is `confirmed` or `contradicted` as of the report date.
+3. Only when reconstruction is impossible: `changed_since_report`. The row must include `reconstruction_attempt` (what you tried and why it failed), `current_value`, `current_as_of`, and an evidence receipt for the current value.
 
 Then run `accept.py`. If it discards rows, fix only those quotes once and run `accept.py` again. Stop after two passes. Discarded rows stay discarded. Do not invent a quote so a row will pass.
 

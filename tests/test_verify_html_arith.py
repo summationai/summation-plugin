@@ -41,6 +41,8 @@ class HtmlArithTests(unittest.TestCase):
             self.assertTrue(footing)
             self.assertAlmostEqual(abs(footing[0]["detail"]["discrepancy"]), 9000.0)
             self.assertEqual(doc["source"]["path"], PLANTED.name)
+            self.assertEqual(doc["coverage"]["claims_in_ledger"], 0)
+            self.assertGreaterEqual(doc["coverage"]["checks_registered"], 1)
 
     def test_clean_twin_stays_quiet(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -56,6 +58,7 @@ class HtmlArithTests(unittest.TestCase):
             doc = json.loads(out.read_text())
             self.assertEqual(doc["findings"], [])
             self.assertFalse(doc["agentic_only"])
+            self.assertEqual(doc["coverage"]["claims_in_ledger"], 0)
 
     def test_pdf_writes_an_agentic_stub(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import pathlib
+import sys
 import tempfile
 import unittest
 
@@ -20,6 +21,15 @@ def load():
 
 
 accept = load()
+
+
+def run_accept(*args: str) -> int:
+    argv = sys.argv
+    sys.argv = ["accept.py", *args]
+    try:
+        return accept.main()
+    finally:
+        sys.argv = argv
 
 
 class AcceptTests(unittest.TestCase):
@@ -56,21 +66,12 @@ class AcceptTests(unittest.TestCase):
                 },
             ]}))
             out = folder / "receipts.json"
-            rc = accept.main.__wrapped__ if hasattr(accept.main, "__wrapped__") else None
-            # Call through argv.
-            import sys
-            argv = sys.argv
-            sys.argv = [
-                "accept.py",
+            code = run_accept(
                 "--report", str(report),
                 "--checks", str(checks),
                 "--evidence-dir", str(folder),
                 "--out", str(out),
-            ]
-            try:
-                code = accept.main()
-            finally:
-                sys.argv = argv
+            )
             self.assertEqual(code, 0)
             payload = json.loads(out.read_text())
             self.assertEqual(payload["proposed"], 2)
@@ -96,19 +97,12 @@ class AcceptTests(unittest.TestCase):
                 "evidence_json": [{"pointer": "/units", "value": 10481}],
                 "explanation": "The file matches the report.",
             }]}))
-            import sys
-            argv = sys.argv
-            sys.argv = [
-                "accept.py",
+            code = run_accept(
                 "--report", str(report),
                 "--checks", str(checks),
                 "--evidence-dir", str(folder),
                 "--out", str(folder / "receipts.json"),
-            ]
-            try:
-                code = accept.main()
-            finally:
-                sys.argv = argv
+            )
             self.assertEqual(code, 0)
             payload = json.loads((folder / "receipts.json").read_text())
             self.assertEqual(payload["grounded"], 1)
@@ -131,22 +125,105 @@ class AcceptTests(unittest.TestCase):
                 "report_quote": "Board says margin is up 3%.",
                 "explanation": "No evidence file was supplied for the margin figure.",
             }]}))
-            import sys
-            argv = sys.argv
-            sys.argv = [
-                "accept.py",
+            code = run_accept(
                 "--report", str(report),
                 "--report-text", str(sidecar),
                 "--checks", str(checks),
                 "--out", str(folder / "receipts.json"),
-            ]
-            try:
-                code = accept.main()
-            finally:
-                sys.argv = argv
+            )
             self.assertEqual(code, 0)
             payload = json.loads((folder / "receipts.json").read_text())
             self.assertEqual(payload["grounded"], 1)
+
+    def test_missing_verdict_is_discarded_not_contradicted(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text("Revenue grew 12%.")
+            (folder / "q3.json").write_text('{"revenue_yoy": 0.12}\n')
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C9",
+                "type": "semantic",
+                "basis": "evidence",
+                "report_quote": "Revenue grew 12%.",
+                "evidence_file": "q3.json",
+                "evidence_quote": '"revenue_yoy": 0.12',
+                "explanation": "Matches.",
+            }]}))
+            code = run_accept(
+                "--report", str(folder / "report.md"),
+                "--checks", str(folder / "checks.json"),
+                "--evidence-dir", str(folder),
+                "--out", str(folder / "receipts.json"),
+            )
+            self.assertEqual(code, 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(payload["grounded"], 0)
+            self.assertEqual(payload["discarded"][0]["id"], "C9")
+            self.assertIn("verdict is missing or unknown", payload["discarded"][0]["problems"])
+            self.assertNotEqual(payload["discarded"][0].get("verdict"), "contradicted")
+
+    def test_changed_since_report_without_attempt_is_discarded(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text("Inventory on hand is 4,200.")
+            (folder / "live.json").write_text('{"on_hand": 5100, "as_of": "2026-08-23"}\n')
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C10",
+                "type": "staleness",
+                "basis": "evidence",
+                "verdict": "changed_since_report",
+                "importance": "material",
+                "report_quote": "Inventory on hand is 4,200.",
+                "evidence_file": "live.json",
+                "evidence_json": [{"pointer": "/on_hand", "value": 5100}],
+                "explanation": "The warehouse now shows 5100.",
+            }]}))
+            code = run_accept(
+                "--report", str(folder / "report.md"),
+                "--checks", str(folder / "checks.json"),
+                "--evidence-dir", str(folder),
+                "--out", str(folder / "receipts.json"),
+            )
+            self.assertEqual(code, 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(payload["grounded"], 0)
+            problems = payload["discarded"][0]["problems"]
+            self.assertIn("changed_since_report has no reconstruction attempt", problems)
+            self.assertIn("changed_since_report has no current value", problems)
+            self.assertIn("changed_since_report has no current as-of date", problems)
+
+    def test_well_formed_changed_since_report_is_kept(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text("Inventory on hand is 4,200.")
+            (folder / "live.json").write_text('{"on_hand": 5100, "as_of": "2026-08-23"}\n')
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C11",
+                "type": "staleness",
+                "basis": "evidence",
+                "verdict": "changed_since_report",
+                "importance": "material",
+                "report_quote": "Inventory on hand is 4,200.",
+                "evidence_file": "live.json",
+                "evidence_json": [{"pointer": "/on_hand", "value": 5100}],
+                "explanation": "Current on-hand is 5100 as of 2026-08-23.",
+                "reconstruction_attempt": (
+                    "Queried inventory_history and the daily snapshot table; "
+                    "neither retains 2026-04-04 on-hand."
+                ),
+                "current_value": 5100,
+                "current_as_of": "2026-08-23",
+            }]}))
+            code = run_accept(
+                "--report", str(folder / "report.md"),
+                "--checks", str(folder / "checks.json"),
+                "--evidence-dir", str(folder),
+                "--out", str(folder / "receipts.json"),
+            )
+            self.assertEqual(code, 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(payload["grounded"], 1)
+            self.assertEqual(payload["checks"][0]["verdict"], "changed_since_report")
 
 
 if __name__ == "__main__":

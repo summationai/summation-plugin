@@ -92,14 +92,14 @@ def verdict_of(raw: dict) -> str:
         return "unable_to_grade"
     if raw.get("agentic_only"):
         return "needs_review" if raw.get("agentic_scan_completed") else "unable_to_grade"
-    if claim_count(raw) < MIN_CLAIMS:
-        return "unable_to_grade"
     findings = raw.get("findings")
     if not isinstance(findings, list):
         return "unable_to_grade"
     tiers = {str(f.get("tier")) for f in findings if not _is_diagnostic_record(f)}
     if "D" in tiers:
         return "fix_first"
+    if claim_count(raw) < MIN_CLAIMS:
+        return "unable_to_grade"
     if not coverage_ok(raw):
         return "needs_review"
     if "C" in tiers:
@@ -177,7 +177,7 @@ def source_public(raw: dict) -> dict:
 def _public_layer2(layer2: list[dict] | None) -> list[dict]:
     public = []
     for f in layer2 or []:
-        verdict = str(f.get("verdict") or "contradicted")
+        verdict = str(f.get("verdict") or "")
         public.append({
             "id": str(f.get("id") or "L2"),
             "type": str(f.get("type") or "semantic"),
@@ -195,6 +195,9 @@ def _public_layer2(layer2: list[dict] | None) -> list[dict]:
             "evidence_receipts": list(f.get("evidence_receipts") or []),
             "evidence_receipt_mode": f.get("evidence_receipt_mode"),
             "explanation": str(f.get("explanation") or ""),
+            "reconstruction_attempt": f.get("reconstruction_attempt"),
+            "current_value": f.get("current_value"),
+            "current_as_of": f.get("current_as_of"),
         })
     return public
 
@@ -202,7 +205,8 @@ def _public_layer2(layer2: list[dict] | None) -> list[dict]:
 def _has_claim_evidence_receipt(check: dict) -> bool:
     """Recognize the two validated receipt shapes exposed by the artifact."""
     if (check.get("basis") != "evidence"
-            or check.get("verdict") not in {"confirmed", "contradicted"}):
+            or check.get("verdict") not in {
+                "confirmed", "contradicted", "changed_since_report"}):
         return False
     single_file = bool(
         check.get("evidence_file")
@@ -408,9 +412,14 @@ def _combined_verdict(base: str, layer2: list[dict], source: dict | None) -> str
         for check in layer2
     ) and base in {"safe_to_share", "share_with_caveats"}:
         return "needs_review"
-    if source and any(
-        check.get("verdict") == "changed_since_report"
-        for check in source.get("checks") or []
+    if (
+        any(check.get("verdict") == "changed_since_report" for check in layer2)
+        or (
+            source and any(
+                check.get("verdict") == "changed_since_report"
+                for check in source.get("checks") or []
+            )
+        )
     ) and base in {"safe_to_share", "share_with_caveats"}:
         return "needs_review"
     if source and source.get("status") in {"failed", "partial", "not_applicable"}:
@@ -1142,7 +1151,7 @@ def html_of(art: dict, raw: dict | None = None,
 
     def l2_block(f: dict) -> str:
         kind = f.get("type")
-        outcome = f.get("verdict") or "contradicted"
+        outcome = f.get("verdict") or ""
         if outcome == "confirmed":
             title = ("Confirmed by supplied evidence"
                      if f.get("basis") == "evidence"
@@ -1151,6 +1160,8 @@ def html_of(art: dict, raw: dict | None = None,
             title = ("Not established by supplied evidence"
                      if f.get("basis") == "evidence"
                      else "Not established from the report")
+        elif outcome == "changed_since_report":
+            title = "Current source differs; the as-of value could not be reconstructed"
         else:
             title = L2_TITLES.get(kind, "The report contradicts its evidence")
         if outcome == "not_checkable":
@@ -1655,6 +1666,22 @@ def html_of(art: dict, raw: dict | None = None,
 """
 
 
+def attach_receipts_ledger(raw: dict, receipts: dict) -> None:
+    """Copy the agent's claim ledger counts onto findings coverage."""
+    if not isinstance(raw, dict) or not isinstance(receipts, dict):
+        return
+    if "proposed" not in receipts:
+        return
+    proposed = int(receipts["proposed"])
+    cov = raw.setdefault("coverage", {})
+    cov["claims_in_ledger"] = proposed
+    if receipts.get("grounded") is not None:
+        cov["claims_reached_by_a_check"] = int(receipts["grounded"])
+    review = raw.setdefault("evidence_review", {})
+    review["outcomes_proposed"] = proposed
+    review["receipt_failures"] = len(receipts.get("discarded") or [])
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--findings", required=True, type=Path)
@@ -1689,6 +1716,7 @@ def main() -> int:
                 "actions": l2raw.get("actions") or [],
                 "limits": l2raw.get("limits") or [],
             }
+            attach_receipts_ledger(raw, l2raw)
     ledger_raw = None
     if args.ledger and args.ledger.is_file():
         ledger_raw = json.loads(args.ledger.read_text())

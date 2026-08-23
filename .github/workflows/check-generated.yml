@@ -25,10 +25,7 @@ jobs:
         run: python3 -m pip install --user jsonschema
 
       - name: Test verify skill scripts
-        run: |
-          python3 tests/test_verify_accept.py
-          python3 tests/test_verify_html_arith.py
-          python3 tests/test_verify_render.py
+        run: python3 -m unittest discover -s tests -p 'test_verify*'
 
       - name: Fail if generated package drifts from skills/ + packaging/
         run: |

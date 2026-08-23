@@ -122,7 +122,10 @@
             "type": ["string", "null"],
             "enum": ["verbatim", "json-object-fields", "json-pointers", null]
           },
-          "explanation": { "type": "string" }
+          "explanation": { "type": "string" },
+          "reconstruction_attempt": { "type": ["string", "null"] },
+          "current_value": true,
+          "current_as_of": { "type": ["string", "null"] }
         }
       }
     },
@@ -136,7 +139,7 @@
           "id": { "type": "string" },
           "type": { "type": "string" },
           "basis": { "type": "string", "enum": ["evidence", "report"] },
-          "verdict": { "type": "string", "enum": ["confirmed", "contradicted", "not_checkable"] },
+          "verdict": { "type": "string", "enum": ["confirmed", "contradicted", "not_checkable", "changed_since_report"] },
           "importance": { "type": "string", "enum": ["material", "supporting"] },
           "severity": { "type": ["string", "null"] },
           "report_quote": { "type": "string" },
@@ -160,7 +163,22 @@
             "type": ["string", "null"],
             "enum": ["verbatim", "json-object-fields", "json-pointers", null]
           },
-          "explanation": { "type": "string" }
+          "explanation": { "type": "string" },
+          "reconstruction_attempt": { "type": ["string", "null"] },
+          "current_value": true,
+          "current_as_of": { "type": ["string", "null"] }
+        },
+        "if": {
+          "properties": { "verdict": { "const": "changed_since_report" } },
+          "required": ["verdict"]
+        },
+        "then": {
+          "required": ["reconstruction_attempt", "current_value", "current_as_of"],
+          "properties": {
+            "reconstruction_attempt": { "type": "string", "minLength": 1 },
+            "current_as_of": { "type": "string", "minLength": 1 },
+            "current_value": { "not": { "type": "null" } }
+          }
         }
       }
     },
