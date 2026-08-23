@@ -1,0 +1,306 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "summation.grade-artifact/v1",
+  "title": "GradeArtifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "generated_at",
+    "source",
+    "source_result",
+    "verdict",
+    "score",
+    "findings",
+    "evidence_checks",
+    "evidence_findings",
+    "evidence_coverage",
+    "decision",
+    "actions",
+    "decision_limits",
+    "diagnostics",
+    "checks",
+    "verification",
+    "limitations",
+    "offer"
+  ],
+  "properties": {
+    "schema_version": { "const": "grade-artifact/v1" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "source": {
+      "type": "object",
+      "required": ["path", "format"],
+      "properties": {
+        "path": { "type": "string" },
+        "format": { "type": "string" },
+        "sha256": { "type": ["string", "null"] },
+        "period_label": { "type": ["string", "null"] }
+      }
+    },
+    "source_result": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["status", "error", "provider", "profile", "source_identity", "suggested_source", "generated_at", "tables", "confirmed", "contradicted", "not_run", "checks"],
+      "properties": {
+        "status": { "type": "string", "enum": ["complete", "partial", "failed", "not_applicable"] },
+        "error": { "type": ["string", "null"] },
+        "provider": { "type": "string", "enum": ["sum-api", "mcp"] },
+        "profile": { "type": "string" },
+        "source_identity": { "type": ["object", "null"] },
+        "suggested_source": { "type": ["string", "null"] },
+        "generated_at": { "type": ["string", "null"] },
+        "tables": { "type": "array", "items": { "type": "string" } },
+        "confirmed": { "type": "integer", "minimum": 0 },
+        "contradicted": { "type": "integer", "minimum": 0 },
+        "not_run": { "type": "integer", "minimum": 0 },
+        "checks": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["safe_to_share", "share_with_caveats", "fix_first", "needs_review", "unable_to_grade"]
+    },
+
+    "score": {
+      "description": "No letter grade. null, or engine-measured rates only.",
+      "type": ["object", "null"],
+      "properties": {
+        "kind": { "const": "tier_d_per_100_claims" },
+        "value": { "type": "number" }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["check_id", "family", "tier", "statement", "location", "claim_ids"],
+        "properties": {
+          "check_id": { "type": "string" },
+          "family": { "type": "string" },
+          "tier": { "type": "string" },
+          "severity": { "type": ["string", "null"] },
+          "statement": { "type": "string" },
+          "location": { "type": ["string", "null"] },
+          "claim_ids": { "type": "array", "items": { "type": "string" } },
+          "evidence": { "type": ["object", "null"] }
+        }
+      }
+    },
+    "evidence_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "basis", "verdict", "importance", "severity", "report_quote", "evidence_receipts", "explanation"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string" },
+          "basis": { "type": "string", "enum": ["evidence", "report"] },
+          "verdict": { "const": "contradicted" },
+          "importance": { "type": "string", "enum": ["material", "supporting"] },
+          "severity": { "type": ["string", "null"] },
+          "report_quote": { "type": "string" },
+          "report_quote_2": { "type": ["string", "null"] },
+          "evidence_file": { "type": ["string", "null"] },
+          "evidence_quote": { "type": ["string", "null"] },
+          "evidence_json": { "type": "array", "items": { "type": "object" } },
+          "evidence_receipts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["evidence_file", "evidence_json"],
+              "properties": {
+                "evidence_file": { "type": "string" },
+                "evidence_json": { "type": "array", "items": { "type": "object" } }
+              }
+            }
+          },
+          "evidence_receipt_mode": {
+            "type": ["string", "null"],
+            "enum": ["verbatim", "json-object-fields", "json-pointers", null]
+          },
+          "explanation": { "type": "string" }
+        }
+      }
+    },
+    "evidence_checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "basis", "verdict", "importance", "severity", "report_quote", "evidence_receipts", "explanation"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string" },
+          "basis": { "type": "string", "enum": ["evidence", "report"] },
+          "verdict": { "type": "string", "enum": ["confirmed", "contradicted", "not_checkable"] },
+          "importance": { "type": "string", "enum": ["material", "supporting"] },
+          "severity": { "type": ["string", "null"] },
+          "report_quote": { "type": "string" },
+          "report_quote_2": { "type": ["string", "null"] },
+          "evidence_file": { "type": ["string", "null"] },
+          "evidence_quote": { "type": ["string", "null"] },
+          "evidence_json": { "type": "array", "items": { "type": "object" } },
+          "evidence_receipts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["evidence_file", "evidence_json"],
+              "properties": {
+                "evidence_file": { "type": "string" },
+                "evidence_json": { "type": "array", "items": { "type": "object" } }
+              }
+            }
+          },
+          "evidence_receipt_mode": {
+            "type": ["string", "null"],
+            "enum": ["verbatim", "json-object-fields", "json-pointers", null]
+          },
+          "explanation": { "type": "string" }
+        }
+      }
+    },
+    "evidence_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["document_claims_total", "document_claims_reached", "claim_outcomes_proposed", "material_claims_reviewed", "supporting_claims_reviewed", "confirmed", "contradicted", "not_checkable", "evidence_confirmed", "evidence_contradicted", "evidence_not_checkable", "report_confirmed", "report_contradicted", "report_not_checkable", "validated_outcomes", "receipt_failures", "evidence_files_supplied", "evidence_files_cited", "provenance_groups", "source_independence"],
+      "properties": {
+        "document_claims_total": { "type": "integer", "minimum": 0 },
+        "document_claims_reached": { "type": "integer", "minimum": 0 },
+        "claim_outcomes_proposed": { "type": "integer", "minimum": 0 },
+        "material_claims_reviewed": { "type": "integer", "minimum": 0 },
+        "supporting_claims_reviewed": { "type": "integer", "minimum": 0 },
+        "confirmed": { "type": "integer", "minimum": 0 },
+        "contradicted": { "type": "integer", "minimum": 0 },
+        "not_checkable": { "type": "integer", "minimum": 0 },
+        "evidence_confirmed": { "type": "integer", "minimum": 0 },
+        "evidence_contradicted": { "type": "integer", "minimum": 0 },
+        "evidence_not_checkable": { "type": "integer", "minimum": 0 },
+        "report_confirmed": { "type": "integer", "minimum": 0 },
+        "report_contradicted": { "type": "integer", "minimum": 0 },
+        "report_not_checkable": { "type": "integer", "minimum": 0 },
+        "validated_outcomes": { "type": "integer", "minimum": 0 },
+        "receipt_failures": { "type": "integer", "minimum": 0 },
+        "evidence_files_supplied": { "type": "integer", "minimum": 0 },
+        "evidence_files_cited": { "type": "array", "items": { "type": "string" } },
+        "provenance_groups": { "type": "array", "items": { "type": "object" } },
+        "source_independence": { "type": "string", "enum": ["not_assessed", "grouped_by_declared_provenance"] }
+      }
+    },
+    "decision": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["outcome", "text", "report_quote", "explanation", "supporting_check_ids", "key_points", "recommended_action_ids", "key_limit_ids"],
+      "properties": {
+        "outcome": { "type": "string", "enum": ["supported", "mixed", "not_supported", "not_checkable"] },
+        "text": { "type": "string" },
+        "report_quote": { "type": "string" },
+        "explanation": { "type": "string" },
+        "supporting_check_ids": { "type": "array", "items": { "type": "string" } },
+        "key_points": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["check_id", "text"],
+            "properties": {
+              "check_id": { "type": "string" },
+              "text": { "type": "string" }
+            }
+          }
+        },
+        "recommended_action_ids": { "type": "array", "items": { "type": "string" } },
+        "key_limit_ids": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "text", "report_quote"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^A[0-9]+$" },
+          "text": { "type": "string" },
+          "report_quote": { "type": "string" }
+        }
+      }
+    },
+    "decision_limits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "text", "report_quote"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^L[0-9]+$" },
+          "text": { "type": "string" },
+          "report_quote": { "type": "string" }
+        }
+      }
+    },
+    "diagnostics": {
+      "description": "Scanner and coverage details. These are not customer-facing report problems.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["check_id", "statement"],
+        "properties": {
+          "check_id": { "type": "string" },
+          "statement": { "type": "string" },
+          "location": { "type": ["string", "null"] },
+          "severity": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "required": ["registered", "with_findings", "found_nothing", "errored", "skipped_note"],
+      "properties": {
+        "registered": { "type": "integer" },
+        "with_findings": { "type": "integer" },
+        "found_nothing": { "type": "integer" },
+        "errored": { "type": "integer" },
+        "skipped_note": { "type": "string" }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["document", "semantic", "live_source"],
+      "properties": {
+        "document": { "$ref": "#/$defs/verificationStage" },
+        "semantic": { "$ref": "#/$defs/verificationStage" },
+        "live_source": { "$ref": "#/$defs/verificationStage" }
+      }
+    },
+    "limitations": { "type": "array", "items": { "type": "string" } },
+    "offer": {
+      "type": "object",
+      "required": ["text", "accepted"],
+      "properties": {
+        "text": { "type": "string" },
+        "accepted": { "type": ["boolean", "null"] }
+      }
+    }
+  },
+  "$defs": {
+    "verificationStage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "detail"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["complete", "partial", "failed", "not_available", "not_requested", "not_run", "skipped"]
+        },
+        "detail": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
