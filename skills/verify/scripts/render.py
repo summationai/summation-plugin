@@ -914,6 +914,19 @@ def _numbers_line(f: dict) -> str:
     return ""
 
 
+def _customer_number(value) -> str:
+    if isinstance(value, bool) or value is None:
+        return "" if value is None else str(value)
+    try:
+        number = Decimal(str(value).replace(",", "").replace("$", ""))
+    except (InvalidOperation, ValueError):
+        return str(value)
+    rendered = f"{number:,f}"
+    if "." in rendered:
+        rendered = rendered.rstrip("0").rstrip(".")
+    return rendered
+
+
 def html_of(art: dict, raw: dict | None = None,
             ledger_raw: dict | None = None, source: dict | None = None) -> str:
     def esc(x) -> str:
@@ -930,6 +943,13 @@ def html_of(art: dict, raw: dict | None = None,
         check for check in confirmed_checks if check.get("basis") == "report"]
     not_checkable_checks = [
         check for check in evidence_checks if check.get("verdict") == "not_checkable"]
+    changed_checks = [
+        check for check in evidence_checks if check.get("verdict") == "changed_since_report"]
+    handled_verdicts = {
+        "confirmed", "contradicted", "not_checkable", "changed_since_report",
+    }
+    leftover_checks = [
+        check for check in evidence_checks if check.get("verdict") not in handled_verdicts]
     evidence_bound = [
         check for check in evidence_checks
         if _has_claim_evidence_receipt(check)
@@ -1161,9 +1181,24 @@ def html_of(art: dict, raw: dict | None = None,
                      if f.get("basis") == "evidence"
                      else "Not established from the report")
         elif outcome == "changed_since_report":
-            title = "Current source differs; the as-of value could not be reconstructed"
+            title = "Source changed after this report"
         else:
-            title = L2_TITLES.get(kind, "The report contradicts its evidence")
+            title = L2_TITLES.get(kind, "Finding")
+        extra = ""
+        if outcome == "changed_since_report":
+            extra = (
+                "<div class='comparison'>"
+                "<strong>Current source</strong>"
+                f"<span>Current value <b>{esc(_customer_number(f.get('current_value')))}</b></span>"
+                f"<span>As of <b>{esc(f.get('current_as_of'))}</b></span>"
+                "</div>"
+            )
+            if f.get("reconstruction_attempt"):
+                extra += f"<div class='s'>{esc(f.get('reconstruction_attempt'))}</div>"
+        elif outcome and outcome not in {
+            "confirmed", "contradicted", "not_checkable",
+        }:
+            extra = f"<div class='w'>{esc(outcome)}</div>"
         if outcome == "not_checkable":
             receipt = ""
         elif f.get("report_quote_2"):
@@ -1190,7 +1225,8 @@ def html_of(art: dict, raw: dict | None = None,
         return (
             "<div class='f'>"
             f"<div class='t'>{esc(title)}</div>"
-            f"<div class='s'>{esc(f.get('explanation'))}</div>"
+            + extra
+            + f"<div class='s'>{esc(f.get('explanation'))}</div>"
             f"<div class='q'>Report says: “{esc(f.get('report_quote'))}”</div>"
             + receipt
             + "</div>"
@@ -1394,6 +1430,18 @@ def html_of(art: dict, raw: dict | None = None,
         lead_sections.append(
             "<section class='findings review'><h2>What was not established</h2>"
             + "".join(l2_block(check) for check in not_checkable_checks)
+            + "</section>"
+        )
+    if changed_checks:
+        lead_sections.append(
+            "<section class='findings review'><h2>Source changes since this report</h2>"
+            + "".join(l2_block(check) for check in changed_checks)
+            + "</section>"
+        )
+    if leftover_checks:
+        lead_sections.append(
+            "<section class='findings review'><h2>Other findings</h2>"
+            + "".join(l2_block(check) for check in leftover_checks)
             + "</section>"
         )
     if src_changed:

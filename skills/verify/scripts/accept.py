@@ -20,12 +20,29 @@ EVIDENCE_SUFFIXES = frozenset({
     ".json", ".jsonl", ".txt", ".sql", ".csv", ".yaml", ".yml", ".md", ".html",
 })
 REPORT_ONLY_TYPES = frozenset({"internal", "logic", "arithmetic", "units", "selection"})
-KNOWN_VERDICTS = frozenset({
+FALLBACK_VERDICTS = frozenset({
     "confirmed", "contradicted", "not_checkable", "changed_since_report",
 })
+
+
+def load_known_verdicts(schema_path: pathlib.Path | None = None) -> frozenset:
+    path = schema_path or (
+        pathlib.Path(__file__).resolve().parent.parent / "schema.v1.json"
+    )
+    try:
+        schema = json.loads(path.read_text())
+        enum = schema["properties"]["evidence_checks"]["items"]["properties"]["verdict"]["enum"]
+        if not isinstance(enum, list) or not enum:
+            raise ValueError("empty verdict enum")
+        return frozenset(enum)
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return FALLBACK_VERDICTS
+
+
+KNOWN_VERDICTS = load_known_verdicts()
 EVIDENCE_RECEIPT_VERDICTS = frozenset({
     "confirmed", "contradicted", "changed_since_report",
-})
+}) & KNOWN_VERDICTS
 
 
 def normalize(text: str) -> str:

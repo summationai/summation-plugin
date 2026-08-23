@@ -78,6 +78,130 @@ class RenderVerdictTests(unittest.TestCase):
         self.assertEqual(render.verdict_of(raw), "fix_first")
 
 
+SCHEMA = ROOT / "skills" / "verify" / "schema.v1.json"
+
+
+def schema_claim_verdicts() -> list:
+    schema = json.loads(SCHEMA.read_text())
+    return list(
+        schema["properties"]["evidence_checks"]["items"]["properties"]["verdict"]["enum"]
+    )
+
+
+def _minimal_art(evidence_checks: list) -> dict:
+    contradicted = [row for row in evidence_checks if row.get("verdict") == "contradicted"]
+    return {
+        "schema_version": "grade-artifact/v1",
+        "run_id": "parity",
+        "generated_at": "2026-08-23T00:00:00Z",
+        "source": {"path": "report.md", "format": "md"},
+        "source_result": None,
+        "verdict": "needs_review",
+        "score": None,
+        "findings": [],
+        "evidence_checks": evidence_checks,
+        "evidence_findings": contradicted,
+        "evidence_coverage": {
+            "document_claims_total": len(evidence_checks),
+            "document_claims_reached": len(evidence_checks),
+            "claim_outcomes_proposed": len(evidence_checks),
+            "material_claims_reviewed": len(evidence_checks),
+            "supporting_claims_reviewed": 0,
+            "confirmed": 0,
+            "contradicted": 0,
+            "not_checkable": 0,
+            "evidence_confirmed": 0,
+            "evidence_contradicted": 0,
+            "evidence_not_checkable": 0,
+            "report_confirmed": 0,
+            "report_contradicted": 0,
+            "report_not_checkable": 0,
+            "validated_outcomes": len(evidence_checks),
+            "receipt_failures": 0,
+            "evidence_files_supplied": 0,
+            "evidence_files_cited": [],
+            "provenance_groups": [],
+            "source_independence": "not_assessed",
+        },
+        "decision": None,
+        "actions": [],
+        "decision_limits": [],
+        "diagnostics": [],
+        "checks": {
+            "registered": 0,
+            "with_findings": 0,
+            "found_nothing": 0,
+            "errored": 0,
+            "skipped_note": "",
+        },
+        "verification": {
+            "document": {"status": "not_run", "detail": None},
+            "semantic": {"status": "complete", "detail": None},
+            "live_source": {"status": "not_run", "detail": None},
+        },
+        "limitations": [],
+        "offer": {"text": "Next: stop.", "accepted": None},
+    }
+
+
+def _check(verdict: str, **extra) -> dict:
+    row = {
+        "id": f"id-{verdict}",
+        "type": "semantic",
+        "basis": "evidence",
+        "verdict": verdict,
+        "importance": "material",
+        "severity": "high" if verdict == "contradicted" else None,
+        "report_quote": f"Visible quote for {verdict}.",
+        "report_quote_2": None,
+        "evidence_file": "live.json",
+        "evidence_quote": f"evidence for {verdict}",
+        "evidence_json": [],
+        "evidence_receipts": [],
+        "evidence_receipt_mode": "verbatim",
+        "explanation": f"Explanation for {verdict}.",
+        "reconstruction_attempt": None,
+        "current_value": None,
+        "current_as_of": None,
+    }
+    row.update(extra)
+    return row
+
+
+class HtmlParityTests(unittest.TestCase):
+    def test_every_schema_claim_verdict_appears_in_html(self) -> None:
+        verdicts = schema_claim_verdicts()
+        self.assertTrue(verdicts)
+        rows = []
+        for verdict in verdicts:
+            extra = {}
+            if verdict == "changed_since_report":
+                extra = {
+                    "reconstruction_attempt": "No history table remains.",
+                    "current_value": 10613,
+                    "current_as_of": "2026-08-23",
+                }
+            rows.append(_check(verdict, **extra))
+        page = render.html_of(_minimal_art(rows))
+        for row in rows:
+            with self.subTest(verdict=row["verdict"]):
+                self.assertIn(
+                    row["report_quote"], page,
+                    f"{row['verdict']} quote missing from HTML",
+                )
+                self.assertIn(
+                    row["explanation"], page,
+                    f"{row['verdict']} explanation missing from HTML",
+                )
+
+    def test_unhandled_verdict_still_renders_a_card(self) -> None:
+        row = _check("unmodeled_verdict")
+        page = render.html_of(_minimal_art([row]))
+        self.assertIn(row["report_quote"], page)
+        self.assertIn(row["explanation"], page)
+        self.assertIn("unmodeled_verdict", page)
+
+
 @unittest.skipUnless(HAS_JSONSCHEMA, "jsonschema is not installed")
 class RenderArtifactTests(unittest.TestCase):
     def test_tiny_fixture_is_fix_first(self) -> None:
@@ -274,7 +398,9 @@ class RenderArtifactTests(unittest.TestCase):
             report = folder / "report.html"
             report.write_text(PLANTED.read_text())
             (folder / "live.json").write_text(
-                '{"revenue": 400000, "as_of": "2026-08-23"}\n')
+                '{"on_hand": 10613, "as_of": "2026-08-23"}\n')
+            (folder / "note.json").write_text(
+                '{"note": "Both segments moved in the same direction."}\n')
             self.assertEqual(run_mod(html_arith, "html_arith.py", [
                 "--report", str(report),
                 "--out", str(folder / "findings.json"),
@@ -284,23 +410,36 @@ class RenderArtifactTests(unittest.TestCase):
                 f for f in findings["findings"] if f["check_id"] == "ari_total_footing"]
             self.assertTrue(footing)
             self.assertAlmostEqual(abs(footing[0]["detail"]["discrepancy"]), 9000.0)
-            (folder / "checks.json").write_text(json.dumps({"checks": [{
-                "id": "C20",
-                "type": "staleness",
-                "basis": "evidence",
-                "verdict": "changed_since_report",
-                "importance": "material",
-                "report_quote": "Revenue is down 4.6% against the same week last year.",
-                "evidence_file": "live.json",
-                "evidence_json": [{"pointer": "/revenue", "value": 400000}],
-                "explanation": "Current revenue is 400000 as of 2026-08-23.",
-                "reconstruction_attempt": (
-                    "No warehouse time-travel or snapshot retains week-ending "
-                    "2026-04-04 revenue; retention is 14 days."
-                ),
-                "current_value": 400000,
-                "current_as_of": "2026-08-23",
-            }]}))
+            (folder / "checks.json").write_text(json.dumps({"checks": [
+                {
+                    "id": "C19",
+                    "type": "semantic",
+                    "basis": "evidence",
+                    "verdict": "confirmed",
+                    "importance": "material",
+                    "report_quote": "Both segments moved in the same direction.",
+                    "evidence_file": "note.json",
+                    "evidence_quote": "Both segments moved in the same direction.",
+                    "explanation": "The evidence repeats the segment direction claim.",
+                },
+                {
+                    "id": "C20",
+                    "type": "staleness",
+                    "basis": "evidence",
+                    "verdict": "changed_since_report",
+                    "importance": "material",
+                    "report_quote": "Revenue is down 4.6% against the same week last year.",
+                    "evidence_file": "live.json",
+                    "evidence_json": [{"pointer": "/on_hand", "value": 10613}],
+                    "explanation": "Current on-hand is 10613 as of 2026-08-23.",
+                    "reconstruction_attempt": (
+                        "Queried inventory_history and the daily snapshot table; "
+                        "neither retains 2026-04-04 on-hand."
+                    ),
+                    "current_value": 10613,
+                    "current_as_of": "2026-08-23",
+                },
+            ]}))
             self.assertEqual(run_mod(accept, "accept.py", [
                 "--report", str(report),
                 "--checks", str(folder / "checks.json"),
@@ -308,7 +447,7 @@ class RenderArtifactTests(unittest.TestCase):
                 "--out", str(folder / "receipts.json"),
             ]), 0)
             receipts = json.loads((folder / "receipts.json").read_text())
-            self.assertEqual(receipts["grounded"], 1)
+            self.assertEqual(receipts["grounded"], 2)
             out = folder / "artifact"
             self.assertEqual(run_mod(render, "render.py", [
                 "--findings", str(folder / "findings.json"),
@@ -322,6 +461,13 @@ class RenderArtifactTests(unittest.TestCase):
                 "changed_since_report",
                 {row["verdict"] for row in art["evidence_checks"]},
             )
+            page = (out / "grade-artifact.html").read_text()
+            self.assertIn("9,000", page)
+            self.assertIn("Evidence confirmed", page)
+            self.assertIn("Both segments moved in the same direction.", page)
+            self.assertIn("Source changed after this report", page)
+            self.assertIn("10,613", page)
+            self.assertIn("2026-08-23", page)
 
 
 if __name__ == "__main__":

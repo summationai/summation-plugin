@@ -33,6 +33,17 @@ def run_accept(*args: str) -> int:
 
 
 class AcceptTests(unittest.TestCase):
+    def test_fallback_verdicts_match_schema(self) -> None:
+        schema = json.loads(
+            (ROOT / "skills" / "verify" / "schema.v1.json").read_text())
+        enum = schema["properties"]["evidence_checks"]["items"]["properties"]["verdict"]["enum"]
+        self.assertEqual(accept.FALLBACK_VERDICTS, frozenset(enum))
+        self.assertEqual(accept.KNOWN_VERDICTS, frozenset(enum))
+        self.assertEqual(
+            accept.load_known_verdicts(pathlib.Path("/no/such/schema.json")),
+            accept.FALLBACK_VERDICTS,
+        )
+
     def test_keeps_verbatim_quote_and_drops_a_sloppy_one(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
