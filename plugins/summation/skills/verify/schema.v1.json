@@ -23,7 +23,8 @@
     "checks",
     "verification",
     "limitations",
-    "offer"
+    "offer",
+    "claims"
   ],
   "properties": {
     "schema_version": { "const": "grade-artifact/v1" },
@@ -123,6 +124,7 @@
             "enum": ["verbatim", "json-object-fields", "json-pointers", null]
           },
           "explanation": { "type": "string" },
+          "claim_id": { "type": ["string", "null"] },
           "reconstruction_attempt": { "type": ["string", "null"] },
           "current_value": true,
           "current_as_of": { "type": ["string", "null"] }
@@ -164,6 +166,7 @@
             "enum": ["verbatim", "json-object-fields", "json-pointers", null]
           },
           "explanation": { "type": "string" },
+          "claim_id": { "type": ["string", "null"] },
           "reconstruction_attempt": { "type": ["string", "null"] },
           "current_value": true,
           "current_as_of": { "type": ["string", "null"] }
@@ -304,6 +307,30 @@
       "properties": {
         "text": { "type": "string" },
         "accepted": { "type": ["boolean", "null"] }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "quote", "importance"],
+        "properties": {
+          "id": { "type": "string" },
+          "quote": { "type": "string" },
+          "importance": { "type": "string", "enum": ["material", "supporting"] },
+          "outcome": { "type": ["string", "null"] },
+          "check_id": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "presentation": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "summary": { "type": "string" },
+        "actions": { "type": "array" },
+        "limits": { "type": "array" }
       }
     }
   },

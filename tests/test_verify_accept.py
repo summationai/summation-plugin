@@ -23,7 +23,32 @@ def load():
 accept = load()
 
 
+def claims_from_checks(checks_path: pathlib.Path) -> pathlib.Path:
+    doc = json.loads(checks_path.read_text())
+    items = doc if isinstance(doc, list) else list(doc.get("checks") or [])
+    claims = []
+    for index, check in enumerate(items, 1):
+        check.setdefault("claim_id", f"L{index}")
+        claims.append({
+            "id": check["claim_id"],
+            "quote": check.get("report_quote") or "",
+            "importance": check.get("importance") or "material",
+        })
+    if isinstance(doc, dict):
+        doc["checks"] = items
+        checks_path.write_text(json.dumps(doc))
+    else:
+        checks_path.write_text(json.dumps({"checks": items}))
+    path = checks_path.parent / "claims.json"
+    path.write_text(json.dumps({"claims": claims}))
+    return path
+
+
 def run_accept(*args: str) -> int:
+    args = list(args)
+    if "--claims" not in args and "--checks" in args:
+        checks_path = pathlib.Path(args[args.index("--checks") + 1])
+        args.extend(["--claims", str(claims_from_checks(checks_path))])
     argv = sys.argv
     sys.argv = ["accept.py", *args]
     try:
@@ -235,6 +260,193 @@ class AcceptTests(unittest.TestCase):
             payload = json.loads((folder / "receipts.json").read_text())
             self.assertEqual(payload["grounded"], 1)
             self.assertEqual(payload["checks"][0]["verdict"], "changed_since_report")
+
+    def test_claim_quote_not_in_report_is_discarded(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text("Alpha is 1.")
+            (folder / "claims.json").write_text(json.dumps({
+                "claims": [
+                    {"id": "L1", "quote": "Alpha is 1.", "importance": "material"},
+                    {"id": "L2", "quote": "Beta is 99.", "importance": "material"},
+                ],
+            }))
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C1",
+                "claim_id": "L1",
+                "type": "semantic",
+                "basis": "report",
+                "verdict": "not_checkable",
+                "importance": "material",
+                "report_quote": "Alpha is 1.",
+                "explanation": "No evidence.",
+            }]}))
+            code = run_accept(
+                "--report", str(folder / "report.md"),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--out", str(folder / "receipts.json"),
+            )
+            self.assertEqual(code, 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(payload["claims_in_ledger"], 1)
+            discarded = payload["discarded_claims"][0]
+            self.assertEqual(discarded["id"], "L2")
+            self.assertIn("claim quote not found in visible report text", discarded["problems"])
+
+    def test_unknown_claim_id_is_discarded(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text("Alpha is 1.")
+            (folder / "claims.json").write_text(json.dumps({
+                "claims": [{"id": "L1", "quote": "Alpha is 1.", "importance": "material"}],
+            }))
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C1",
+                "claim_id": "L99",
+                "type": "semantic",
+                "basis": "report",
+                "verdict": "not_checkable",
+                "importance": "material",
+                "report_quote": "Alpha is 1.",
+                "explanation": "No evidence.",
+            }]}))
+            code = run_accept(
+                "--report", str(folder / "report.md"),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--out", str(folder / "receipts.json"),
+            )
+            self.assertEqual(code, 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(payload["grounded"], 0)
+            self.assertIn("claim_id 'L99' is not in the ledger", payload["discarded"][0]["problems"])
+
+    def test_current_value_must_match_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text("Inventory on hand is 4,200.")
+            (folder / "live.json").write_text('{"on_hand": 10613, "as_of": "2026-08-23"}\n')
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C12",
+                "type": "staleness",
+                "basis": "evidence",
+                "verdict": "changed_since_report",
+                "importance": "material",
+                "report_quote": "Inventory on hand is 4,200.",
+                "evidence_file": "live.json",
+                "evidence_json": [{"pointer": "/on_hand", "value": 10613}],
+                "explanation": "Current on-hand is 9999.",
+                "reconstruction_attempt": "No history table remains.",
+                "current_value": 9999,
+                "current_as_of": "2026-08-23",
+            }]}))
+            code = run_accept(
+                "--report", str(folder / "report.md"),
+                "--checks", str(folder / "checks.json"),
+                "--evidence-dir", str(folder),
+                "--out", str(folder / "receipts.json"),
+            )
+            self.assertEqual(code, 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(payload["grounded"], 0)
+            self.assertIn(
+                "current_value does not match the receipt",
+                payload["discarded"][0]["problems"],
+            )
+
+    def test_current_as_of_must_match_evidence_date(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text("Inventory on hand is 4,200.")
+            (folder / "live.json").write_text(
+                '{"on_hand": 10613, "as_of": "2026-08-23"}\n')
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C13",
+                "type": "staleness",
+                "basis": "evidence",
+                "verdict": "changed_since_report",
+                "importance": "material",
+                "report_quote": "Inventory on hand is 4,200.",
+                "evidence_file": "live.json",
+                "evidence_json": [{"pointer": "/on_hand", "value": 10613}],
+                "explanation": "Current on-hand is 10613.",
+                "reconstruction_attempt": "No history table remains.",
+                "current_value": 10613,
+                "current_as_of": "2019-01-01",
+            }]}))
+            code = run_accept(
+                "--report", str(folder / "report.md"),
+                "--checks", str(folder / "checks.json"),
+                "--evidence-dir", str(folder),
+                "--out", str(folder / "receipts.json"),
+            )
+            self.assertEqual(code, 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(payload["grounded"], 0)
+            self.assertIn(
+                "current_as_of does not match evidence date",
+                payload["discarded"][0]["problems"],
+            )
+
+    def test_numeric_equality_cases(self) -> None:
+        self.assertTrue(accept.quantities_equal("$4.2M", 4200000))
+        self.assertTrue(accept.quantities_equal("1,200", 1200))
+        self.assertTrue(accept.quantities_equal("29%", 29))
+        self.assertFalse(accept.quantities_equal("29%", 0.29))
+        self.assertTrue(accept.quantities_equal("(1,200)", -1200))
+        self.assertFalse(accept.quantities_equal(100, 200))
+        self.assertTrue(accept.quote_in_text("$4.2M", "Revenue was 4200000 this quarter."))
+        with tempfile.TemporaryDirectory() as raw:
+            evidence = pathlib.Path(raw) / "n.json"
+            evidence.write_text('{"rev": 4200000}\n')
+            ok, canonical = accept.json_pointer_receipt(
+                evidence, [{"pointer": "/rev", "value": "4.2M"}])
+            self.assertTrue(ok)
+            self.assertEqual(canonical[0]["value"], 4200000)
+
+    def test_not_checkable_is_reached_not_confirmed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text("Alpha is 1.")
+            (folder / "claims.json").write_text(json.dumps({
+                "claims": [{"id": "L1", "quote": "Alpha is 1.", "importance": "material"}],
+            }))
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C1",
+                "claim_id": "L1",
+                "type": "semantic",
+                "basis": "report",
+                "verdict": "not_checkable",
+                "importance": "material",
+                "report_quote": "Alpha is 1.",
+                "explanation": "No warehouse snapshot remains for this figure.",
+            }]}))
+            code = run_accept(
+                "--report", str(folder / "report.md"),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--out", str(folder / "receipts.json"),
+            )
+            self.assertEqual(code, 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(payload["claims_in_ledger"], 1)
+            self.assertEqual(payload["claims_reached_by_a_check"], 1)
+            self.assertEqual(payload["claims"][0]["outcome"], "not_checkable")
+            self.assertEqual(payload["semantic_status"], "complete")
+
+    def test_named_missing_claims_file_is_exit_2(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text("Alpha is 1.")
+            (folder / "checks.json").write_text(json.dumps({"checks": []}))
+            code = run_accept(
+                "--report", str(folder / "report.md"),
+                "--checks", str(folder / "checks.json"),
+                "--claims", str(folder / "missing-claims.json"),
+                "--out", str(folder / "receipts.json"),
+            )
+            self.assertEqual(code, 2)
 
 
 if __name__ == "__main__":

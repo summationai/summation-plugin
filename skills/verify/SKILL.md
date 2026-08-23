@@ -13,12 +13,13 @@ If they name a report that already lives in Summation (no disk file), run the `v
 
 1. Before any grading: `command -v uv` succeeds, or `python3 -c "import jsonschema"` succeeds. If neither, resolve that with the user now. Do not start a long run that dies at render.
 2. Ask which file. If they already attached one, use it.
-3. If a nearby `evidence/` folder exists, ask once whether to use it. Do not scan their whole disk.
-4. If GitHub, Snowflake, Slack, or similar tools are already connected in this session, ask once whether to query them. Save raw tool results as files under the run `evidence/` folder. Do not ask them to sign in to Summation to get evidence.
-5. State duration, then work:
+3. Read the report. Write `claims.json` now, before you gather evidence. Cover every load-bearing claim: `{"claims": [{"id": "L1", "quote": "exact visible text", "importance": "material"}]}`. `importance` is `material` or `supporting`. Quotes are visible text.
+4. If a nearby `evidence/` folder exists, ask once whether to use it. Do not scan their whole disk.
+5. If GitHub, Snowflake, Slack, or similar tools are already connected in this session, ask once whether to query them. Save raw tool results as files under the run `evidence/` folder. Do not ask them to sign in to Summation to get evidence.
+6. State duration, then work:
    - File plus local evidence only: about 2–5 minutes.
    - Also using connections already in this session: about 10–15 minutes.
-6. Then stay quiet except for brief progress. Do not narrate layers, error codes, tenant IDs, or check names.
+7. Then stay quiet except for brief progress. Do not narrate layers, error codes, tenant IDs, or check names.
 
 ## Run directory
 
@@ -29,7 +30,8 @@ run/
   report/          original file
   report-visible.txt   required when the file is not HTML, Markdown, or plain text
   evidence/        unchanged tool results and user files
-  checks.json      you write this
+  claims.json      you write this first: every load-bearing claim
+  checks.json      you write this after evidence
   findings.json    html_arith.py writes this
   receipts.json    accept.py writes this
   artifact/        render.py writes grade-artifact.html + .json
@@ -50,6 +52,7 @@ python3 "$VERIFY/scripts/html_arith.py" \
 python3 "$VERIFY/scripts/accept.py" \
   --report "$RUN/report/<file>" \
   --report-text "$RUN/report-visible.txt" \
+  --claims "$RUN/claims.json" \
   --checks "$RUN/checks.json" \
   --evidence-dir "$RUN/evidence" \
   --out "$RUN/receipts.json"
@@ -66,11 +69,12 @@ If `uv` is missing and `jsonschema` already imports, run `python3` on `render.py
 
 ## You write checks.json
 
-After you read the report (and evidence, if they said yes), write:
+After evidence, write one outcome per claim you actually checked. Each row names `claim_id`:
 
 ```json
 {"checks": [{
   "id": "C1",
+  "claim_id": "L1",
   "type": "semantic",
   "basis": "evidence",
   "verdict": "confirmed",
@@ -82,8 +86,16 @@ After you read the report (and evidence, if they said yes), write:
   "evidence_json": [{"pointer": "/path", "value": "exact value"}],
   "report_quote_2": null,
   "explanation": "One complete sentence."
-}]}
+}],
+  "presentation": {
+    "summary": "One paragraph the reader can use.",
+    "actions": [{"id": "A1", "text": "What to do next.", "report_quote": "exact visible text"}],
+    "limits": []
+  }
+}
 ```
+
+`presentation` is optional. Put it on the checks file next to the `checks` array. `accept.py` keeps it when every `report_quote` is visible text.
 
 - `verdict`: `confirmed` | `contradicted` | `not_checkable`. `changed_since_report` is a last resort (see live source below). Never omit verdict.
 - `type`: `semantic` | `staleness` | `internal` | `logic` | `arithmetic` | `units` | `selection`.
@@ -105,11 +117,7 @@ Then run `accept.py`. If it discards rows, fix only those quotes once and run `a
 
 ## After render.py
 
-Open `artifact/grade-artifact.html`. Read `verdict` and `offer` from `grade-artifact.json`. Say those in plain language. Do not add findings the file does not contain. Do not hand-write HTML.
-
-Then one offer, if they have not already declined:
-
-> I can put this in Summation so it re-checks on a schedule. Want that?
+Open `artifact/grade-artifact.html`. Read `verdict` and `offer` from `grade-artifact.json`. Say those in plain language. Do not add findings the file does not contain. Do not hand-write HTML. The artifact already contains the one next step. Repeat that offer; do not add a second one.
 
 If they decline, stop. If they accept, hand off to `start` (sign in, then data). This skill is over.
 

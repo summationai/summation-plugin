@@ -39,7 +39,32 @@ assert arith_spec.loader is not None
 arith_spec.loader.exec_module(html_arith)
 
 
+def claims_from_checks(checks_path: pathlib.Path) -> pathlib.Path:
+    doc = json.loads(checks_path.read_text())
+    items = doc if isinstance(doc, list) else list(doc.get("checks") or [])
+    claims = []
+    for index, check in enumerate(items, 1):
+        check.setdefault("claim_id", f"L{index}")
+        claims.append({
+            "id": check["claim_id"],
+            "quote": check.get("report_quote") or "",
+            "importance": check.get("importance") or "material",
+        })
+    if isinstance(doc, dict):
+        doc["checks"] = items
+        checks_path.write_text(json.dumps(doc))
+    else:
+        checks_path.write_text(json.dumps({"checks": items}))
+    path = checks_path.parent / "claims.json"
+    path.write_text(json.dumps({"claims": claims}))
+    return path
+
+
 def run_mod(mod, name: str, args: list[str]) -> int:
+    args = list(args)
+    if name == "accept.py" and "--claims" not in args and "--checks" in args:
+        checks_path = pathlib.Path(args[args.index("--checks") + 1])
+        args.extend(["--claims", str(claims_from_checks(checks_path))])
     argv = sys.argv
     sys.argv = [name, *args]
     try:
@@ -141,6 +166,7 @@ def _minimal_art(evidence_checks: list) -> dict:
         },
         "limitations": [],
         "offer": {"text": "Next: stop.", "accepted": None},
+        "claims": [],
     }
 
 
@@ -200,6 +226,45 @@ class HtmlParityTests(unittest.TestCase):
         self.assertIn(row["report_quote"], page)
         self.assertIn(row["explanation"], page)
         self.assertIn("unmodeled_verdict", page)
+
+    def test_html_has_exactly_one_next_block(self) -> None:
+        page = render.html_of(_minimal_art([_check("confirmed")]))
+        self.assertEqual(page.count('class="next"') + page.count("class='next'"), 1)
+
+    def test_named_missing_inputs_exit_2(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            findings = folder / "findings.json"
+            findings.write_text(json.dumps({
+                "findings": [],
+                "coverage": {
+                    "claims_in_ledger": 0,
+                    "claims_reached_by_a_check": 0,
+                    "extractor_checkable_fraction": 1.0,
+                    "engine_checkable_fraction": 1.0,
+                    "checks_registered": 0,
+                    "checks_with_findings": 0,
+                    "checks_found_nothing": 0,
+                    "checks_errored": 0,
+                },
+                "source": {"path": "report.md", "format": "md"},
+                "findings_truncated": False,
+            }))
+            out = folder / "artifact"
+            self.assertEqual(run_mod(render, "render.py", [
+                "--findings", str(folder / "no-findings.json"),
+                "--out-dir", str(out),
+            ]), 2)
+            self.assertEqual(run_mod(render, "render.py", [
+                "--findings", str(findings),
+                "--layer2", str(folder / "no-layer2.json"),
+                "--out-dir", str(out),
+            ]), 2)
+            self.assertEqual(run_mod(render, "render.py", [
+                "--findings", str(findings),
+                "--claims", str(folder / "no-claims.json"),
+                "--out-dir", str(out),
+            ]), 2)
 
 
 @unittest.skipUnless(HAS_JSONSCHEMA, "jsonschema is not installed")
@@ -468,6 +533,226 @@ class RenderArtifactTests(unittest.TestCase):
             self.assertIn("Source changed after this report", page)
             self.assertIn("10,613", page)
             self.assertIn("2026-08-23", page)
+            self.assertEqual(page.count('class="next"') + page.count("class='next'"), 1)
+            self.assertGreaterEqual(art["evidence_coverage"]["document_claims_total"], 1)
+
+    def test_fifty_claim_ledger_shows_one_of_fifty(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            quotes = [f"Claim number {index} holds." for index in range(1, 51)]
+            (folder / "report.md").write_text(" ".join(quotes))
+            claims = [
+                {"id": f"L{index}", "quote": quote, "importance": "material"}
+                for index, quote in enumerate(quotes, 1)
+            ]
+            (folder / "claims.json").write_text(json.dumps({"claims": claims}))
+            (folder / "ev.json").write_text('{"ok": true, "n": 1}\n')
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C1",
+                "claim_id": "L1",
+                "type": "semantic",
+                "basis": "evidence",
+                "verdict": "confirmed",
+                "importance": "material",
+                "report_quote": quotes[0],
+                "evidence_file": "ev.json",
+                "evidence_quote": '"ok": true',
+                "explanation": "The first claim matches.",
+            }]}))
+            self.assertEqual(run_mod(accept, "accept.py", [
+                "--report", str(folder / "report.md"),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--evidence-dir", str(folder),
+                "--out", str(folder / "receipts.json"),
+            ]), 0)
+            receipts = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(receipts["claims_in_ledger"], 50)
+            self.assertEqual(receipts["claims_reached_by_a_check"], 1)
+            findings = {
+                "findings": [],
+                "coverage": {
+                    "claims_in_ledger": 0,
+                    "claims_reached_by_a_check": 0,
+                    "extractor_checkable_fraction": 1.0,
+                    "engine_checkable_fraction": 1.0,
+                    "checks_registered": 0,
+                    "checks_with_findings": 0,
+                    "checks_found_nothing": 0,
+                    "checks_errored": 0,
+                },
+                "source": {"path": "report.md", "format": "md", "sha256": "abc"},
+                "findings_truncated": False,
+            }
+            (folder / "findings.json").write_text(json.dumps(findings))
+            out = folder / "artifact"
+            self.assertEqual(run_mod(render, "render.py", [
+                "--findings", str(folder / "findings.json"),
+                "--layer2", str(folder / "receipts.json"),
+                "--out-dir", str(out),
+                "--run-id", "fifty",
+            ]), 0)
+            art = json.loads((out / "grade-artifact.json").read_text())
+            self.assertEqual(art["evidence_coverage"]["document_claims_total"], 50)
+            self.assertEqual(art["evidence_coverage"]["document_claims_reached"], 1)
+            page = (out / "grade-artifact.html").read_text()
+            self.assertIn("1 / 50", page)
+
+    def test_clean_report_all_material_confirmed_is_safe_to_share(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            report = folder / "report.html"
+            report.write_text(
+                (ROOT / "tests" / "fixtures" / "verify"
+                 / "weekly-sales-snapshot-clean.html").read_text())
+            self.assertEqual(run_mod(html_arith, "html_arith.py", [
+                "--report", str(report),
+                "--out", str(folder / "findings.json"),
+            ]), 0)
+            quote = "Both segments moved in the same direction."
+            (folder / "note.json").write_text(json.dumps({"note": quote}))
+            (folder / "claims.json").write_text(json.dumps({
+                "claims": [{"id": "L1", "quote": quote, "importance": "material"}],
+            }))
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C1",
+                "claim_id": "L1",
+                "type": "semantic",
+                "basis": "evidence",
+                "verdict": "confirmed",
+                "importance": "material",
+                "report_quote": quote,
+                "evidence_file": "note.json",
+                "evidence_quote": quote,
+                "explanation": "The note matches the report.",
+            }]}))
+            self.assertEqual(run_mod(accept, "accept.py", [
+                "--report", str(report),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--evidence-dir", str(folder),
+                "--out", str(folder / "receipts.json"),
+            ]), 0)
+            out = folder / "artifact"
+            self.assertEqual(run_mod(render, "render.py", [
+                "--findings", str(folder / "findings.json"),
+                "--layer2", str(folder / "receipts.json"),
+                "--out-dir", str(out),
+                "--run-id", "clean-complete",
+            ]), 0)
+            art = json.loads((out / "grade-artifact.json").read_text())
+            self.assertEqual(art["verdict"], "safe_to_share")
+            self.assertEqual(art["verification"]["semantic"]["status"], "complete")
+
+    def test_half_material_unreached_is_partial(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text("Alpha is 1. Beta is 2.")
+            (folder / "ev.json").write_text('{"alpha": 1}\n')
+            (folder / "claims.json").write_text(json.dumps({"claims": [
+                {"id": "L1", "quote": "Alpha is 1.", "importance": "material"},
+                {"id": "L2", "quote": "Beta is 2.", "importance": "material"},
+            ]}))
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C1",
+                "claim_id": "L1",
+                "type": "semantic",
+                "basis": "evidence",
+                "verdict": "confirmed",
+                "importance": "material",
+                "report_quote": "Alpha is 1.",
+                "evidence_file": "ev.json",
+                "evidence_json": [{"pointer": "/alpha", "value": 1}],
+                "explanation": "Alpha matches.",
+            }]}))
+            self.assertEqual(run_mod(accept, "accept.py", [
+                "--report", str(folder / "report.md"),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--evidence-dir", str(folder),
+                "--out", str(folder / "receipts.json"),
+            ]), 0)
+            receipts = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(receipts["semantic_status"], "partial")
+            (folder / "findings.json").write_text(json.dumps({
+                "findings": [],
+                "coverage": {
+                    "claims_in_ledger": 0,
+                    "claims_reached_by_a_check": 0,
+                    "extractor_checkable_fraction": 1.0,
+                    "engine_checkable_fraction": 1.0,
+                    "checks_registered": 0,
+                    "checks_with_findings": 0,
+                    "checks_found_nothing": 0,
+                    "checks_errored": 0,
+                },
+                "source": {"path": "report.md", "format": "md", "sha256": "abc"},
+                "findings_truncated": False,
+            }))
+            out = folder / "artifact"
+            self.assertEqual(run_mod(render, "render.py", [
+                "--findings", str(folder / "findings.json"),
+                "--layer2", str(folder / "receipts.json"),
+                "--out-dir", str(out),
+                "--run-id", "partial",
+            ]), 0)
+            art = json.loads((out / "grade-artifact.json").read_text())
+            self.assertEqual(art["verification"]["semantic"]["status"], "partial")
+            self.assertEqual(art["evidence_coverage"]["document_claims_total"], 2)
+            self.assertEqual(art["evidence_coverage"]["document_claims_reached"], 1)
+
+    def test_not_checkable_is_reached_not_confirmed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text("Alpha is 1.")
+            (folder / "claims.json").write_text(json.dumps({
+                "claims": [{"id": "L1", "quote": "Alpha is 1.", "importance": "material"}],
+            }))
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C1",
+                "claim_id": "L1",
+                "type": "semantic",
+                "basis": "report",
+                "verdict": "not_checkable",
+                "importance": "material",
+                "report_quote": "Alpha is 1.",
+                "explanation": "No warehouse snapshot remains for this figure.",
+            }]}))
+            self.assertEqual(run_mod(accept, "accept.py", [
+                "--report", str(folder / "report.md"),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--out", str(folder / "receipts.json"),
+            ]), 0)
+            receipts = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(receipts["claims_reached_by_a_check"], 1)
+            self.assertEqual(receipts["claims"][0]["outcome"], "not_checkable")
+            (folder / "findings.json").write_text(json.dumps({
+                "findings": [],
+                "coverage": {
+                    "claims_in_ledger": 0,
+                    "claims_reached_by_a_check": 0,
+                    "extractor_checkable_fraction": 1.0,
+                    "engine_checkable_fraction": 1.0,
+                    "checks_registered": 0,
+                    "checks_with_findings": 0,
+                    "checks_found_nothing": 0,
+                    "checks_errored": 0,
+                },
+                "source": {"path": "report.md", "format": "md", "sha256": "abc"},
+                "findings_truncated": False,
+            }))
+            out = folder / "artifact"
+            self.assertEqual(run_mod(render, "render.py", [
+                "--findings", str(folder / "findings.json"),
+                "--layer2", str(folder / "receipts.json"),
+                "--out-dir", str(out),
+                "--run-id", "uncheckable",
+            ]), 0)
+            art = json.loads((out / "grade-artifact.json").read_text())
+            self.assertEqual(art["evidence_coverage"]["document_claims_reached"], 1)
+            self.assertEqual(art["evidence_coverage"]["confirmed"], 0)
+            self.assertEqual(art["evidence_coverage"]["not_checkable"], 1)
 
 
 if __name__ == "__main__":

@@ -35,6 +35,7 @@ REQUIRED = (
     "verification",
     "limitations",
     "offer",
+    "claims",
 )
 VERDICTS = frozenset(
     {"safe_to_share", "share_with_caveats", "fix_first", "needs_review", "unable_to_grade"}
@@ -198,6 +199,7 @@ def _public_layer2(layer2: list[dict] | None) -> list[dict]:
             "reconstruction_attempt": f.get("reconstruction_attempt"),
             "current_value": f.get("current_value"),
             "current_as_of": f.get("current_as_of"),
+            "claim_id": f.get("claim_id"),
         })
     return public
 
@@ -430,57 +432,10 @@ def _combined_verdict(base: str, layer2: list[dict], source: dict | None) -> str
 
 def _offer(findings: list[dict], layer2: list[dict], source: dict | None,
            verdict: str, raw: dict) -> str:
-    evidence_findings = [
-        check for check in layer2 if check.get("verdict") == "contradicted"]
-    semantic_status = (((raw.get("verification") or {}).get("semantic") or {})
-                       .get("status"))
-    if semantic_status == "failed":
-        return ("Next: retry the semantic review once. If it stops again, keep this "
-                "artifact and share the run ID with support.")
     if verdict == "unable_to_grade":
-        if raw.get("deterministic_error"):
-            return "Next: retry this assessment once. If it stops again, share the run ID with support."
         return ("Provide one supported report file (HTML, Markdown, text, CSV, XLSX, "
                 "PPTX, DOCX, or PDF) to assess it.")
-    if source and source.get("status") == "failed":
-        return "Next: repair the source connection, then rerun the live check."
-    if source and source.get("status") == "partial":
-        return "Next: retry the live check. The document and semantic findings are preserved."
-    if source and source.get("status") == "not_applicable":
-        if source.get("suggested_source"):
-            return (f"Next: connect or provide {source.get('suggested_source')}, the "
-                    "authoritative source identified for these claims, then rerun the assessment.")
-        return "Next: provide the authoritative source for the unverified claims, then rerun the assessment."
-    if source and int(source.get("contradicted") or 0):
-        return "Next: correct a copy with the current source values, then rerun the assessment."
-    if source and any(
-        check.get("verdict") == "changed_since_report"
-        for check in source.get("checks") or []
-    ):
-        return ("Next: if this report is meant to describe the current state, refresh a copy. "
-                "If it is a historical record, keep its snapshot date and do not treat later "
-                "source changes as report errors.")
-    if source and any(
-        check.get("verdict") == "matches_current_source"
-        for check in source.get("checks") or []
-    ):
-        return ("Next: keep the dated scope visible. Use a same-period snapshot or "
-                "time-aligned query if you need independent historical confirmation.")
-    if source is None:
-        evidence_files = list(raw.get("evidence_files") or [])
-        has_evidence_receipt = any(
-            _has_claim_evidence_receipt(finding) for finding in layer2)
-        if has_evidence_receipt:
-            return ("Next: use a direct live query if you need confirmation beyond "
-                    "the cited evidence files.")
-        if evidence_files:
-            return ("Next: retrieve or connect a current source and rerun. The supplied "
-                    "files produced no claim-level source receipt.")
-        return ("Next: retrieve or connect the current source and rerun before relying "
-                "on this fallback assessment.")
-    if findings or evidence_findings:
-        return "Next: correct a copy, then rerun the assessment."
-    return "Next: save this as a repeatable verification check."
+    return "I can put this in Summation so it re-checks on a schedule."
 
 
 def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
@@ -565,6 +520,8 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
         "limitations": limitations_of(raw),
         "offer": {"text": _offer(findings, evidence_checks, source_result, verdict, raw),
                   "accepted": None},
+        "claims": list(raw.get("claims") or []),
+        "presentation": raw.get("presentation"),
     }
     validate_artifact(art)
     return art
@@ -1715,19 +1672,33 @@ def html_of(art: dict, raw: dict | None = None,
 
 
 def attach_receipts_ledger(raw: dict, receipts: dict) -> None:
-    """Copy the agent's claim ledger counts onto findings coverage."""
+    """Copy the grounded claims ledger onto findings coverage."""
     if not isinstance(raw, dict) or not isinstance(receipts, dict):
         return
-    if "proposed" not in receipts:
-        return
-    proposed = int(receipts["proposed"])
+    claims = list(receipts.get("claims") or [])
+    ledger_n = int(receipts.get("claims_in_ledger", len(claims)))
+    reached_n = int(receipts.get("claims_reached_by_a_check", sum(
+        1 for row in claims if row.get("outcome") not in (None, "not_reached")
+    )))
     cov = raw.setdefault("coverage", {})
-    cov["claims_in_ledger"] = proposed
-    if receipts.get("grounded") is not None:
-        cov["claims_reached_by_a_check"] = int(receipts["grounded"])
+    cov["claims_in_ledger"] = ledger_n
+    cov["claims_reached_by_a_check"] = reached_n
     review = raw.setdefault("evidence_review", {})
-    review["outcomes_proposed"] = proposed
+    review["outcomes_proposed"] = int(receipts.get("proposed") or 0)
     review["receipt_failures"] = len(receipts.get("discarded") or [])
+    if claims:
+        raw["claims"] = claims
+    status = receipts.get("semantic_status")
+    if status:
+        verification = raw.setdefault("verification", {})
+        verification["semantic"] = {
+            "status": status,
+            "detail": (
+                f"{reached_n} of {ledger_n} ledger claims have an accepted outcome."
+            ),
+        }
+    if receipts.get("presentation"):
+        raw["presentation"] = receipts["presentation"]
 
 
 def main() -> int:
@@ -1741,14 +1712,22 @@ def main() -> int:
                    help="ledger.json for naming where unchecked figures live; HTML only")
     p.add_argument("--source", type=Path, default=None,
                    help="source-findings.json from sourcecheck.py; HTML only")
+    p.add_argument("--claims", type=Path, default=None,
+                   help="claims.json ledger; required if the path is named")
     args = p.parse_args()
     if not args.findings.is_file():
-        print(f"render: missing {args.findings}", file=sys.stderr)
+        print(f"render: missing findings {args.findings}", file=sys.stderr)
+        return 2
+    if args.layer2 is not None and not args.layer2.is_file():
+        print(f"render: missing layer2 {args.layer2}", file=sys.stderr)
+        return 2
+    if args.claims is not None and not args.claims.is_file():
+        print(f"render: missing claims {args.claims}", file=sys.stderr)
         return 2
     raw = json.loads(args.findings.read_text())
     layer2 = []
     guidance = {"decision": None, "actions": [], "limits": []}
-    if args.layer2 and args.layer2.is_file():
+    if args.layer2 is not None:
         l2raw = json.loads(args.layer2.read_text())
         if isinstance(l2raw, list):
             layer2 = l2raw
@@ -1765,6 +1744,30 @@ def main() -> int:
                 "limits": l2raw.get("limits") or [],
             }
             attach_receipts_ledger(raw, l2raw)
+            pres = l2raw.get("presentation")
+            if pres:
+                quote = ""
+                if pres.get("actions"):
+                    quote = str(pres["actions"][0].get("report_quote") or "")
+                elif l2raw.get("claims"):
+                    quote = str(l2raw["claims"][0].get("quote") or "")
+                if pres.get("summary"):
+                    guidance["decision"] = {
+                        "outcome": "not_checkable",
+                        "text": pres["summary"],
+                        "report_quote": quote,
+                        "explanation": "Agent summary of the assessment.",
+                        "supporting_check_ids": [],
+                        "key_points": [],
+                        "recommended_action_ids": [
+                            str(item.get("id") or "") for item in pres.get("actions") or []],
+                        "key_limit_ids": [
+                            str(item.get("id") or "") for item in pres.get("limits") or []],
+                    }
+                if pres.get("actions"):
+                    guidance["actions"] = pres["actions"]
+                if pres.get("limits"):
+                    guidance["limits"] = pres["limits"]
     ledger_raw = None
     if args.ledger and args.ledger.is_file():
         ledger_raw = json.loads(args.ledger.read_text())
