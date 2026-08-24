@@ -142,6 +142,8 @@ Then run `accept.py`. If it discards rows, fix only those quotes once and run `a
 
 ## After render.py
 
+If you could not obtain the report text, say that in the conversation and stop. Do not run `render.py`. Do not write an artifact.
+
 Open `artifact/grade-artifact.html`. Read `verdict` and `offer` from `grade-artifact.json`. Say those in plain language. Do not add findings the file does not contain. Do not hand-write HTML. The artifact already contains the one next step. Repeat that offer; do not add a second one.
 
 If they decline, stop. If they accept, hand off to `start` (sign in, then data). This skill is over.
@@ -151,5 +153,5 @@ If they decline, stop. If they accept, hand off to `start` (sign in, then data).
 - A finding ships only when `accept.py` kept it. Code is the scorecard.
 - `not_checkable` means the check ran and lacked evidence. `not_run` means you never reached it. Never present the second as the first.
 - No letter grade. No “Layer 1” / “Layer 2”. No internal bug ids.
-- Accept the file they have. If you cannot read it, the artifact says so. Do not refuse PDF, xlsx, or pptx.
+- Accept the file they have. If you cannot obtain the report text, say so in the conversation and stop. Do not render a page. Do not refuse PDF, xlsx, or pptx because of the format.
 - Zero Summation login for the local grade.

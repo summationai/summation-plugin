@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import pathlib
+import re
 import sys
 import tempfile
 import unittest
@@ -170,6 +171,68 @@ def _minimal_art(evidence_checks: list) -> dict:
     }
 
 
+DESIGN = ROOT / "tests" / "design"
+SECTION_ORDER = [
+    "Errors: fix these first",
+    "Confirmed correct",
+    "Today’s value differs",
+    "What we could not check, and why",
+    "What ran",
+]
+EM_EN_DASH = re.compile(r"[\u2013\u2014]")
+
+
+def _headings(page: str) -> list[str]:
+    raw = re.findall(r"<h2>(.*?)</h2>", page, flags=re.S)
+    out = []
+    for item in raw:
+        text = re.sub(r"<[^>]+>", "", item)
+        text = (text.replace("&rsquo;", "’").replace("&#8217;", "’")
+                .replace("&ldquo;", "“").replace("&rdquo;", "”"))
+        out.append(re.sub(r"\s+", " ", text).strip())
+    return out
+
+
+def assert_page_structure(test, page: str, *, expect_errors: bool, expect_csr: bool) -> None:
+    test.assertNotIn('class="sample"', page)
+    test.assertNotIn("Design sample", page)
+    test.assertIn("Summation", page)
+    test.assertIn("/ Verify", page)
+    test.assertEqual(page.count('class="next"') + page.count("class='next'"), 1)
+    test.assertIn("<b>Next:</b>", page)
+    test.assertIsNone(EM_EN_DASH.search(page), "em or en dash in generated page")
+    test.assertNotIn("changed since", page.lower())
+    test.assertNotIn("differs from source", page.lower())
+    test.assertNotIn("NEEDS REVIEW", page)
+    test.assertIn("Technical detail", page)
+    test.assertIn("Checked automatically by Summation Verify", page)
+    headings = _headings(page)
+    allowed = list(SECTION_ORDER)
+    if not expect_errors:
+        allowed.remove("Errors: fix these first")
+    if not expect_csr:
+        allowed.remove("Today’s value differs")
+    test.assertEqual(headings, allowed)
+    buckets = re.findall(r'data-bucket="([^"]+)" data-count="([^"]+)"', page)
+    test.assertEqual([item[0] for item in buckets], [
+        "errors", "confirmed", "today-differs", "not-checkable"])
+    ledger = int(re.search(r'data-ledger="(\d+)"', page).group(1))
+    numeric = 0
+    for _slug, count in buckets:
+        if count != "not-run":
+            numeric += int(count)
+    test.assertEqual(numeric, ledger)
+    if "listed under technical detail" in page:
+        test.assertIn("<details>", page)
+        test.assertIn("<li>", page)
+    for match in re.finditer(r'<div class="card [^"]+" data-kind="[^"]+">', page):
+        chunk = page[match.start(): match.start() + 1600]
+        test.assertIn('class="tag"', chunk)
+        test.assertIn("<h3>", chunk)
+        test.assertIn('class="where"', chunk)
+        test.assertIn("Checked by a program:", chunk)
+
+
 def _check(verdict: str, **extra) -> dict:
     row = {
         "id": f"id-{verdict}",
@@ -230,6 +293,30 @@ class HtmlParityTests(unittest.TestCase):
     def test_html_has_exactly_one_next_block(self) -> None:
         page = render.html_of(_minimal_art([_check("confirmed")]))
         self.assertEqual(page.count('class="next"') + page.count("class='next'"), 1)
+
+    def test_needs_review_is_shown_as_share_with_caveats(self) -> None:
+        art = _minimal_art([_check("confirmed")])
+        art["verdict"] = "needs_review"
+        page = render.html_of(art)
+        self.assertIn("SHARE WITH CAVEATS", page)
+        self.assertNotIn("NEEDS REVIEW", page)
+        self.assertNotIn("needs_review", page)
+
+    def test_design_samples_are_the_frozen_reference(self) -> None:
+        files = {
+            "grade-artifact-exemplar.html": "FIX FIRST",
+            "grade-artifact-exemplar-safe.html": "SAFE TO SHARE",
+            "grade-artifact-exemplar-caveats.html": "SHARE WITH CAVEATS",
+        }
+        for name, chip in files.items():
+            page = (DESIGN / name).read_text()
+            self.assertIn(chip, page)
+            self.assertIn("Design sample", page)
+            self.assertIn("Confirmed correct", page)
+            self.assertIn("What we could not check, and why", page)
+            self.assertIn("What ran", page)
+            self.assertIn("Technical detail", page)
+            self.assertEqual(page.count('class="next"'), 1)
 
     def test_named_missing_inputs_exit_2(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -311,7 +398,8 @@ class RenderArtifactTests(unittest.TestCase):
             raw, run_id="t", generated_at="2026-08-20T00:00:00Z", layer2=layer2)
         self.assertEqual(art["verdict"], "fix_first")
         page = render.html_of(art, raw)
-        self.assertIn("Do not rely on this report yet", page)
+        self.assertIn("FIX FIRST", page)
+        self.assertIn("does not match your evidence", page)
 
     def test_cli_writes_html_and_json(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -325,7 +413,9 @@ class RenderArtifactTests(unittest.TestCase):
             html = (out / "grade-artifact.html").read_text()
             art = json.loads((out / "grade-artifact.json").read_text())
             self.assertEqual(art["verdict"], "fix_first")
-            self.assertIn("Report assessment", html)
+            self.assertIn("Summation", html)
+            self.assertIn("FIX FIRST", html)
+            self.assertNotIn('class="sample"', html)
 
     def test_changed_since_report_writes_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -393,6 +483,9 @@ class RenderArtifactTests(unittest.TestCase):
             self.assertIn("changed_since_report", verdicts)
             self.assertTrue(art["evidence_checks"][0]["reconstruction_attempt"])
             self.assertEqual(art["evidence_checks"][0]["current_value"], 5100)
+            assert_page_structure(
+                self, (out / "grade-artifact.html").read_text(),
+                expect_errors=False, expect_csr=True)
 
     def test_ledger_count_matches_proposed_checks(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -530,13 +623,16 @@ class RenderArtifactTests(unittest.TestCase):
             )
             page = (out / "grade-artifact.html").read_text()
             self.assertIn("9,000", page)
-            self.assertIn("Evidence confirmed", page)
+            self.assertIn("Confirmed correct", page)
             self.assertIn("Both segments moved in the same direction.", page)
-            self.assertIn("Source changed after this report", page)
+            self.assertIn("Today&rsquo;s value differs", page)
+            self.assertNotIn("changed since", page.lower())
+            self.assertNotIn("differs from source", page.lower())
             self.assertIn("10,613", page)
             self.assertIn("2026-08-23", page)
             self.assertEqual(page.count('class="next"') + page.count("class='next'"), 1)
             self.assertGreaterEqual(art["evidence_coverage"]["document_claims_total"], 1)
+            assert_page_structure(self, page, expect_errors=True, expect_csr=True)
 
     def test_fifty_claim_ledger_shows_one_of_fifty(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -598,7 +694,8 @@ class RenderArtifactTests(unittest.TestCase):
             self.assertEqual(art["evidence_coverage"]["document_claims_total"], 50)
             self.assertEqual(art["evidence_coverage"]["document_claims_reached"], 1)
             page = (out / "grade-artifact.html").read_text()
-            self.assertIn("1 / 50", page)
+            self.assertIn('data-ledger="50"', page)
+            self.assertIn('data-bucket="confirmed" data-count="1"', page)
 
     def test_clean_report_all_material_confirmed_is_safe_to_share(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -645,6 +742,9 @@ class RenderArtifactTests(unittest.TestCase):
             art = json.loads((out / "grade-artifact.json").read_text())
             self.assertEqual(art["verdict"], "safe_to_share")
             self.assertEqual(art["verification"]["semantic"]["status"], "complete")
+            assert_page_structure(
+                self, (out / "grade-artifact.html").read_text(),
+                expect_errors=False, expect_csr=False)
 
     def test_half_material_unreached_is_partial(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
