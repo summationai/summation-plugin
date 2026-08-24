@@ -329,6 +329,7 @@
       "additionalProperties": false,
       "properties": {
         "summary": { "type": "string" },
+        "check_ids": { "type": "array", "items": { "type": "string" } },
         "actions": { "type": "array" },
         "limits": { "type": "array" }
       }

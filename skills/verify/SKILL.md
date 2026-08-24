@@ -48,7 +48,22 @@ If those variables are empty, resolve `VERIFY` from this skill’s directory.
 ```bash
 python3 "$VERIFY/scripts/html_arith.py" \
   --report "$RUN/report/<file>" --out "$RUN/findings.json"
+```
 
+If the report is HTML, Markdown, or plain text:
+
+```bash
+python3 "$VERIFY/scripts/accept.py" \
+  --report "$RUN/report/<file>" \
+  --claims "$RUN/claims.json" \
+  --checks "$RUN/checks.json" \
+  --evidence-dir "$RUN/evidence" \
+  --out "$RUN/receipts.json"
+```
+
+If the report is PDF, xlsx, pptx, or an image, write `report-visible.txt` first. Then:
+
+```bash
 python3 "$VERIFY/scripts/accept.py" \
   --report "$RUN/report/<file>" \
   --report-text "$RUN/report-visible.txt" \
@@ -56,7 +71,11 @@ python3 "$VERIFY/scripts/accept.py" \
   --checks "$RUN/checks.json" \
   --evidence-dir "$RUN/evidence" \
   --out "$RUN/receipts.json"
+```
 
+Then:
+
+```bash
 uv run --with jsonschema python3 "$VERIFY/scripts/render.py" \
   --findings "$RUN/findings.json" \
   --layer2 "$RUN/receipts.json" \
@@ -89,13 +108,19 @@ After evidence, write one outcome per claim you actually checked. Each row names
 }],
   "presentation": {
     "summary": "One paragraph the reader can use.",
-    "actions": [{"id": "A1", "text": "What to do next.", "report_quote": "exact visible text"}],
+    "check_ids": ["C1"],
+    "actions": [{
+      "id": "A1",
+      "text": "What to do next.",
+      "report_quote": "exact visible text",
+      "check_ids": ["C1"]
+    }],
     "limits": []
   }
 }
 ```
 
-`presentation` is optional. Put it on the checks file next to the `checks` array. `accept.py` keeps it when every `report_quote` is visible text.
+`presentation` is optional. Put it on the checks file next to the `checks` array. Every summary, action, and limit names the accepted check ids that support it. `accept.py` keeps a statement when every `report_quote` is visible text and every named id is a grounded check.
 
 - `verdict`: `confirmed` | `contradicted` | `not_checkable`. `changed_since_report` is a last resort (see live source below). Never omit verdict.
 - `type`: `semantic` | `staleness` | `internal` | `logic` | `arithmetic` | `units` | `selection`.

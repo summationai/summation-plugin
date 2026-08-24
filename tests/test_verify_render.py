@@ -399,7 +399,9 @@ class RenderArtifactTests(unittest.TestCase):
             folder = pathlib.Path(raw)
             report = folder / "report.md"
             report.write_text("Alpha is 1. Beta is 2. Gamma is 3. Delta is 4. Epsilon is 5.")
-            (folder / "ev.json").write_text('{"alpha": 1}\n')
+            (folder / "ev.json").write_text(json.dumps({
+                "alpha": 1, "beta": 2, "gamma": 3, "delta": 4, "epsilon": 5,
+            }))
             rows = []
             for i, (name, quote) in enumerate([
                 ("Alpha", "Alpha is 1."),
@@ -416,7 +418,7 @@ class RenderArtifactTests(unittest.TestCase):
                     "importance": "material",
                     "report_quote": quote,
                     "evidence_file": "ev.json",
-                    "evidence_quote": '"alpha": 1',
+                    "evidence_json": [{"pointer": f"/{name.lower()}", "value": i}],
                     "explanation": f"{name} matches.",
                 })
             (folder / "checks.json").write_text(json.dumps({"checks": rows}))

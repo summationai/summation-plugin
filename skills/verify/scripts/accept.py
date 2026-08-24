@@ -60,6 +60,7 @@ _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _DATE_KEYS = frozenset({
     "as_of", "date", "current_as_of", "queried_at", "timestamp",
 })
+VISIBLE_REPORT_SUFFIXES = frozenset({".html", ".md", ".txt", ".csv"})
 
 
 def normalize(text: str) -> str:
@@ -213,29 +214,64 @@ def json_field_receipt(evidence: pathlib.Path, quote: str) -> tuple[bool, str | 
     return False, None
 
 
+def needs_sidecar(report: pathlib.Path) -> bool:
+    return report.suffix.lower() not in VISIBLE_REPORT_SUFFIXES
+
+
+def evidence_path(
+        sandbox: pathlib.Path, name: str, report_path: pathlib.Path | None
+        ) -> tuple[pathlib.Path | None, str | None]:
+    raw = str(name or "").strip()
+    if not raw:
+        return None, "evidence_file is missing"
+    path = pathlib.Path(raw)
+    if path.is_absolute() or raw.startswith("~"):
+        return None, "evidence_file is an absolute path"
+    sandbox_res = sandbox.resolve()
+    candidate = (sandbox / raw).resolve()
+    try:
+        candidate.relative_to(sandbox_res)
+    except ValueError:
+        return None, "evidence_file is outside the evidence directory"
+    if report_path is not None and candidate == report_path.resolve():
+        return None, "report file is not valid evidence"
+    if not candidate.is_file():
+        return None, f"evidence_file {raw!r} missing"
+    return candidate, None
+
+
 def resolve_json_pointer_receipts(
-        sandbox: pathlib.Path, finding: dict, receipts: list) -> list | None:
+        sandbox: pathlib.Path, finding: dict, receipts: list,
+        report_path: pathlib.Path | None) -> tuple[list | None, str | None]:
     candidates = []
+    path_error = None
     for name in [finding.get("evidence_file"), *(finding.get("evidence_files") or [])]:
         name = str(name or "")
-        if name and name not in candidates and (sandbox / name).is_file():
-            candidates.append(name)
+        if not name or name in candidates:
+            continue
+        resolved, err = evidence_path(sandbox, name, report_path)
+        if err:
+            path_error = err
+            continue
+        candidates.append((name, resolved))
+    if not candidates:
+        return None, path_error or "evidence_file is missing"
     grouped: dict[str, list] = {}
     for receipt in receipts:
         matched = None
-        for name in candidates:
-            ok, canonical = json_pointer_receipt(sandbox / name, [receipt])
+        for name, path in candidates:
+            ok, canonical = json_pointer_receipt(path, [receipt])
             if ok:
                 matched = (name, canonical[0])
                 break
         if matched is None:
-            return None
+            return None, path_error or "JSON pointer receipt did not match an evidence file"
         name, canonical_receipt = matched
         grouped.setdefault(name, []).append(canonical_receipt)
     return [
         {"evidence_file": name, "evidence_json": grouped[name]}
-        for name in candidates if name in grouped
-    ]
+        for name, _path in candidates if name in grouped
+    ], None
 
 
 def report_text(report: pathlib.Path, sidecar: pathlib.Path | None) -> str:
@@ -250,17 +286,107 @@ def report_text(report: pathlib.Path, sidecar: pathlib.Path | None) -> str:
         return ""
 
 
-def _json_dates(payload) -> list[str]:
+def _dates_on_object(obj: dict) -> list[str]:
     found = []
-    for obj in _json_objects(payload):
-        if not isinstance(obj, dict):
+    for key, value in obj.items():
+        if not isinstance(value, str) or not value.strip():
             continue
-        for key, value in obj.items():
-            if not isinstance(value, str) or not value.strip():
-                continue
-            if key.lower() in _DATE_KEYS or _DATE.search(value):
-                found.append(value.strip())
+        if key.lower() in _DATE_KEYS or _DATE.search(value):
+            found.append(value.strip())
     return found
+
+
+def _parent_record(payload, pointer: str):
+    if not isinstance(pointer, str) or not pointer.startswith("/"):
+        return payload if isinstance(payload, dict) else None
+    current = payload
+    parts = [part.replace("~1", "/").replace("~0", "~") for part in pointer[1:].split("/")]
+    for token in parts[:-1]:
+        try:
+            if isinstance(current, list):
+                current = current[int(token)]
+            elif isinstance(current, dict):
+                current = current[token]
+            else:
+                return None
+        except (KeyError, IndexError, ValueError, TypeError):
+            return None
+    return current if isinstance(current, dict) else None
+
+
+def _json_values_from_receipts(finding: dict, receipt_updates: dict) -> list:
+    values = []
+    groups = receipt_updates.get("evidence_receipts")
+    if groups:
+        for group in groups:
+            for item in group.get("evidence_json") or []:
+                if isinstance(item, dict) and "value" in item:
+                    values.append(item["value"])
+        return values
+    if "evidence_json" in receipt_updates:
+        for item in receipt_updates.get("evidence_json") or []:
+            if isinstance(item, dict) and "value" in item:
+                values.append(item["value"])
+    return values
+
+
+def _json_pointers(finding: dict, receipt_updates: dict) -> list[str]:
+    pointers = []
+    for item in receipt_updates.get("evidence_json") or finding.get("evidence_json") or []:
+        if isinstance(item, dict) and item.get("pointer"):
+            pointers.append(str(item["pointer"]))
+    for group in receipt_updates.get("evidence_receipts") or []:
+        for item in group.get("evidence_json") or []:
+            if isinstance(item, dict) and item.get("pointer"):
+                pointers.append(str(item["pointer"]))
+    return pointers
+
+
+def _dates_on_same_record(payload, pointers: list[str], current_value) -> list[str]:
+    dates = []
+    seen = set()
+    records = []
+    for pointer in pointers:
+        parent = _parent_record(payload, pointer)
+        if isinstance(parent, dict) and id(parent) not in seen:
+            seen.add(id(parent))
+            records.append(parent)
+    if not records and current_value not in (None, ""):
+        for obj in _json_objects(payload):
+            if not isinstance(obj, dict) or id(obj) in seen:
+                continue
+            if any(values_equal(value, current_value) for value in obj.values()):
+                seen.add(id(obj))
+                records.append(obj)
+    for record in records:
+        dates.extend(_dates_on_object(record))
+    return dates
+
+
+def _csv_dates_for_value(path: pathlib.Path, current_value) -> list[str]:
+    if path.suffix.lower() != ".csv" or current_value in (None, ""):
+        return []
+    import csv
+    import io
+    try:
+        raw = path.read_text(errors="replace")
+    except OSError:
+        return []
+    rows = list(csv.reader(io.StringIO(raw)))
+    if not rows:
+        return []
+    header = rows[0]
+    dates = []
+    for row in rows:
+        if not any(cell != "" and values_equal(cell, current_value) for cell in row):
+            continue
+        for index, cell in enumerate(row):
+            if not isinstance(cell, str) or not cell.strip():
+                continue
+            key = header[index] if index < len(header) else ""
+            if str(key).lower() in _DATE_KEYS or _DATE.search(cell):
+                dates.append(cell.strip())
+    return dates
 
 
 def _date_matches(declared: str, candidates: list[str]) -> bool:
@@ -274,15 +400,23 @@ def _date_matches(declared: str, candidates: list[str]) -> bool:
     return False
 
 
-def _resolved_receipt_values(finding: dict, receipt_updates: dict, sandbox: pathlib.Path) -> list:
-    values = []
-    for group in receipt_updates.get("evidence_receipts") or []:
-        for item in group.get("evidence_json") or []:
-            if isinstance(item, dict) and "value" in item:
-                values.append(item["value"])
-    for item in receipt_updates.get("evidence_json") or finding.get("evidence_json") or []:
-        if isinstance(item, dict) and "value" in item:
-            values.append(item["value"])
+def _load_evidence_payload(
+        finding: dict, receipt_updates: dict, sandbox: pathlib.Path,
+        report_path: pathlib.Path | None) -> tuple[pathlib.Path | None, object]:
+    name = str(finding.get("evidence_file") or receipt_updates.get("evidence_file") or "")
+    path, err = evidence_path(sandbox, name, report_path) if name else (None, "missing")
+    if err or path is None:
+        return None, None
+    if path.suffix.lower() != ".json":
+        return path, None
+    try:
+        return path, json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return path, None
+
+
+def _resolved_receipt_values(finding: dict, receipt_updates: dict) -> list:
+    values = list(_json_values_from_receipts(finding, receipt_updates))
     quote = receipt_updates.get("evidence_quote") or finding.get("evidence_quote")
     if quote:
         parsed = parse_quantity(quote)
@@ -292,16 +426,76 @@ def _resolved_receipt_values(finding: dict, receipt_updates: dict, sandbox: path
             parse_quantity(token) for token in _QTOKEN.findall(str(quote))
             if parse_quantity(token) is not None
         )
-    name = str(finding.get("evidence_file") or receipt_updates.get("evidence_file") or "")
-    path = sandbox / name if name else None
-    if path is not None and path.suffix.lower() == ".json" and path.is_file():
-        try:
-            payload = json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
-            payload = None
-        if payload is not None:
-            finding["_evidence_payload"] = payload
     return values
+
+
+def _collect_comparable(quote, json_values: list) -> tuple[list, list]:
+    numbers = []
+    strings = []
+    seen_n = set()
+
+    def add_num(number):
+        if number is None:
+            return
+        key = str(number)
+        if key not in seen_n:
+            seen_n.add(key)
+            numbers.append(number)
+
+    def add_str(text):
+        item = normalize(str(text))
+        if item and item not in strings:
+            strings.append(item)
+
+    for value in json_values:
+        if isinstance(value, bool):
+            continue
+        parsed = parse_quantity(value)
+        if parsed is not None:
+            add_num(parsed)
+        elif isinstance(value, str) and value.strip():
+            add_str(value)
+    if quote:
+        for token in _QTOKEN.findall(str(quote)):
+            add_num(parse_quantity(token))
+        add_num(parse_quantity(quote))
+        if not numbers:
+            add_str(quote)
+    return numbers, strings
+
+
+def _strings_match(left: str, right: str) -> bool:
+    return left == right or quote_in_text(left, right) or quote_in_text(right, left)
+
+
+def _verdict_receipt_problem(finding: dict, receipt_updates: dict) -> str | None:
+    verdict = finding.get("verdict")
+    if verdict not in {"confirmed", "contradicted"}:
+        return None
+    report_quote = finding.get("report_quote") or ""
+    if finding.get("basis") == "report":
+        evidence_quote = finding.get("report_quote_2") or ""
+        json_values = []
+    else:
+        evidence_quote = receipt_updates.get("evidence_quote") or finding.get("evidence_quote") or ""
+        json_values = _json_values_from_receipts(finding, receipt_updates)
+    report_nums, report_strs = _collect_comparable(report_quote, [])
+    evidence_nums, evidence_strs = _collect_comparable(evidence_quote, json_values)
+    comparable = (report_nums and evidence_nums) or (report_strs and evidence_strs)
+    if not comparable:
+        return None
+    matched = False
+    if report_nums and evidence_nums:
+        matched = any(
+            values_equal(left, right) for left in report_nums for right in evidence_nums)
+    if not matched and report_strs and evidence_strs:
+        matched = any(
+            _strings_match(left, right) for left in report_strs for right in evidence_strs)
+    if verdict == "confirmed" and not matched:
+        return "confirmed verdict is not supported by the receipt values"
+    if verdict == "contradicted" and matched:
+        return "contradicted verdict is not supported by the receipt values"
+    return None
 
 
 def validate_claims(report: str, proposed: list) -> tuple[list, list]:
@@ -334,7 +528,8 @@ def validate_claims(report: str, proposed: list) -> tuple[list, list]:
 
 
 def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
-                      claim_ids: set[str]) -> tuple[list, list]:
+                      claim_ids: set[str],
+                      report_path: pathlib.Path | None = None) -> tuple[list, list]:
     validated, discarded = [], []
     for finding in proposed:
         problems = []
@@ -373,10 +568,10 @@ def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
                 "changed_since_report requires an evidence receipt for the current value")
         if basis == "evidence" and verdict in EVIDENCE_RECEIPT_VERDICTS:
             evidence_name = str(finding.get("evidence_file") or "")
-            evidence = sandbox / evidence_name if evidence_name else None
             json_receipts = finding.get("evidence_json") or []
             if json_receipts:
-                resolved = resolve_json_pointer_receipts(sandbox, finding, json_receipts)
+                resolved, path_err = resolve_json_pointer_receipts(
+                    sandbox, finding, json_receipts, report_path)
                 if resolved:
                     receipt_updates.update({
                         "evidence_file": (
@@ -389,27 +584,30 @@ def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
                         "evidence_quote": None,
                     })
                 else:
-                    problems.append("JSON pointer receipt did not match an evidence file")
-            elif not evidence_name or evidence is None or not evidence.exists():
-                problems.append(f"evidence_file {evidence_name!r} missing")
+                    problems.append(
+                        path_err or "JSON pointer receipt did not match an evidence file")
             else:
-                quote = finding.get("evidence_quote", "")
-                evidence_texts = (
-                    load_text(evidence),
-                    normalize(evidence.read_text(errors="replace")),
-                )
-                if quote and any(quote_in_text(quote, text) for text in evidence_texts):
-                    receipt_updates["evidence_receipt_mode"] = "verbatim"
+                evidence, path_err = evidence_path(sandbox, evidence_name, report_path)
+                if path_err or evidence is None:
+                    problems.append(path_err or f"evidence_file {evidence_name!r} missing")
                 else:
-                    matched, canonical = json_field_receipt(evidence, quote)
-                    if matched:
-                        receipt_updates.update({
-                            "evidence_receipt_mode": "json-object-fields",
-                            "evidence_quote": canonical,
-                        })
+                    quote = finding.get("evidence_quote", "")
+                    evidence_texts = (
+                        load_text(evidence),
+                        normalize(evidence.read_text(errors="replace")),
+                    )
+                    if quote and any(quote_in_text(quote, text) for text in evidence_texts):
+                        receipt_updates["evidence_receipt_mode"] = "verbatim"
                     else:
-                        problems.append(
-                            "evidence_quote is neither verbatim nor two exact JSON object fields")
+                        matched, canonical = json_field_receipt(evidence, quote)
+                        if matched:
+                            receipt_updates.update({
+                                "evidence_receipt_mode": "json-object-fields",
+                                "evidence_quote": canonical,
+                            })
+                        else:
+                            problems.append(
+                                "evidence_quote is neither verbatim nor two exact JSON object fields")
         if verdict == "not_checkable" and not str(finding.get("explanation") or "").strip():
             problems.append("not_checkable outcome has no reason")
         if verdict == "changed_since_report":
@@ -419,24 +617,30 @@ def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
                 problems.append("changed_since_report has no current value")
             if not str(finding.get("current_as_of") or "").strip():
                 problems.append("changed_since_report has no current as-of date")
-            resolved_values = _resolved_receipt_values(finding, receipt_updates, sandbox)
+            resolved_values = _resolved_receipt_values(finding, receipt_updates)
             declared = finding.get("current_value")
             if declared not in (None, "") and not any(
                 values_equal(declared, item) for item in resolved_values
             ):
                 problems.append("current_value does not match the receipt")
-            payload = finding.pop("_evidence_payload", None)
-            name = str(finding.get("evidence_file") or receipt_updates.get("evidence_file") or "")
-            path = sandbox / name if name else None
-            if payload is None and path is not None and path.suffix.lower() == ".json" and path.is_file():
-                try:
-                    payload = json.loads(path.read_text())
-                except (json.JSONDecodeError, OSError):
-                    payload = None
-            dates = _json_dates(payload) if payload is not None else []
+            path, payload = _load_evidence_payload(
+                finding, receipt_updates, sandbox, report_path)
+            pointers = _json_pointers(finding, receipt_updates)
             as_of = str(finding.get("current_as_of") or "").strip()
-            if dates and as_of and not _date_matches(as_of, dates):
-                problems.append("current_as_of does not match evidence date")
+            dates = []
+            if payload is not None:
+                dates = _dates_on_same_record(payload, pointers, declared)
+            if not dates and path is not None:
+                dates = _csv_dates_for_value(path, declared)
+            if as_of:
+                if not dates:
+                    problems.append(
+                        "current_as_of is not on the same record as the current value")
+                elif not _date_matches(as_of, dates):
+                    problems.append("current_as_of does not match evidence date")
+        support_problem = _verdict_receipt_problem(finding, receipt_updates)
+        if support_problem:
+            problems.append(support_problem)
         target = discarded if problems else validated
         target.append({**finding, **receipt_updates,
                        **({"problems": problems} if problems else {})})
@@ -482,7 +686,33 @@ def semantic_status(claims: list, checks: list, error: str | None = None) -> str
     return "partial"
 
 
-def validate_presentation(doc, report: str) -> tuple[dict | None, list[str]]:
+def _check_ids_of(item) -> list[str]:
+    if not isinstance(item, dict):
+        return []
+    raw = item.get("check_ids")
+    if raw is None:
+        raw = item.get("check_id")
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [raw.strip()] if raw.strip() else []
+    if isinstance(raw, list):
+        return [str(value).strip() for value in raw if str(value).strip()]
+    return []
+
+
+def _ids_problem(ids: list[str], accepted: set[str], label: str) -> str | None:
+    if not ids:
+        return f"{label} has no check ids"
+    unknown = [item for item in ids if item not in accepted]
+    if unknown:
+        return f"{label} references unknown check id {unknown[0]!r}"
+    return None
+
+
+def validate_presentation(doc, report: str,
+                          accepted_ids: set[str] | None = None
+                          ) -> tuple[dict | None, list[str]]:
     if not isinstance(doc, dict) or "presentation" not in doc:
         return None, []
     pres = doc.get("presentation")
@@ -491,9 +721,19 @@ def validate_presentation(doc, report: str) -> tuple[dict | None, list[str]]:
     problems = []
     if not isinstance(pres, dict):
         return None, ["presentation is not an object"]
+    accepted = accepted_ids or set()
     summary = pres.get("summary")
     if summary is not None and not isinstance(summary, str):
         problems.append("presentation.summary is not a string")
+        summary = None
+    summary_text = str(summary or "").strip()
+    summary_ids = _check_ids_of(pres)
+    if summary_text:
+        id_problem = _ids_problem(summary_ids, accepted, "presentation.summary")
+        if id_problem:
+            problems.append(id_problem)
+            summary_text = ""
+            summary_ids = []
     actions = pres.get("actions") or []
     limits = pres.get("limits") or []
     cleaned_actions = []
@@ -506,30 +746,37 @@ def validate_presentation(doc, report: str) -> tuple[dict | None, list[str]]:
             problems.append(f"presentation.{name} is not a list")
             continue
         for index, item in enumerate(items):
+            label = f"presentation.{name}[{index}]"
             if not isinstance(item, dict):
-                problems.append(f"presentation.{name}[{index}] is not an object")
+                problems.append(f"{label} is not an object")
                 continue
             text = str(item.get("text") or "").strip()
             quote = str(item.get("report_quote") or "").strip()
             if not text or not quote:
-                problems.append(f"presentation.{name}[{index}] is incomplete")
+                problems.append(f"{label} is incomplete")
                 continue
             if not quote_in_text(quote, report):
-                problems.append(
-                    f"presentation.{name}[{index}] report_quote not found in visible report text")
+                problems.append(f"{label} report_quote not found in visible report text")
+                continue
+            ids = _check_ids_of(item)
+            id_problem = _ids_problem(ids, accepted, label)
+            if id_problem:
+                problems.append(id_problem)
                 continue
             bucket.append({
                 "id": str(item.get("id") or f"{name[:1].upper()}{index + 1}"),
                 "text": text,
                 "report_quote": quote,
+                "check_ids": ids,
             })
-    if problems:
+    if problems and not summary_text and not cleaned_actions and not cleaned_limits:
         return None, problems
     return {
-        "summary": str(summary or "").strip(),
+        "summary": summary_text,
+        "check_ids": summary_ids,
         "actions": cleaned_actions,
         "limits": cleaned_limits,
-    }, []
+    }, problems
 
 
 def load_checks(path: pathlib.Path) -> tuple[list, dict | None]:
@@ -574,8 +821,17 @@ def main() -> int:
         return _missing(args.checks, "checks")
     if not args.claims.is_file():
         return _missing(args.claims, "claims")
-    if args.report_text is not None and not args.report_text.is_file():
-        return _missing(args.report_text, "report-text")
+    sidecar = args.report_text
+    if sidecar is not None and not sidecar.is_file():
+        if needs_sidecar(args.report):
+            return _missing(sidecar, "report-text")
+        sidecar = None
+    if sidecar is None and needs_sidecar(args.report):
+        print(
+            "accept: this format needs --report-text with visible report text.",
+            file=sys.stderr,
+        )
+        return 2
 
     try:
         proposed, checks_doc = load_checks(args.checks)
@@ -585,7 +841,7 @@ def main() -> int:
         return 2
 
     sandbox = args.evidence_dir if args.evidence_dir is not None else args.report.parent
-    text = report_text(args.report, args.report_text)
+    text = report_text(args.report, sidecar)
     if not text:
         print(
             "accept: no visible report text. Write report-visible.txt and pass --report-text.",
@@ -595,9 +851,13 @@ def main() -> int:
 
     grounded_claims, discarded_claims = validate_claims(text, proposed_claims)
     claim_ids = {row["id"] for row in grounded_claims}
-    validated, discarded = validate_receipts(text, sandbox, proposed, claim_ids)
+    validated, discarded = validate_receipts(
+        text, sandbox, proposed, claim_ids, args.report)
     ledger = attach_claim_outcomes(grounded_claims, validated)
-    presentation, presentation_problems = validate_presentation(checks_doc, text)
+    accepted_ids = {
+        str(row.get("id") or "").strip() for row in validated if row.get("id")}
+    presentation, presentation_problems = validate_presentation(
+        checks_doc, text, accepted_ids)
     payload = {
         "checks": validated,
         "validated": validated,
