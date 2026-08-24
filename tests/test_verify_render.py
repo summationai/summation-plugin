@@ -66,6 +66,10 @@ def run_mod(mod, name: str, args: list[str]) -> int:
     if name == "accept.py" and "--claims" not in args and "--checks" in args:
         checks_path = pathlib.Path(args[args.index("--checks") + 1])
         args.extend(["--claims", str(claims_from_checks(checks_path))])
+    if name == "accept.py" and "--findings" not in args and "--checks" in args:
+        sibling = pathlib.Path(args[args.index("--checks") + 1]).parent / "findings.json"
+        if sibling.is_file():
+            args.extend(["--findings", str(sibling)])
     argv = sys.argv
     sys.argv = [name, *args]
     try:
@@ -180,6 +184,30 @@ SECTION_ORDER = [
     "What ran",
 ]
 EM_EN_DASH = re.compile(r"[\u2013\u2014]")
+E2E = ROOT / "tests" / "fixtures" / "verify" / "e2e"
+_COUNT_WORDS = {
+    "no": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9,
+}
+
+
+def prose_claim_total(page: str) -> int:
+    match = re.search(r"The report makes ([^.]+?) claims?\.", page)
+    test_msg = "page does not state a claim total"
+    if not match:
+        raise AssertionError(test_msg)
+    raw = match.group(1).strip().lower().replace(",", "")
+    if raw in _COUNT_WORDS:
+        return _COUNT_WORDS[raw]
+    return int(raw)
+
+
+def tile_counts(page: str) -> dict[str, int | None]:
+    found = re.findall(r'data-bucket="([^"]+)" data-count="([^"]+)"', page)
+    out = {}
+    for slug, count in found:
+        out[slug] = None if count == "not-run" else int(count)
+    return out
 
 
 def _headings(page: str) -> list[str]:
@@ -216,12 +244,13 @@ def assert_page_structure(test, page: str, *, expect_errors: bool, expect_csr: b
     buckets = re.findall(r'data-bucket="([^"]+)" data-count="([^"]+)"', page)
     test.assertEqual([item[0] for item in buckets], [
         "errors", "confirmed", "today-differs", "not-checkable"])
-    ledger = int(re.search(r'data-ledger="(\d+)"', page).group(1))
     numeric = 0
     for _slug, count in buckets:
         if count != "not-run":
             numeric += int(count)
-    test.assertEqual(numeric, ledger)
+    data_ledger = int(re.search(r'data-ledger="(\d+)"', page).group(1))
+    test.assertEqual(numeric, data_ledger)
+    test.assertEqual(prose_claim_total(page), data_ledger)
     if "listed under technical detail" in page:
         test.assertIn("<details>", page)
         test.assertIn("<li>", page)
@@ -229,7 +258,6 @@ def assert_page_structure(test, page: str, *, expect_errors: bool, expect_csr: b
         chunk = page[match.start(): match.start() + 1600]
         test.assertIn('class="tag"', chunk)
         test.assertIn("<h3>", chunk)
-        test.assertIn('class="where"', chunk)
         test.assertIn("Checked by a program:", chunk)
 
 
@@ -399,7 +427,7 @@ class RenderArtifactTests(unittest.TestCase):
         self.assertEqual(art["verdict"], "fix_first")
         page = render.html_of(art, raw)
         self.assertIn("FIX FIRST", page)
-        self.assertIn("does not match your evidence", page)
+        self.assertIn("The kickoff is Thursday.", page)
 
     def test_cli_writes_html_and_json(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -623,6 +651,9 @@ class RenderArtifactTests(unittest.TestCase):
             )
             page = (out / "grade-artifact.html").read_text()
             self.assertIn("9,000", page)
+            self.assertIn("SEGMENT_ALPHA", page)
+            self.assertIn("218,385.67", page)
+            self.assertIn("SEGMENT_BETA", page)
             self.assertIn("Confirmed correct", page)
             self.assertIn("Both segments moved in the same direction.", page)
             self.assertIn("Today&rsquo;s value differs", page)
@@ -855,6 +886,87 @@ class RenderArtifactTests(unittest.TestCase):
             self.assertEqual(art["evidence_coverage"]["document_claims_reached"], 1)
             self.assertEqual(art["evidence_coverage"]["confirmed"], 0)
             self.assertEqual(art["evidence_coverage"]["not_checkable"], 1)
+
+    def test_repro_ledger_tiles_match_receipts_not_bucket_sum(self) -> None:
+        """The 3-claim sloppy e2e input must not invent a fifth claim."""
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            report = folder / "weekly-sales-snapshot.html"
+            report.write_text(PLANTED.read_text())
+            evidence = folder / "evidence"
+            evidence.mkdir()
+            for name in ("q3.json", "live-units.json"):
+                (evidence / name).write_text((E2E / "evidence" / name).read_text())
+            claims = folder / "claims.json"
+            checks = folder / "checks.json"
+            findings = folder / "findings.json"
+            claims.write_text((E2E / "claims-r5.json").read_text())
+            checks.write_text((E2E / "checks-r5.json").read_text())
+            findings.write_text((E2E / "findings.json").read_text())
+            self.assertEqual(run_mod(accept, "accept.py", [
+                "--report", str(report),
+                "--claims", str(claims),
+                "--checks", str(checks),
+                "--findings", str(findings),
+                "--evidence-dir", str(evidence),
+                "--out", str(folder / "receipts.json"),
+            ]), 0)
+            receipts = json.loads((folder / "receipts.json").read_text())
+            ledger_n = int(receipts["claims_in_ledger"])
+            self.assertEqual(ledger_n, 4)
+            outcomes = {row["id"]: row.get("outcome") for row in receipts["claims"]}
+            self.assertEqual(outcomes["L1"], "changed_since_report")
+            self.assertEqual(outcomes["L2"], "not_checkable")
+            self.assertEqual(outcomes["L3"], "not_reached")
+            synthetic = [row for row in receipts["claims"] if row.get("found_by") == "arithmetic"]
+            self.assertEqual(len(synthetic), 1)
+            self.assertEqual(synthetic[0]["outcome"], "error")
+            out = folder / "artifact"
+            self.assertEqual(run_mod(render, "render.py", [
+                "--findings", str(findings),
+                "--layer2", str(folder / "receipts.json"),
+                "--out-dir", str(out),
+            ]), 0)
+            page = (out / "grade-artifact.html").read_text()
+            self.assertEqual(prose_claim_total(page), ledger_n)
+            tiles = tile_counts(page)
+            numeric = sum(v or 0 for v in tiles.values())
+            self.assertEqual(numeric, ledger_n)
+            self.assertEqual(tiles["errors"], 1)
+            self.assertEqual(tiles["confirmed"], 0)
+            self.assertEqual(tiles["today-differs"], 1)
+            self.assertEqual(tiles["not-checkable"], 2)
+            self.assertIn("No check reached this claim", page)
+            self.assertIn("week ending April 4, 2026", page)
+            self.assertIn("April 4, 2026", page)
+            self.assertNotIn("The claim matches your evidence", page)
+            footer = re.search(r"Run ([^<]+)", page).group(1)
+            self.assertRegex(footer, r"sf-[0-9a-f]{6}")
+            art = json.loads((out / "grade-artifact.json").read_text())
+            self.assertRegex(art["run_id"], r"^sf-[0-9a-f]{6}$")
+
+
+class FillerAndAddendTests(unittest.TestCase):
+    def test_render_source_has_no_filler_strings(self) -> None:
+        src = (SCRIPTS / "render.py").read_text()
+        self.assertNotIn("The claim matches your evidence", src)
+        self.assertNotIn("In the report", src)
+
+    def test_unlabeled_check_uses_quote_as_title(self) -> None:
+        art = _minimal_art([_check("confirmed")])
+        art["claims"] = [{
+            "id": "L1",
+            "quote": "Visible quote for confirmed.",
+            "importance": "material",
+            "outcome": "confirmed",
+            "check_id": "id-confirmed",
+        }]
+        art["evidence_checks"][0]["claim_id"] = "L1"
+        page = render.html_of(art)
+        self.assertIn("Visible quote for confirmed.", page)
+        self.assertNotIn("The claim matches your evidence", page)
+        self.assertNotIn(">In the report<", page)
+        self.assertNotIn('class="where"', page)
 
 
 if __name__ == "__main__":

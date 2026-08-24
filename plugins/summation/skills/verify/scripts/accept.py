@@ -649,6 +649,7 @@ def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
 
 def attach_claim_outcomes(claims: list, checks: list) -> list:
     rank = {
+        "error": 0,
         "contradicted": 0,
         "changed_since_report": 1,
         "confirmed": 2,
@@ -792,12 +793,84 @@ def load_checks(path: pathlib.Path) -> tuple[list, dict | None]:
 
 
 def load_claims(path: pathlib.Path) -> list:
+    claims, _meta = load_claims_bundle(path)
+    return claims
+
+
+def load_claims_bundle(path: pathlib.Path) -> tuple[list, dict]:
     doc = json.loads(path.read_text())
+    meta = {}
     if isinstance(doc, list):
-        return doc
+        return doc, meta
     if isinstance(doc, dict) and isinstance(doc.get("claims"), list):
-        return doc["claims"]
+        period = doc.get("report_period")
+        date = doc.get("report_date")
+        if isinstance(period, str) and period.strip():
+            meta["report_period"] = period.strip()
+        if isinstance(date, str) and date.strip():
+            meta["report_date"] = date.strip()
+        return doc["claims"], meta
     raise ValueError("claims file has no claims array")
+
+
+def load_arithmetic_findings(path: pathlib.Path | None) -> list:
+    if path is None:
+        return []
+    doc = json.loads(path.read_text())
+    out = []
+    for item in doc.get("findings") or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("check_id") == "ari_total_footing" or (
+                item.get("tier") == "D" and item.get("family") == "internal_arithmetic"):
+            out.append(item)
+    return out
+
+
+def attach_arithmetic_claims(ledger: list, findings: list) -> list:
+    """Each arithmetic error maps to one ledger claim. Add a row when none match."""
+    if not findings:
+        return ledger
+    seen = {str(row.get("id") or "") for row in ledger}
+    next_n = 1
+    for finding in findings:
+        detail = finding.get("detail") or {}
+        stated = detail.get("stated")
+        if stated in (None, ""):
+            continue
+        matched = None
+        for claim in ledger:
+            if quantities_equal(claim.get("quote"), stated):
+                matched = claim
+                break
+            if quote_in_text(str(stated), str(claim.get("quote") or "")):
+                matched = claim
+                break
+        if matched is not None:
+            if matched.get("outcome") not in {"error", "contradicted"}:
+                matched["outcome"] = "error"
+                matched["check_id"] = finding.get("check_id")
+            matched["found_by"] = matched.get("found_by") or "arithmetic"
+            continue
+        while f"AR{next_n}" in seen:
+            next_n += 1
+        cid = f"AR{next_n}"
+        seen.add(cid)
+        next_n += 1
+        loc = str(finding.get("location") or "")
+        parts = loc.split("/")
+        label = parts[2] if len(parts) == 3 else "Total"
+        quote = str(finding.get("statement") or f"{label} {stated}")
+        ledger.append({
+            "id": cid,
+            "quote": quote,
+            "importance": "material",
+            "found_by": "arithmetic",
+            "outcome": "error",
+            "check_id": finding.get("check_id"),
+            "location": loc,
+        })
+    return ledger
 
 
 def _missing(path: pathlib.Path, label: str) -> int:
@@ -813,6 +886,7 @@ def main() -> int:
     ap.add_argument("--out", required=True, type=pathlib.Path)
     ap.add_argument("--evidence-dir", type=pathlib.Path, default=None)
     ap.add_argument("--report-text", type=pathlib.Path, default=None)
+    ap.add_argument("--findings", type=pathlib.Path, default=None)
     args = ap.parse_args()
 
     if not args.report.is_file():
@@ -821,6 +895,8 @@ def main() -> int:
         return _missing(args.checks, "checks")
     if not args.claims.is_file():
         return _missing(args.claims, "claims")
+    if args.findings is not None and not args.findings.is_file():
+        return _missing(args.findings, "findings")
     sidecar = args.report_text
     if sidecar is not None and not sidecar.is_file():
         if needs_sidecar(args.report):
@@ -835,7 +911,7 @@ def main() -> int:
 
     try:
         proposed, checks_doc = load_checks(args.checks)
-        proposed_claims = load_claims(args.claims)
+        proposed_claims, claims_meta = load_claims_bundle(args.claims)
     except (ValueError, json.JSONDecodeError) as exc:
         print(f"accept: {exc}", file=sys.stderr)
         return 2
@@ -854,6 +930,12 @@ def main() -> int:
     validated, discarded = validate_receipts(
         text, sandbox, proposed, claim_ids, args.report)
     ledger = attach_claim_outcomes(grounded_claims, validated)
+    try:
+        arith = load_arithmetic_findings(args.findings)
+    except (ValueError, json.JSONDecodeError) as exc:
+        print(f"accept: {exc}", file=sys.stderr)
+        return 2
+    ledger = attach_arithmetic_claims(ledger, arith)
     accepted_ids = {
         str(row.get("id") or "").strip() for row in validated if row.get("id")}
     presentation, presentation_problems = validate_presentation(
@@ -873,6 +955,8 @@ def main() -> int:
         "semantic_status": semantic_status(ledger, validated),
         "presentation": presentation,
         "presentation_problems": presentation_problems,
+        "report_period": claims_meta.get("report_period"),
+        "report_date": claims_meta.get("report_date"),
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(payload, indent=2) + "\n")

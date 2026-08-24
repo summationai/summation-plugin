@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from decimal import Decimal, InvalidOperation
+import hashlib
 import html
 import json
 import sys
@@ -172,6 +173,7 @@ def source_public(raw: dict) -> dict:
         "format": src.get("format") or "unknown",
         "sha256": src.get("sha256"),
         "period_label": src.get("period_label"),
+        "report_date": src.get("report_date"),
     }
 
 
@@ -200,6 +202,8 @@ def _public_layer2(layer2: list[dict] | None) -> list[dict]:
             "current_value": f.get("current_value"),
             "current_as_of": f.get("current_as_of"),
             "claim_id": f.get("claim_id"),
+            "location": f.get("location"),
+            "metric_label": f.get("metric_label"),
         })
     return public
 
@@ -752,7 +756,7 @@ def pointer_name(pointer: str) -> str:
 def where_from(location) -> str:
     text = str(location or "").strip()
     if not text:
-        return "In the report"
+        return ""
     parts = text.split("/")
     if len(parts) == 3 and parts[0].lower().startswith("table"):
         digits = _re.sub(r"\D+", "", parts[0]) or "1"
@@ -810,13 +814,24 @@ def math_table(finding: dict) -> str:
     stated = detail["stated"]
     computed = detail["computed"]
     delta = detail.get("discrepancy", (Decimal(str(stated)) - Decimal(str(computed))))
-    return (
-        '<table class="math num">'
+    rows = []
+    for addend in detail.get("addends") or []:
+        if not isinstance(addend, dict):
+            continue
+        label = html.escape(str(addend.get("label") or "row"))
+        rows.append(
+            f'<tr><td>{label}</td><td class="v">{html.escape(money(addend.get("value"), cents=True))}</td></tr>'
+        )
+    rows.append(
         f'<tr class="sum"><td>Sum of the rows</td><td class="v">{html.escape(money(computed, cents=True))}</td></tr>'
-        f'<tr class="bad"><td>The report shows</td><td class="v">{html.escape(money(stated, cents=True))}</td></tr>'
-        f'<tr class="sum"><td>Difference</td><td class="v">{html.escape(money(abs(Decimal(str(delta))), cents=True))}</td></tr>'
-        "</table>"
     )
+    rows.append(
+        f'<tr class="bad"><td>The report shows</td><td class="v">{html.escape(money(stated, cents=True))}</td></tr>'
+    )
+    rows.append(
+        f'<tr class="sum"><td>Difference</td><td class="v">{html.escape(money(abs(Decimal(str(delta))), cents=True))}</td></tr>'
+    )
+    return '<table class="math num">' + "".join(rows) + "</table>"
 
 
 def arith_title(finding: dict) -> str:
@@ -850,6 +865,48 @@ def is_as_of_confirmed(check: dict) -> bool:
     return False
 
 
+ERROR_OUTCOMES = frozenset({"error", "contradicted"})
+CSR_OUTCOMES = frozenset({"changed_since_report"})
+OK_OUTCOMES = frozenset({"confirmed"})
+
+
+def claim_bucket(outcome) -> str:
+    if outcome in ERROR_OUTCOMES:
+        return "errors"
+    if outcome in CSR_OUTCOMES:
+        return "today-differs"
+    if outcome in OK_OUTCOMES:
+        return "confirmed"
+    return "not-checkable"
+
+
+def card_title(check: dict, kind: str) -> str:
+    label = str(check.get("metric_label") or "").strip()
+    quote = str(check.get("report_quote") or "").strip()
+    if kind == "confirmed":
+        if label and is_as_of_confirmed(check):
+            return f"The {html.escape(label.lower())} figure matches the source, as of the report&rsquo;s own period"
+        if label:
+            return f"The {html.escape(label.lower())} figure matches your evidence"
+        return html.escape(quote or "Confirmed")
+    if kind == "error":
+        if label:
+            return f"The {html.escape(label.lower())} figure does not match your evidence"
+        return html.escape(quote or "The figure does not match your evidence")
+    if kind == "csr":
+        if label:
+            return f"{html.escape(label)}: today&rsquo;s value differs from the report&rsquo;s"
+        return html.escape(quote) if quote else "Today&rsquo;s value differs from the report&rsquo;s"
+    return html.escape(quote or kind)
+
+
+def location_line(check_or_finding: dict) -> str:
+    where = where_from(check_or_finding.get("location"))
+    if not where:
+        return ""
+    return f'<div class="where">{html.escape(where)}</div>'
+
+
 def live_source_ran(art: dict) -> bool:
     live = ((art.get("verification") or {}).get("live_source") or {})
     status = str(live.get("status") or "not_run")
@@ -866,36 +923,51 @@ def html_of(art: dict, raw: dict | None = None,
     findings = [f for f in (art.get("findings") or []) if f.get("tier") == "D"]
     checks = list(art.get("evidence_checks") or [])
     claims = list(art.get("claims") or [])
-    contradicted = [c for c in checks if c.get("verdict") == "contradicted"]
-    confirmed = [c for c in checks if c.get("verdict") == "confirmed"]
-    csr = [c for c in checks if c.get("verdict") == "changed_since_report"]
-    not_checkable = [c for c in checks if c.get("verdict") == "not_checkable"]
-    other = [
-        c for c in checks
-        if c.get("verdict") not in {
-            "confirmed", "contradicted", "not_checkable", "changed_since_report",
-        }
-    ]
-    reached_ids = {
-        str(c.get("claim_id") or "")
-        for c in checks if c.get("claim_id")
-    }
-    unreached = [
-        row for row in claims
-        if row.get("outcome") in (None, "not_reached")
-        and str(row.get("id") or "") not in reached_ids
-    ]
-
-    n_err = len(findings) + len(contradicted) + len(other)
-    n_ok = len(confirmed)
-    n_csr = len(csr)
-    n_nc = len(not_checkable) + len(unreached)
-    ledger = len(claims) or int(
-        (art.get("evidence_coverage") or {}).get("document_claims_total") or 0)
-    classified = n_err + n_ok + n_csr + n_nc
-    if ledger > classified:
-        n_nc += ledger - classified
-    ledger = n_err + n_ok + n_csr + n_nc
+    if claims:
+        n_err = sum(1 for row in claims if claim_bucket(row.get("outcome")) == "errors")
+        n_ok = sum(1 for row in claims if claim_bucket(row.get("outcome")) == "confirmed")
+        n_csr = sum(1 for row in claims if claim_bucket(row.get("outcome")) == "today-differs")
+        n_nc = sum(1 for row in claims if claim_bucket(row.get("outcome")) == "not-checkable")
+        ledger = len(claims)
+        chosen_check_ids = {
+            str(row.get("check_id") or "") for row in claims if row.get("check_id")}
+        contradicted = [
+            c for c in checks
+            if c.get("verdict") == "contradicted" and c.get("id") in chosen_check_ids]
+        confirmed = [
+            c for c in checks
+            if c.get("verdict") == "confirmed" and c.get("id") in chosen_check_ids]
+        csr = [
+            c for c in checks
+            if c.get("verdict") == "changed_since_report" and c.get("id") in chosen_check_ids]
+        not_checkable = [
+            c for c in checks
+            if c.get("verdict") == "not_checkable" and c.get("id") in chosen_check_ids]
+        unreached = [
+            row for row in claims if row.get("outcome") in (None, "not_reached")]
+        other = []
+    else:
+        contradicted = [c for c in checks if c.get("verdict") == "contradicted"]
+        confirmed = [c for c in checks if c.get("verdict") == "confirmed"]
+        csr = [c for c in checks if c.get("verdict") == "changed_since_report"]
+        not_checkable = [c for c in checks if c.get("verdict") == "not_checkable"]
+        other = [
+            c for c in checks
+            if c.get("verdict") not in {
+                "confirmed", "contradicted", "not_checkable", "changed_since_report",
+            }
+        ]
+        unreached = []
+        n_err = len(findings) + len(contradicted) + len(other)
+        n_ok = len(confirmed)
+        n_csr = len(csr)
+        n_nc = len(not_checkable)
+        coverage_total = int(
+            (art.get("evidence_coverage") or {}).get("document_claims_total") or 0)
+        classified = n_err + n_ok + n_csr + n_nc
+        ledger = coverage_total or classified
+        if ledger > classified:
+            n_nc += ledger - classified
 
     csr_ran = n_csr > 0 or live_source_ran(art)
     page_v = customer_verdict(str(art.get("verdict") or "needs_review"))
@@ -905,8 +977,13 @@ def html_of(art: dict, raw: dict | None = None,
     src = art.get("source") or {}
     filename = src.get("path") or "report"
     period = src.get("period_label") or ""
+    iso_date = src.get("report_date") or ""
+    if not iso_date and raw:
+        iso_date = str((raw.get("source") or {}).get("report_date") or "")
     verified = pretty_date(art.get("generated_at"))
-    report_date = pretty_date(period) if _re.search(r"\d{4}-\d{2}-\d{2}", str(period)) else period
+    report_date = pretty_date(iso_date) if iso_date else ""
+    if not report_date and period and _re.search(r"\d{4}-\d{2}-\d{2}", str(period)):
+        report_date = pretty_date(period)
 
     if page_v == "fix_first":
         chip, chip_class = "FIX FIRST", "fix"
@@ -978,7 +1055,7 @@ def html_of(art: dict, raw: dict | None = None,
             )
         if n_nc:
             clauses.append(
-                f"{spell_count(n_nc).capitalize()} had no evidence to check against."
+                f"{spell_count(n_nc).capitalize()} could not be checked."
             )
         verdict_p = " ".join(clauses)
 
@@ -1032,7 +1109,7 @@ def html_of(art: dict, raw: dict | None = None,
             '<div class="card err" data-kind="error">'
             '<span class="tag">ERROR</span>'
             f"<h3>{html.escape(arith_title(finding))}</h3>"
-            f'<div class="where">{html.escape(where_from(finding.get("location")))}</div>'
+            f"{location_line(finding)}"
             f"{body}"
             + (f"<p>{html.escape(fix)}</p>" if fix else "")
             + '<div class="machine">Checked by a program: the total was recomputed from the report itself.</div>'
@@ -1042,8 +1119,8 @@ def html_of(art: dict, raw: dict | None = None,
         error_cards.append(
             '<div class="card err" data-kind="error">'
             '<span class="tag">ERROR</span>'
-            "<h3>The figure does not match your evidence</h3>"
-            f'<div class="where">{html.escape(where_from(check.get("location")))}</div>'
+            f"<h3>{card_title(check, 'error')}</h3>"
+            f"{location_line(check)}"
             + receipt_block(curly(check.get("report_quote") or ""), evidence_value_line(check))
             + (f"<p>{html.escape(check.get('explanation') or '')}</p>"
                if check.get("explanation") else "")
@@ -1055,7 +1132,7 @@ def html_of(art: dict, raw: dict | None = None,
             '<div class="card err" data-kind="error">'
             f'<span class="tag">{html.escape(str(check.get("verdict") or "ERROR").upper())}</span>'
             f"<h3>{html.escape(check.get('report_quote') or 'Finding')}</h3>"
-            f'<div class="where">{html.escape(where_from(check.get("location")))}</div>'
+            f"{location_line(check)}"
             + (f"<p>{html.escape(check.get('explanation') or '')}</p>"
                if check.get("explanation") else "")
             + f'<div class="machine">Checked by a program: {html.escape(str(check.get("verdict")))}.</div>'
@@ -1074,16 +1151,15 @@ def html_of(art: dict, raw: dict | None = None,
     confirm_cards = []
     for check in shown_confirmed:
         as_of = is_as_of_confirmed(check)
+        title = card_title(check, "confirmed")
         if as_of:
-            title = "The figure matches the source, as of the report&rsquo;s own period"
             machine = "Checked by a program: the report value was compared with the live query result."
             ev_label = "Source says"
-            date_bit = pretty_date(check.get("current_as_of") or report_date or period)
+            date_bit = pretty_date(check.get("current_as_of") or report_date or iso_date)
             explain = (
                 f"This value is checked as of {html.escape(date_bit)}, not as of today."
             )
         else:
-            title = "The claim matches your evidence"
             machine = "Checked by a program: the report quote and the evidence value match."
             ev_label = "Evidence says"
             explain = check.get("explanation") or ""
@@ -1091,7 +1167,7 @@ def html_of(art: dict, raw: dict | None = None,
             '<div class="card ok" data-kind="confirmed">'
             '<span class="tag">CONFIRMED</span>'
             f"<h3>{title}</h3>"
-            f'<div class="where">{html.escape(where_from(check.get("location")))}</div>'
+            f"{location_line(check)}"
             + receipt_block(
                 curly(check.get("report_quote") or ""),
                 evidence_value_line(check),
@@ -1123,7 +1199,7 @@ def html_of(art: dict, raw: dict | None = None,
             found = _re.search(r"\$?-?\d[\d,]*(?:\.\d+)?%?", quote)
             report_val = figure(found.group(0)) if found else quote
             live_val = figure(check.get("current_value"))
-            report_label = f"Report, {html.escape(report_date or 'report date')}" if report_date else "Report"
+            report_label = f"Report, {html.escape(report_date)}" if report_date else "Report"
             live_label = "Live query"
             if check.get("current_as_of"):
                 live_label = f"Live query, {html.escape(pretty_date(check.get('current_as_of')))}"
@@ -1131,8 +1207,8 @@ def html_of(art: dict, raw: dict | None = None,
             csr_cards.append(
                 '<div class="card chg" data-kind="today-differs">'
                 '<span class="tag">TODAY DIFFERS</span>'
-                "<h3>Today&rsquo;s value differs from the report&rsquo;s</h3>"
-                f'<div class="where">{html.escape(where_from(check.get("location")))}</div>'
+                f"<h3>{card_title(check, 'csr')}</h3>"
+                f"{location_line(check)}"
                 '<div class="compare">'
                 f'<div class="box"><div class="bl">{report_label}</div>'
                 f'<div class="bv">{html.escape(report_val)}</div></div>'
@@ -1221,7 +1297,7 @@ def html_of(art: dict, raw: dict | None = None,
         f"Every headline figure, table total, and named metric counts as a claim; "
         f"{spell_count(ledger)} found. {spell_count(checked_n).capitalize()} "
         f"{'was' if checked_n == 1 else 'were'} checked"
-        + (f"; {spell_count(n_nc)} had no evidence" if n_nc else "")
+        + (f"; {spell_count(n_nc)} could not be checked" if n_nc else "")
         + "."
     )
     sections.append(
@@ -1338,6 +1414,11 @@ def attach_receipts_ledger(raw: dict, receipts: dict) -> None:
         }
     if receipts.get("presentation"):
         raw["presentation"] = receipts["presentation"]
+    src = raw.setdefault("source", {})
+    if receipts.get("report_period"):
+        src["period_label"] = receipts["report_period"]
+    if receipts.get("report_date"):
+        src["report_date"] = receipts["report_date"]
 
 
 def main() -> int:
@@ -1417,7 +1498,10 @@ def main() -> int:
     source = None
     if args.source and args.source.is_file():
         source = json.loads(args.source.read_text())
-    run_id = args.run_id or args.findings.parent.parent.name
+    digest = str((raw.get("source") or {}).get("sha256") or "")
+    if len(digest) < 6:
+        digest = hashlib.sha256(args.findings.read_bytes()).hexdigest()
+    run_id = args.run_id or f"sf-{digest[:6]}"
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     art = artifact_from_findings(raw, run_id=run_id, generated_at=generated_at,
                                  layer2=layer2, source=source, guidance=guidance)

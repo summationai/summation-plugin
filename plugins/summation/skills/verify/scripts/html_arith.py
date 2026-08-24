@@ -132,6 +132,13 @@ def footing_findings(tables: list[list[list[str]]]) -> tuple[list[dict], int]:
                     "stated": float(shown),
                     "computed": float(computed),
                     "discrepancy": float(delta),
+                    "addends": [
+                        {
+                            "label": str(components[index][0] if components[index] else f"row {index + 1}"),
+                            "value": float(values[index]),
+                        }
+                        for index in range(len(values))
+                    ],
                 },
             })
     return findings, checked

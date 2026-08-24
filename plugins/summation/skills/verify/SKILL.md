@@ -13,7 +13,7 @@ If they name a report that already lives in Summation (no disk file), run the `v
 
 1. Before any grading: `command -v uv` succeeds, or `python3 -c "import jsonschema"` succeeds. If neither, resolve that with the user now. Do not start a long run that dies at render.
 2. Ask which file. If they already attached one, use it.
-3. Read the report. Write `claims.json` now, before you gather evidence. Cover every load-bearing claim: `{"claims": [{"id": "L1", "quote": "exact visible text", "importance": "material"}]}`. `importance` is `material` or `supporting`. Quotes are visible text.
+3. Read the report. Write `claims.json` now, before you gather evidence. Cover every load-bearing claim, including every table total: `{"report_period": "week ending April 4, 2026", "report_date": "2026-04-04", "claims": [{"id": "L1", "quote": "exact visible text", "importance": "material"}]}`. `importance` is `material` or `supporting`. Quotes are visible text. `report_period` is the display string. `report_date` is ISO `YYYY-MM-DD`. Leave either field out when the report does not name a period.
 4. If a nearby `evidence/` folder exists, ask once whether to use it. Do not scan their whole disk.
 5. If GitHub, Snowflake, Slack, or similar tools are already connected in this session, ask once whether to query them. Save raw tool results as files under the run `evidence/` folder. Do not ask them to sign in to Summation to get evidence.
 6. State duration, then work:
@@ -57,6 +57,7 @@ python3 "$VERIFY/scripts/accept.py" \
   --report "$RUN/report/<file>" \
   --claims "$RUN/claims.json" \
   --checks "$RUN/checks.json" \
+  --findings "$RUN/findings.json" \
   --evidence-dir "$RUN/evidence" \
   --out "$RUN/receipts.json"
 ```
@@ -69,6 +70,7 @@ python3 "$VERIFY/scripts/accept.py" \
   --report-text "$RUN/report-visible.txt" \
   --claims "$RUN/claims.json" \
   --checks "$RUN/checks.json" \
+  --findings "$RUN/findings.json" \
   --evidence-dir "$RUN/evidence" \
   --out "$RUN/receipts.json"
 ```
@@ -100,6 +102,8 @@ After evidence, write one outcome per claim you actually checked. Each row names
   "importance": "material",
   "severity": null,
   "report_quote": "exact visible text from the report",
+  "metric_label": "Units",
+  "location": "Headline tile, Units",
   "evidence_file": "relative/name.json",
   "evidence_quote": "exact text from that evidence file",
   "evidence_json": [{"pointer": "/path", "value": "exact value"}],
@@ -126,6 +130,7 @@ After evidence, write one outcome per claim you actually checked. Each row names
 - `type`: `semantic` | `staleness` | `internal` | `logic` | `arithmetic` | `units` | `selection`.
 - `basis`: `evidence` or `report`. Report-only contradictions need `report_quote` and `report_quote_2`.
 - Quotes are visible text, after whitespace normalize. Never quote HTML tags.
+- `metric_label` names the figure (for example `Units`). `location` names the spot on the page (for example `Headline tile, Orders`). Leave either field out when you do not have it.
 - Prefer `evidence_json` pointers for JSON files.
 - `not_checkable` needs a specific reason. Do not attach a fake receipt.
 - Subagents per section are optional. Hosts without subagents do the same writes in sequence.

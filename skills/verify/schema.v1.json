@@ -127,7 +127,9 @@
           "claim_id": { "type": ["string", "null"] },
           "reconstruction_attempt": { "type": ["string", "null"] },
           "current_value": true,
-          "current_as_of": { "type": ["string", "null"] }
+          "current_as_of": { "type": ["string", "null"] },
+          "location": { "type": ["string", "null"] },
+          "metric_label": { "type": ["string", "null"] }
         }
       }
     },
@@ -169,7 +171,9 @@
           "claim_id": { "type": ["string", "null"] },
           "reconstruction_attempt": { "type": ["string", "null"] },
           "current_value": true,
-          "current_as_of": { "type": ["string", "null"] }
+          "current_as_of": { "type": ["string", "null"] },
+          "location": { "type": ["string", "null"] },
+          "metric_label": { "type": ["string", "null"] }
         },
         "if": {
           "properties": { "verdict": { "const": "changed_since_report" } },
@@ -320,7 +324,9 @@
           "quote": { "type": "string" },
           "importance": { "type": "string", "enum": ["material", "supporting"] },
           "outcome": { "type": ["string", "null"] },
-          "check_id": { "type": ["string", "null"] }
+          "check_id": { "type": ["string", "null"] },
+          "found_by": { "type": ["string", "null"] },
+          "location": { "type": ["string", "null"] }
         }
       }
     },

@@ -52,6 +52,10 @@ def run_accept(*args: str) -> int:
     if "--claims" not in args and "--checks" in args:
         checks_path = pathlib.Path(args[args.index("--checks") + 1])
         args.extend(["--claims", str(claims_from_checks(checks_path))])
+    if "--findings" not in args and "--checks" in args:
+        sibling = pathlib.Path(args[args.index("--checks") + 1]).parent / "findings.json"
+        if sibling.is_file():
+            args.extend(["--findings", str(sibling)])
     argv = sys.argv
     sys.argv = ["accept.py", *args]
     try:
