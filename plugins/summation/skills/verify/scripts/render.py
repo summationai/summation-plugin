@@ -39,8 +39,9 @@ REQUIRED = (
     "claims",
 )
 VERDICTS = frozenset(
-    {"safe_to_share", "share_with_caveats", "fix_first", "needs_review", "unable_to_grade"}
+    {"safe_to_share", "share_with_caveats", "fix_first", "unable_to_grade"}
 )
+PUBLIC_VERDICTS = VERDICTS
 MATERIAL_REPORT_ONLY_TYPES = frozenset(
     {"internal", "logic", "arithmetic", "units", "selection"}
 )
@@ -503,6 +504,7 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
         "safe_to_share", "share_with_caveats"
     }:
         verdict = "needs_review"
+    verdict = public_verdict(verdict)
     art = {
         "schema_version": SCHEMA_VERSION,
         "run_id": run_id,
@@ -686,10 +688,65 @@ _MONTHS = (
 )
 
 
+def public_verdict(verdict: str) -> str:
+    if verdict == "needs_review":
+        return "share_with_caveats"
+    if verdict in PUBLIC_VERDICTS:
+        return verdict
+    return "unable_to_grade"
+
+
 def customer_verdict(verdict: str) -> str:
     if verdict in {"needs_review", "unable_to_grade"}:
         return "share_with_caveats"
-    return verdict
+    return public_verdict(verdict)
+
+
+def _finding_quantity(finding: dict):
+    detail = finding.get("detail") or finding.get("evidence") or {}
+    if isinstance(detail, dict) and "stated" in detail:
+        try:
+            return Decimal(str(detail["stated"]))
+        except (InvalidOperation, ValueError):
+            return None
+    return None
+
+
+def document_errors_unaccounted(raw: dict) -> bool:
+    """True when D findings exist that the receipts ledger does not cover."""
+    claims = list(raw.get("claims") or [])
+    if not claims:
+        return False
+    d_findings = [
+        item for item in (raw.get("findings") or [])
+        if str(item.get("tier")) == "D" and not _is_diagnostic_record(item)
+    ]
+    if not d_findings:
+        return False
+    for finding in d_findings:
+        stated = _finding_quantity(finding)
+        cid = str(finding.get("check_id") or "")
+        accounted = False
+        for claim in claims:
+            if claim.get("found_by") == "arithmetic":
+                if not cid or str(claim.get("check_id") or "") in {cid, ""}:
+                    accounted = True
+                    break
+            if str(claim.get("check_id") or "") == cid and cid:
+                accounted = True
+                break
+            if stated is not None:
+                quote = str(claim.get("quote") or "")
+                try:
+                    q = Decimal(_re.sub(r"[^\d.\-]+", "", quote) or "nan")
+                except (InvalidOperation, ValueError):
+                    q = None
+                if q == stated:
+                    accounted = True
+                    break
+        if not accounted:
+            return True
+    return False
 
 
 def spell_count(n: int) -> str:
@@ -973,6 +1030,8 @@ def html_of(art: dict, raw: dict | None = None,
     page_v = customer_verdict(str(art.get("verdict") or "needs_review"))
     if n_err:
         page_v = "fix_first"
+    elif page_v == "fix_first":
+        page_v = "share_with_caveats"
 
     src = art.get("source") or {}
     filename = src.get("path") or "report"
@@ -1464,6 +1523,13 @@ def main() -> int:
                 "limits": l2raw.get("limits") or [],
             }
             attach_receipts_ledger(raw, l2raw)
+            if document_errors_unaccounted(raw):
+                print(
+                    "render: findings contain errors the claims ledger does not "
+                    "account for. Run accept.py with --findings.",
+                    file=sys.stderr,
+                )
+                return 2
             pres = l2raw.get("presentation")
             if pres:
                 quote = ""

@@ -945,6 +945,67 @@ class RenderArtifactTests(unittest.TestCase):
             art = json.loads((out / "grade-artifact.json").read_text())
             self.assertRegex(art["run_id"], r"^sf-[0-9a-f]{6}$")
 
+    def test_unreconciled_findings_exit_2(self) -> None:
+        """accept without --findings, then render with findings, must not write a page."""
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            report = folder / "weekly-sales-snapshot.html"
+            report.write_text(PLANTED.read_text())
+            evidence = folder / "evidence"
+            evidence.mkdir()
+            for name in ("q3.json", "live-units.json"):
+                (evidence / name).write_text((E2E / "evidence" / name).read_text())
+            (folder / "claims.json").write_text((E2E / "claims-r5.json").read_text())
+            (folder / "checks.json").write_text((E2E / "checks-r5.json").read_text())
+            self.assertEqual(run_mod(accept, "accept.py", [
+                "--report", str(report),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--evidence-dir", str(evidence),
+                "--out", str(folder / "receipts.json"),
+            ]), 0)
+            receipts = json.loads((folder / "receipts.json").read_text())
+            self.assertFalse(any(
+                row.get("found_by") == "arithmetic" for row in receipts["claims"]))
+            (folder / "findings.json").write_text((E2E / "findings.json").read_text())
+            out = folder / "artifact"
+            code = run_mod(render, "render.py", [
+                "--findings", str(folder / "findings.json"),
+                "--layer2", str(folder / "receipts.json"),
+                "--out-dir", str(out),
+            ])
+            self.assertEqual(code, 2)
+            self.assertFalse((out / "grade-artifact.html").is_file())
+
+    def test_artifact_verdict_is_a_public_value(self) -> None:
+        raw = {
+            "findings": [],
+            "coverage": {
+                "claims_in_ledger": 2,
+                "claims_reached_by_a_check": 0,
+                "extractor_checkable_fraction": 1.0,
+                "engine_checkable_fraction": 1.0,
+                "checks_registered": 0,
+                "checks_with_findings": 0,
+                "checks_found_nothing": 0,
+                "checks_errored": 0,
+            },
+            "source": {"path": "report.md", "format": "md"},
+            "findings_truncated": False,
+        }
+        self.assertEqual(render.verdict_of(raw), "needs_review")
+        art = render.artifact_from_findings(
+            raw, run_id="v", generated_at="2026-08-24T00:00:00Z")
+        self.assertIn(art["verdict"], {
+            "safe_to_share", "share_with_caveats", "fix_first", "unable_to_grade"})
+        self.assertNotEqual(art["verdict"], "needs_review")
+        schema = json.loads(
+            (ROOT / "skills" / "verify" / "schema.v1.json").read_text())
+        self.assertEqual(
+            set(schema["properties"]["verdict"]["enum"]),
+            {"safe_to_share", "share_with_caveats", "fix_first", "unable_to_grade"},
+        )
+
 
 class FillerAndAddendTests(unittest.TestCase):
     def test_render_source_has_no_filler_strings(self) -> None:

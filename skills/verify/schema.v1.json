@@ -61,7 +61,7 @@
     },
     "verdict": {
       "type": "string",
-      "enum": ["safe_to_share", "share_with_caveats", "fix_first", "needs_review", "unable_to_grade"]
+      "enum": ["safe_to_share", "share_with_caveats", "fix_first", "unable_to_grade"]
     },
 
     "score": {

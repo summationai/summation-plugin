@@ -82,7 +82,7 @@ class AcceptTests(unittest.TestCase):
             report = folder / "report.html"
             report.write_text("<p>Revenue grew 12% year over year.</p>")
             evidence = folder / "q3.json"
-            evidence.write_text('{"revenue_yoy": 0.098}\n')
+            evidence.write_text('{"revenue_yoy": "9.8%"}\n')
             checks = folder / "checks.json"
             checks.write_text(json.dumps({"checks": [
                 {
@@ -93,7 +93,7 @@ class AcceptTests(unittest.TestCase):
                     "importance": "material",
                     "report_quote": "Revenue grew 12% year over year.",
                     "evidence_file": "q3.json",
-                    "evidence_quote": '"revenue_yoy": 0.098',
+                    "evidence_quote": '"revenue_yoy": "9.8%"',
                     "explanation": "The file shows 9.8%, not 12%.",
                 },
                 {
@@ -459,7 +459,7 @@ class AcceptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
             (folder / "report.md").write_text("Revenue grew 12% year over year.")
-            (folder / "q3.json").write_text('{"revenue_yoy": 0.098}\n')
+            (folder / "q3.json").write_text('{"revenue_yoy": "9.8%"}\n')
             (folder / "claims.json").write_text(json.dumps({
                 "claims": [{
                     "id": "L1",
@@ -475,7 +475,7 @@ class AcceptTests(unittest.TestCase):
                 "importance": "material",
                 "report_quote": "Revenue grew 12% year over year.",
                 "evidence_file": "q3.json",
-                "evidence_json": [{"pointer": "/revenue_yoy", "value": 0.098}],
+                "evidence_json": [{"pointer": "/revenue_yoy", "value": "9.8%"}],
                 "explanation": "The file shows 9.8%.",
             }
             (folder / "checks.json").write_text(json.dumps({
@@ -494,12 +494,12 @@ class AcceptTests(unittest.TestCase):
                 "confirmed verdict is not supported by the receipt values",
                 confirmed["discarded"][0]["problems"],
             )
-            (folder / "match.json").write_text('{"revenue_yoy": 12}\n')
+            (folder / "match.json").write_text('{"revenue_yoy": "12%"}\n')
             (folder / "checks.json").write_text(json.dumps({"checks": [{
                 **mismatch,
                 "verdict": "contradicted",
                 "evidence_file": "match.json",
-                "evidence_json": [{"pointer": "/revenue_yoy", "value": 12}],
+                "evidence_json": [{"pointer": "/revenue_yoy", "value": "12%"}],
                 "explanation": "The file shows 12%.",
             }]}))
             self.assertEqual(run_accept(
@@ -515,6 +515,50 @@ class AcceptTests(unittest.TestCase):
                 "contradicted verdict is not supported by the receipt values",
                 contradicted["discarded"][0]["problems"],
             )
+
+    def test_percent_cannot_confirm_a_bare_count(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text(
+                "Revenue is down 4.6% against the same week last year.")
+            (folder / "live.json").write_text('{"units_now": 10613}\n')
+            (folder / "claims.json").write_text(json.dumps({
+                "claims": [{
+                    "id": "L1",
+                    "quote": "Revenue is down 4.6% against the same week last year.",
+                    "importance": "material",
+                }],
+            }))
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C1",
+                "claim_id": "L1",
+                "type": "semantic",
+                "basis": "evidence",
+                "verdict": "confirmed",
+                "importance": "material",
+                "report_quote": "Revenue is down 4.6% against the same week last year.",
+                "evidence_file": "live.json",
+                "evidence_json": [{"pointer": "/units_now", "value": 10613}],
+                "explanation": "The live file has a number.",
+            }]}))
+            code = run_accept(
+                "--report", str(folder / "report.md"),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--evidence-dir", str(folder),
+                "--out", str(folder / "receipts.json"),
+            )
+            self.assertEqual(code, 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(payload["grounded"], 0)
+            self.assertIn(
+                "report and evidence unit classes are not compatible",
+                payload["discarded"][0]["problems"],
+            )
+            self.assertEqual(accept.unit_class("4.6%"), "percent")
+            self.assertEqual(accept.unit_class(10613), "count")
+            self.assertFalse(accept.unit_classes_compatible("4.6%", 10613))
+            self.assertFalse(accept.unit_classes_compatible("$4.2M", 4200000))
 
     def test_evidence_path_must_stay_inside_evidence_dir(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -642,7 +686,7 @@ class AcceptTests(unittest.TestCase):
             evidence.mkdir()
             html = report_dir / "weekly.html"
             html.write_text("<p>Revenue grew 12% year over year.</p>")
-            (evidence / "q3.json").write_text('{"revenue_yoy": 12}\n')
+            (evidence / "q3.json").write_text('{"revenue_yoy": "12%"}\n')
             claims = run / "claims.json"
             checks = run / "checks.json"
             claims.write_text(json.dumps({
@@ -661,7 +705,7 @@ class AcceptTests(unittest.TestCase):
                 "importance": "material",
                 "report_quote": "Revenue grew 12% year over year.",
                 "evidence_file": "q3.json",
-                "evidence_json": [{"pointer": "/revenue_yoy", "value": 12}],
+                "evidence_json": [{"pointer": "/revenue_yoy", "value": "12%"}],
                 "explanation": "The file matches the report.",
             }]}))
             html_cmd = [

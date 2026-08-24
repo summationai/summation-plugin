@@ -107,6 +107,27 @@ def quantities_equal(left, right) -> bool:
     return a is not None and b is not None and a == b
 
 
+def unit_class(value) -> str | None:
+    if parse_quantity(value) is None:
+        return None
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float, Decimal)):
+        return "count"
+    text = str(value)
+    if "%" in text:
+        return "percent"
+    if re.search(r"[\$€£¥]", text):
+        return "currency"
+    return "count"
+
+
+def unit_classes_compatible(left, right) -> bool:
+    a = unit_class(left)
+    b = unit_class(right)
+    return a is not None and a == b
+
+
 def values_equal(left, right) -> bool:
     return left == right or quantities_equal(left, right)
 
@@ -429,18 +450,20 @@ def _resolved_receipt_values(finding: dict, receipt_updates: dict) -> list:
     return values
 
 
-def _collect_comparable(quote, json_values: list) -> tuple[list, list]:
+def _collect_comparable(quote, json_values: list) -> tuple[list, list, list]:
     numbers = []
+    classes = []
     strings = []
     seen_n = set()
 
-    def add_num(number):
+    def add_num(number, source):
         if number is None:
             return
         key = str(number)
         if key not in seen_n:
             seen_n.add(key)
             numbers.append(number)
+            classes.append(unit_class(source))
 
     def add_str(text):
         item = normalize(str(text))
@@ -452,16 +475,16 @@ def _collect_comparable(quote, json_values: list) -> tuple[list, list]:
             continue
         parsed = parse_quantity(value)
         if parsed is not None:
-            add_num(parsed)
+            add_num(parsed, value)
         elif isinstance(value, str) and value.strip():
             add_str(value)
     if quote:
         for token in _QTOKEN.findall(str(quote)):
-            add_num(parse_quantity(token))
-        add_num(parse_quantity(quote))
+            add_num(parse_quantity(token), token)
+        add_num(parse_quantity(quote), quote)
         if not numbers:
             add_str(quote)
-    return numbers, strings
+    return numbers, strings, classes
 
 
 def _strings_match(left: str, right: str) -> bool:
@@ -479,11 +502,20 @@ def _verdict_receipt_problem(finding: dict, receipt_updates: dict) -> str | None
     else:
         evidence_quote = receipt_updates.get("evidence_quote") or finding.get("evidence_quote") or ""
         json_values = _json_values_from_receipts(finding, receipt_updates)
-    report_nums, report_strs = _collect_comparable(report_quote, [])
-    evidence_nums, evidence_strs = _collect_comparable(evidence_quote, json_values)
+    report_nums, report_strs, report_classes = _collect_comparable(report_quote, [])
+    evidence_nums, evidence_strs, evidence_classes = _collect_comparable(
+        evidence_quote, json_values)
     comparable = (report_nums and evidence_nums) or (report_strs and evidence_strs)
     if not comparable:
         return None
+    if report_nums and evidence_nums:
+        compatible = any(
+            r is not None and r == e
+            for r in report_classes
+            for e in evidence_classes
+        )
+        if not compatible:
+            return "report and evidence unit classes are not compatible"
     matched = False
     if report_nums and evidence_nums:
         matched = any(
