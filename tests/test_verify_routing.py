@@ -62,6 +62,30 @@ class RoutingTests(unittest.TestCase):
         self.assertNotIn("run the `validate` skill", local)
         self.assertIn("Do not start that path during the local grade", local)
 
+    def test_optional_local_fastmcp_fallback_is_bounded(self) -> None:
+        text = skill("verify")
+        local, _, _ = text.partition("## Connected path")
+        start = local.index("### Optional local source wrapper")
+        end = local.index("## Run directory", start)
+        wrapper = local[start:end]
+        self.assertIn("direct read-only API or CLI call remains valid", wrapper)
+        self.assertIn("only after explicit consent", wrapper)
+        self.assertIn("source-specific typed functions", wrapper)
+        self.assertIn("rather than arbitrary SQL or shell input", wrapper)
+        self.assertIn("without copying secrets", wrapper)
+        for annotation in ("read-only", "non-destructive", "idempotent"):
+            self.assertIn(annotation, wrapper)
+        self.assertIn("save the raw result", wrapper)
+        self.assertIn("make one test call", wrapper)
+        self.assertIn("current host workflow", wrapper)
+        self.assertIn("equivalent source connection inside Summation", wrapper)
+        self.assertIn("add no backend, relay, default-grade dependency", wrapper)
+        self.assertIn("mandatory wrapper step", wrapper)
+
+    def test_temporal_receipt_requires_explicit_report_operand(self) -> None:
+        text = skill("verify")
+        self.assertIn("`report_value` must be the visible report operand", text)
+
     def test_connected_path_is_consent_then_addison_once(self) -> None:
         text = skill("verify")
         _, _, connected = text.partition("## Connected path")

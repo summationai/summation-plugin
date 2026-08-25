@@ -42,11 +42,12 @@ def main() -> int:
     html = args.report.suffix.lower() in {".html", ".htm"}
     findings: list[dict] = []
     arithmetic_checks = 0
+    arithmetic_uses: list[dict] = []
     if html:
         parser = _Tables()
         parser.feed(args.report.read_text(errors="replace"))
         parser.close()
-        findings, arithmetic_checks = footing_findings(parser.tables)
+        findings, arithmetic_checks, arithmetic_uses = footing_findings(parser.tables)
         if not visible:
             visible, err = visible_text_for(args.report)
 
@@ -64,7 +65,8 @@ def main() -> int:
     args.visible.parent.mkdir(parents=True, exist_ok=True)
     args.visible.write_text(visible if visible.endswith("\n") else visible + "\n")
     doc = findings_doc(
-        args.report, findings, html=html, arithmetic_checks=arithmetic_checks)
+        args.report, findings, html=html, arithmetic_checks=arithmetic_checks,
+        arithmetic_uses=arithmetic_uses)
     inv = doc.get("inventory") or inventory_for(args.report)
     doc["internal_outcomes"] = check_inventory(inv, visible)
     args.out.parent.mkdir(parents=True, exist_ok=True)

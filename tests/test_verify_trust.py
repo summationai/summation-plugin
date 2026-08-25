@@ -591,8 +591,7 @@ class TrustCorrectionTests(unittest.TestCase):
         internal_path = "/var/summation/INTERNAL_PATH/report.html"
         pointer = "/units_now"
         leaks = (
-            "q3.json", "live-units.json", "receipts.json",
-            internal_path, pointer, SENTINEL,
+            "receipts.json", internal_path, pointer, SENTINEL,
         )
         leak = " ".join(leaks)
         with tempfile.TemporaryDirectory() as raw:
@@ -709,6 +708,8 @@ class TrustCorrectionTests(unittest.TestCase):
             public = art_path.read_text() + html_path.read_text()
             for item in leaks:
                 self.assertNotIn(item, public, item)
+            self.assertIn("q3.json", public)
+            self.assertNotIn("live-units.json", public)
             art = json.loads(art_path.read_text())
             self.assertEqual(art["verdict"], "fix_first")
             for row in art.get("evidence_checks") or []:

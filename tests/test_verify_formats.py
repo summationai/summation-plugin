@@ -186,6 +186,24 @@ def contradicted_evidence(cid: str, claim_id: str, quote: str, pointer: str, val
     }
 
 
+def confirmed_evidence(cid: str, claim_id: str, quote: str,
+                       receipts: list[tuple[str, object]]) -> dict:
+    return {
+        "id": cid,
+        "claim_id": claim_id,
+        "type": "semantic",
+        "basis": "evidence",
+        "verdict": "confirmed",
+        "importance": "material",
+        "report_quote": quote,
+        "evidence_file": "project-status.json",
+        "evidence_json": [
+            {"pointer": pointer, "value": value} for pointer, value in receipts
+        ],
+        "explanation": "The supplied recorded evidence supports the report claim.",
+    }
+
+
 @unittest.skipUnless(FIX.is_dir(), "alg-deploy fixtures are not present")
 class FormatInventoryTests(unittest.TestCase):
     def test_md_planted_inventories_m1_to_m4(self) -> None:
@@ -233,7 +251,19 @@ class FormatGradeTests(unittest.TestCase):
             claims = [{"id": f"L{i}", "quote": q} for i, q in enumerate(quotes, 1)]
             claims.append(provenance_claim(f"L{len(quotes) + 1}", MD_SOURCE))
             checks = [
-                confirmed_report(f"C{i}", f"L{i}", q) for i, q in enumerate(quotes, 1)]
+                confirmed_evidence("C1", "L1", quotes[0], [
+                    ("/latest_complete_date", "2026-08-14")]),
+                confirmed_evidence("C2", "L2", quotes[1], [
+                    ("/active_projects", 12)]),
+                confirmed_evidence("C3", "L3", quotes[2], [
+                    ("/at_risk_projects", 3)]),
+                confirmed_evidence("C4", "L4", quotes[3], [
+                    ("/blocked_projects", 1)]),
+                confirmed_evidence("C5", "L5", quotes[4], [
+                    ("/at_risk_projects", 3),
+                    ("/prior_week_at_risk_projects", 2),
+                ]),
+            ]
             art, page = grade(
                 folder, MD_CLEAN, claims=claims, checks=checks,
                 evidence_dir=MD_EV, run_id="md-clean")
@@ -245,7 +275,8 @@ class FormatGradeTests(unittest.TestCase):
             (M1, contradicted_evidence("C1", "L1", M1, "/latest_complete_date", "2026-08-14")),
             (M2, contradicted_evidence("C2", "L2", M2, "/active_projects", 12)),
             (M3, contradicted_evidence("C3", "L3", M3, "/at_risk_projects", 3)),
-            ("Projects blocked: 1", confirmed_report("C4", "L4", "Projects blocked: 1")),
+            ("Projects blocked: 1", confirmed_evidence(
+                "C4", "L4", "Projects blocked: 1", [("/blocked_projects", 1)])),
             (M4, contradicted_evidence("C5", "L5", M4, "/prior_week_at_risk_projects", 2)),
         ]
         with tempfile.TemporaryDirectory() as raw:
@@ -275,7 +306,8 @@ class FormatGradeTests(unittest.TestCase):
             }),
             (M2, contradicted_evidence("C2", "L2", M2, "/active_projects", 12)),
             (M3, contradicted_evidence("C3", "L3", M3, "/at_risk_projects", 3)),
-            ("Projects blocked: 1", confirmed_report("C4", "L4", "Projects blocked: 1")),
+            ("Projects blocked: 1", confirmed_evidence(
+                "C4", "L4", "Projects blocked: 1", [("/blocked_projects", 1)])),
             (M4, contradicted_evidence("C5", "L5", M4, "/prior_week_at_risk_projects", 2)),
         ]
         with tempfile.TemporaryDirectory() as raw:

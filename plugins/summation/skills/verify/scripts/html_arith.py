@@ -79,8 +79,9 @@ def is_total_label(text: str) -> bool:
     return bool(re.search(r"\btotals?\b", text, flags=re.I))
 
 
-def footing_findings(tables: list[list[list[str]]]) -> tuple[list[dict], int]:
+def footing_findings(tables: list[list[list[str]]]) -> tuple[list[dict], int, list[dict]]:
     findings = []
+    uses = []
     checked = 0
     for table_index, table in enumerate(tables, start=1):
         if len(table) < 3:
@@ -93,15 +94,19 @@ def footing_findings(tables: list[list[list[str]]]) -> tuple[list[dict], int]:
         width = max(len(header), max((len(row) for row in body), default=0))
         for col in range(1, width):
             values = []
+            shown_cells = []
             for row in components:
                 if col >= len(row):
                     values = []
+                    shown_cells = []
                     break
                 number = parse_number(row[col])
                 if number is None:
                     values = []
+                    shown_cells = []
                     break
                 values.append(number)
+                shown_cells.append(str(row[col]))
             if not values or col >= len(last):
                 continue
             shown = parse_number(last[col])
@@ -110,13 +115,39 @@ def footing_findings(tables: list[list[list[str]]]) -> tuple[list[dict], int]:
             checked += 1
             computed = sum(values, Decimal("0"))
             delta = shown - computed
-            # Money with cents: 1 cent. Counts: exact.
             sample = values[0]
             cents = sample.as_tuple().exponent < 0 or shown.as_tuple().exponent < 0
             allowance = Decimal("0.01") if cents else Decimal("0")
-            if abs(delta) <= allowance:
-                continue
+            matched = abs(delta) <= allowance
             col_name = header[col] if col < len(header) and header[col] else f"column {col + 1}"
+            addends = [
+                {
+                    "label": str(components[index][0] if components[index] else f"row {index + 1}"),
+                    "value": float(values[index]),
+                    "displayed": shown_cells[index],
+                    "location": (
+                        f"table{table_index}/"
+                        f"{components[index][0] if components[index] else f'row {index + 1}'}/"
+                        f"{col_name}"
+                    ),
+                }
+                for index in range(len(values))
+            ]
+            location = f"table{table_index}/{last[0]}/{col_name}"
+            uses.append({
+                "check_id": "ari_total_footing",
+                "family": "internal_arithmetic",
+                "location": location,
+                "column": col_name,
+                "matched": matched,
+                "stated": float(shown),
+                "stated_displayed": str(last[col]),
+                "computed": float(computed),
+                "discrepancy": float(delta),
+                "addends": addends,
+            })
+            if matched:
+                continue
             findings.append({
                 "check_id": "ari_total_footing",
                 "family": "internal_arithmetic",
@@ -126,26 +157,24 @@ def footing_findings(tables: list[list[list[str]]]) -> tuple[list[dict], int]:
                     f"The “{last[0]}” row in {col_name} shows {last[col]}, "
                     f"but the rows above sum to {computed}."
                 ),
-                "location": f"table{table_index}/{last[0]}/{col_name}",
+                "location": location,
                 "claim_ids": [f"t{table_index}c{col}"],
                 "detail": {
                     "stated": float(shown),
                     "computed": float(computed),
                     "discrepancy": float(delta),
                     "addends": [
-                        {
-                            "label": str(components[index][0] if components[index] else f"row {index + 1}"),
-                            "value": float(values[index]),
-                        }
-                        for index in range(len(values))
+                        {"label": row["label"], "value": row["value"]}
+                        for row in addends
                     ],
                 },
             })
-    return findings, checked
+    return findings, checked, uses
 
 
 def findings_doc(report: pathlib.Path, findings: list[dict], *, html: bool,
-                 arithmetic_checks: int = 0, intake_error: str | None = None
+                 arithmetic_checks: int = 0, intake_error: str | None = None,
+                 arithmetic_uses: list[dict] | None = None
                  ) -> dict:
     scripts = pathlib.Path(__file__).resolve().parent
     if str(scripts) not in sys.path:
@@ -192,6 +221,7 @@ def findings_doc(report: pathlib.Path, findings: list[dict], *, html: bool,
             ),
         },
         "findings": findings,
+        "arithmetic_uses": list(arithmetic_uses or []),
         "findings_truncated": False,
         "agentic_only": not complete,
         "agentic_scan_completed": complete,
@@ -233,10 +263,11 @@ def main() -> int:
         parser = _Tables()
         parser.feed(args.report.read_text(errors="replace"))
         parser.close()
-        findings, arithmetic_checks = footing_findings(parser.tables)
+        findings, arithmetic_checks, arithmetic_uses = footing_findings(parser.tables)
 
     doc = findings_doc(
-        args.report, findings, html=html, arithmetic_checks=arithmetic_checks)
+        args.report, findings, html=html, arithmetic_checks=arithmetic_checks,
+        arithmetic_uses=arithmetic_uses if html else None)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(doc, indent=2) + "\n")
     print(f"html_arith: {len(findings)} footing finding(s) → {args.out}")

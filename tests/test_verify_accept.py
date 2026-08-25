@@ -117,7 +117,7 @@ class AcceptTests(unittest.TestCase):
             )
             self.assertEqual(code, 0)
             payload = json.loads(out.read_text())
-            self.assertEqual(payload["proposed"], 2)
+            self.assertEqual(payload["proposed"], 1)
             self.assertEqual(payload["grounded"], 1)
             self.assertEqual(payload["validated"][0]["id"], "C1")
             self.assertEqual(payload["discarded"][0]["id"], "C2")
@@ -284,6 +284,7 @@ class AcceptTests(unittest.TestCase):
                 "verdict": "changed_since_report",
                 "importance": "material",
                 "report_quote": "Inventory on hand is 4,200.",
+                "report_value": 4200,
                 "evidence_file": "live.json",
                 "evidence_json": [{"pointer": "/on_hand", "value": 5100}],
                 "explanation": "The warehouse now shows 5100.",
@@ -314,6 +315,7 @@ class AcceptTests(unittest.TestCase):
                 "verdict": "changed_since_report",
                 "importance": "material",
                 "report_quote": "Inventory on hand is 4,200.",
+                "report_value": 4200,
                 "evidence_file": "live.json",
                 "evidence_json": [{"pointer": "/on_hand", "value": 5100}],
                 "explanation": "Current on-hand is 5100 as of 2026-08-23.",
@@ -334,6 +336,41 @@ class AcceptTests(unittest.TestCase):
             payload = json.loads((folder / "receipts.json").read_text())
             self.assertEqual(payload["grounded"], 1)
             self.assertEqual(payload["checks"][0]["verdict"], "changed_since_report")
+
+    def test_comparative_json_receipt_retains_current_and_prior_operands(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            report_quote = "The at-risk list increased by one project during the week."
+            (folder / "report.md").write_text(report_quote)
+            (folder / "status.json").write_text(json.dumps({
+                "at_risk_projects": 3,
+                "prior_week_at_risk_projects": 2,
+            }))
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C12",
+                "type": "semantic",
+                "basis": "evidence",
+                "verdict": "confirmed",
+                "importance": "material",
+                "report_quote": report_quote,
+                "evidence_file": "status.json",
+                "evidence_quote": "3",
+                "explanation": "The evidence shows the increase.",
+            }]}))
+            self.assertEqual(run_accept(
+                "--report", str(folder / "report.md"),
+                "--checks", str(folder / "checks.json"),
+                "--evidence-dir", str(folder),
+                "--out", str(folder / "receipts.json"),
+            ), 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(payload["grounded"], 1)
+            receipt = payload["checks"][0]
+            self.assertEqual(receipt["evidence_receipt_mode"], "json-pointers")
+            self.assertEqual(
+                {(row["pointer"], row["value"]) for row in receipt["evidence_json"]},
+                {("/at_risk_projects", 3), ("/prior_week_at_risk_projects", 2)},
+            )
 
     def test_claim_quote_not_in_report_is_discarded(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -408,6 +445,7 @@ class AcceptTests(unittest.TestCase):
                 "verdict": "changed_since_report",
                 "importance": "material",
                 "report_quote": "Inventory on hand is 4,200.",
+                "report_value": 4200,
                 "evidence_file": "live.json",
                 "evidence_json": [{"pointer": "/on_hand", "value": 10613}],
                 "explanation": "Current on-hand is 9999.",
@@ -442,6 +480,7 @@ class AcceptTests(unittest.TestCase):
                 "verdict": "changed_since_report",
                 "importance": "material",
                 "report_quote": "Inventory on hand is 4,200.",
+                "report_value": 4200,
                 "evidence_file": "live.json",
                 "evidence_json": [{"pointer": "/on_hand", "value": 10613}],
                 "explanation": "Current on-hand is 10613.",
@@ -836,6 +875,7 @@ class AcceptTests(unittest.TestCase):
                 "verdict": "changed_since_report",
                 "importance": "material",
                 "report_quote": "Inventory on hand is 4,200.",
+                "report_value": 4200,
                 "evidence_file": "live.json",
                 "evidence_json": [{"pointer": "/rows/0/on_hand", "value": 10613}],
                 "explanation": "Current on-hand is 10613.",
@@ -994,6 +1034,15 @@ class AcceptTests(unittest.TestCase):
                 "location": "line1",
                 "explanation": "Deterministic rank check.",
                 "found_by": "internal",
+                "comparison": {
+                    "kind": "ordered_list",
+                    "formula": "highest to lowest",
+                    "result": "Enterprise $520, Mid-market $410",
+                    "operands": [
+                        {"label": "Enterprise", "value": "$520", "location": "line2"},
+                        {"label": "Mid-market", "value": "$410", "location": "line3"},
+                    ],
+                },
             }],
         }))
         (folder / "claims.json").write_text(json.dumps({
@@ -1115,7 +1164,7 @@ class AcceptTests(unittest.TestCase):
     def test_internal_confirm_does_not_cross_inventory_ids_by_quote(self) -> None:
         sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
         from test_verify_render import render, run_mod  # noqa: E402
-        quote1 = "Revenue $100"
+        quote1 = "Revenue $100 from 10 units at $10 per unit"
         quote2 = "Forecast says Revenue $100 but requires external audit"
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
@@ -1157,6 +1206,16 @@ class AcceptTests(unittest.TestCase):
                     "location": "line1",
                     "explanation": "Displayed revenue matches the report.",
                     "found_by": "internal",
+                    "comparison": {
+                        "kind": "identity",
+                        "formula": "10 units × $10 per unit = $100",
+                        "result": "$100",
+                        "operands": [
+                            {"label": "units", "value": 10, "location": "line1"},
+                            {"label": "price per unit", "value": "$10", "location": "line1"},
+                            {"label": "reported revenue", "value": "$100", "location": "line1"},
+                        ],
+                    },
                 }],
             }))
             (folder / "claims.json").write_text(json.dumps({
@@ -1221,6 +1280,19 @@ class AcceptTests(unittest.TestCase):
             ]), 0)
             art = json.loads((out / "grade-artifact.json").read_text())
             self.assertNotEqual(art["verdict"], "safe_to_share")
+
+    def test_arithmetic_quantity_match_fails_closed_when_location_is_ambiguous(self) -> None:
+        ledger = [
+            {"id": "L1", "quote": "$100", "location": "table1/Alpha/Revenue"},
+            {"id": "L2", "quote": "$100", "location": "table1/Beta/Revenue"},
+        ]
+        self.assertIsNone(accept._claim_for_quantity(ledger, "$100"))
+        self.assertEqual(
+            accept._claim_for_quantity(
+                ledger, "$100", "table1/Beta/Revenue"
+            )["id"],
+            "L2",
+        )
 
     def test_supporting_provenance_accounts_source_snapshot(self) -> None:
         sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))

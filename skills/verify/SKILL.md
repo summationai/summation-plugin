@@ -21,6 +21,20 @@ If they named a report that already lives in Summation and there is no disk file
    - Also using connections already in this session: about 10–15 minutes.
 7. Then stay quiet except for brief progress. Do not narrate layers, error codes, tenant IDs, or check names.
 
+### Optional local source wrapper
+
+When an authenticated local SDK, CLI, or API profile can already read a source but no MCP tool exposes it, a direct read-only API or CLI call remains valid and is usually simpler. You may offer to generate a local read-only FastMCP wrapper for the current host workflow. Explain the bounded scope and generate it only after explicit consent.
+
+If they consent, the wrapper must:
+
+- expose source-specific typed functions rather than arbitrary SQL or shell input;
+- reuse the existing credential provider or profile without copying secrets into code, chat, logs, or evidence;
+- mark every tool read-only, non-destructive, and idempotent;
+- save the raw result under the run `evidence/` folder; and
+- make one test call and retain its raw result before using the wrapper for a grade.
+
+The wrapper lasts only for the current host workflow. A recurring Summation workflow still needs the equivalent source connection inside Summation. Keep this fallback optional: add no backend, relay, default-grade dependency, or mandatory wrapper step.
+
 ## Run directory
 
 Create a run folder next to the report (or in `/tmp/summation-verify-<id>/`):
@@ -155,7 +169,7 @@ A report claim that names a data-currency or as-of date must be compared with a 
 
 1. If the claim names a closed period, re-query with that period filter. Verdict is `confirmed` or `contradicted` for that period. If today's warehouse shows a different value for that same closed period, that is a restatement or a report error: `contradicted`, with both values and both dates in the explanation.
 2. If the claim is point-in-time ("inventory on hand is 4,200"), reconstruct the as-of value (time travel, snapshot, history table, or a date column). If reconstruction works, verdict is `confirmed` or `contradicted` as of the report date.
-3. Only when reconstruction is impossible: `changed_since_report`. The row must include `reconstruction_attempt` (what you tried and why it failed), `current_value`, `current_as_of`, and an evidence receipt for the current value.
+3. Only when reconstruction is impossible: `changed_since_report`. The row must include `reconstruction_attempt` (what you tried and why it failed), `report_value`, `current_value`, `current_as_of`, and an evidence receipt for the current value. `report_value` must be the visible report operand; `report_date` comes from the row or the claims metadata.
 
 Then run `accept.py`. If it discards rows, fix only those quotes once and run `accept.py` again. Stop after two passes. Discarded rows stay discarded. Do not invent a quote so a row will pass.
 

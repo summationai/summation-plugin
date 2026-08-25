@@ -274,6 +274,76 @@ def json_field_receipt(evidence: pathlib.Path, quote: str) -> tuple[bool, str | 
     return False, None
 
 
+_COMPARATIVE_CLAIM = re.compile(
+    r"\b(?:unchanged|increas\w*|decreas\w*|grew|rose|fell|prior|previous|"
+    r"week[- ]over[- ]week|month[- ]over[- ]month|versus|vs\.?)\b",
+    re.I,
+)
+_PRIOR_KEY = re.compile(
+    r"^(?:prior|previous|last)(?:_(?:week|month|quarter|year|period))?_(.+)$",
+    re.I,
+)
+
+
+def _pointer_token(value) -> str:
+    return str(value).replace("~", "~0").replace("/", "~1")
+
+
+def _json_dicts_with_paths(value, prefix=""):
+    if isinstance(value, dict):
+        yield value, prefix
+        for key, child in value.items():
+            child_prefix = f"{prefix}/{_pointer_token(key)}"
+            yield from _json_dicts_with_paths(child, child_prefix)
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            yield from _json_dicts_with_paths(child, f"{prefix}/{index}")
+
+
+def comparative_json_receipt(evidence: pathlib.Path, finding: dict) -> list[dict]:
+    """Return the current/prior sibling pair needed to prove a change claim."""
+    if (evidence.suffix.lower() != ".json"
+            or not _COMPARATIVE_CLAIM.search(str(finding.get("report_quote") or ""))):
+        return []
+    try:
+        payload = json.loads(evidence.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+    declared_values = [
+        item.get("value") for item in (finding.get("evidence_json") or [])
+        if isinstance(item, dict) and "value" in item
+    ]
+    if finding.get("evidence_quote") not in (None, ""):
+        declared_values.append(finding.get("evidence_quote"))
+    for obj, prefix in _json_dicts_with_paths(payload):
+        keys = {str(key): key for key in obj}
+        for prior_name, prior_key in keys.items():
+            match = _PRIOR_KEY.match(prior_name)
+            if not match:
+                continue
+            current_name = match.group(1)
+            current_key = keys.get(current_name)
+            if current_key is None:
+                continue
+            current = obj[current_key]
+            prior = obj[prior_key]
+            if declared_values and not any(
+                    values_equal(value, current) or values_equal(value, prior)
+                    for value in declared_values):
+                continue
+            return [
+                {
+                    "pointer": f"{prefix}/{_pointer_token(current_key)}",
+                    "value": current,
+                },
+                {
+                    "pointer": f"{prefix}/{_pointer_token(prior_key)}",
+                    "value": prior,
+                },
+            ]
+    return []
+
+
 def needs_sidecar(report: pathlib.Path) -> bool:
     return report.suffix.lower() not in VISIBLE_REPORT_SUFFIXES
 
@@ -708,15 +778,61 @@ def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
                         else:
                             problems.append(
                                 "evidence_quote is neither verbatim nor two exact JSON object fields")
+            # A one-value receipt cannot prove an increase, decrease, or
+            # unchanged claim. When the cited JSON record exposes a clear
+            # current/prior sibling pair, retain both exact operands.
+            comparative_path, _comparative_error = evidence_path(
+                sandbox, evidence_name, report_path)
+            if comparative_path is not None:
+                pair = comparative_json_receipt(comparative_path, finding)
+                if pair:
+                    receipt_updates.update({
+                        "evidence_file": evidence_name,
+                        "evidence_receipts": [{
+                            "evidence_file": evidence_name,
+                            "evidence_json": pair,
+                        }],
+                        "evidence_receipt_mode": "json-pointers",
+                        "evidence_json": pair,
+                        "evidence_quote": None,
+                    })
         if verdict == "not_checkable" and not str(finding.get("explanation") or "").strip():
             problems.append("not_checkable outcome has no reason")
         if verdict == "changed_since_report":
             if not str(finding.get("reconstruction_attempt") or "").strip():
                 problems.append("changed_since_report has no reconstruction attempt")
+            if finding.get("report_value") in (None, ""):
+                problems.append("changed_since_report has no report value")
             if finding.get("current_value") in (None, ""):
                 problems.append("changed_since_report has no current value")
             if not str(finding.get("current_as_of") or "").strip():
                 problems.append("changed_since_report has no current as-of date")
+            if not str(
+                finding.get("evidence_file")
+                or receipt_updates.get("evidence_file")
+                or ""
+            ).strip():
+                problems.append("changed_since_report has no evidence source")
+            if (
+                finding.get("report_value") not in (None, "")
+                and not quote_in_text(
+                    str(finding.get("report_value")),
+                    str(finding.get("report_quote") or ""),
+                )
+            ):
+                problems.append(
+                    "changed_since_report report value is not visible in the report quote"
+                )
+            report_qty = parse_quantity(finding.get("report_value"))
+            current_qty = parse_quantity(finding.get("current_value"))
+            if (
+                report_qty is not None
+                and current_qty is not None
+                and report_qty == current_qty
+            ) or values_equal(finding.get("report_quote"), finding.get("current_value")):
+                problems.append(
+                    "changed_since_report current value equals the report value"
+                )
             resolved_values = _resolved_receipt_values(finding, receipt_updates)
             declared = finding.get("current_value")
             if declared not in (None, "") and not any(
@@ -977,6 +1093,7 @@ def attach_claim_outcomes(claims: list, checks: list) -> list:
         "changed_since_report": 1,
         "confirmed": 2,
         "not_checkable": 3,
+        "used_for_internal_arithmetic": 2,
     }
     by_claim: dict[str, list] = {}
     for check in checks:
@@ -1429,11 +1546,19 @@ def apply_inventory_importance(ledger: list, validated: list, inventory: dict) -
             by_id[iid].get("importance") for iid in ids if iid in by_id]
         if imps and all(item == "supporting" for item in imps):
             claim["importance"] = "supporting"
+        locations = [
+            by_id[iid].get("location") for iid in ids
+            if iid in by_id and by_id[iid].get("location")
+        ]
+        if len(set(locations)) == 1 and not claim.get("location"):
+            claim["location"] = locations[0]
     by_claim = {str(row.get("id") or ""): row for row in ledger}
     for check in validated:
+        claim = by_claim.get(str(check.get("claim_id") or ""))
+        if claim and claim.get("location") and not check.get("location"):
+            check["location"] = claim["location"]
         if check.get("found_by") == "internal":
             continue
-        claim = by_claim.get(str(check.get("claim_id") or ""))
         if claim and claim.get("importance") == "supporting":
             check["importance"] = "supporting"
 
@@ -1450,6 +1575,146 @@ def load_arithmetic_findings(path: pathlib.Path | None) -> list:
                 item.get("tier") == "D" and item.get("family") == "internal_arithmetic"):
             out.append(item)
     return out
+
+
+def _claim_for_quantity(ledger: list, value, location=None) -> dict | None:
+    if location:
+        exact = [
+            claim for claim in ledger
+            if claim.get("location") == location
+            and quantities_equal(claim.get("quote"), value)
+        ]
+        if len(exact) == 1:
+            return exact[0]
+    matches = []
+    for claim in ledger:
+        displayed = claim.get("quote")
+        if (
+            quantities_equal(displayed, value)
+            or quote_in_text(str(value), str(displayed or ""))
+            or quote_in_text(str(displayed or ""), str(value))
+        ):
+            matches.append(claim)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _footing_comparison(use: dict, *, include_stated: bool = True) -> dict:
+    operands = []
+    for item in use.get("addends") or []:
+        if not isinstance(item, dict):
+            continue
+        operands.append({
+            "label": str(item.get("label") or "row"),
+            "value": item.get("displayed") if item.get("displayed") not in (None, "") else item.get("value"),
+            "location": item.get("location"),
+        })
+    if include_stated:
+        operands.append({
+            "label": "report total",
+            "value": (
+                use.get("stated_displayed")
+                if use.get("stated_displayed") not in (None, "")
+                else use.get("stated")
+            ),
+        })
+    operands.append({
+        "label": "sum of rows",
+        "value": use.get("computed"),
+    })
+    comparison = {
+        "kind": "identity",
+        "formula": "sum of rows",
+        "result": use.get("computed"),
+        "operands": operands,
+    }
+    if include_stated:
+        comparison["stated"] = use.get("stated")
+    return comparison
+
+
+def attach_arithmetic_uses(ledger: list, validated: list, uses: list) -> tuple[list, list]:
+    """Mark values used in footing as internal arithmetic, not unchecked."""
+    if not uses:
+        return validated, ledger
+    used_ids = {str(row.get("id") or "") for row in validated if row.get("id")}
+    next_n = 1
+
+    def new_id() -> str:
+        nonlocal next_n
+        while f"ARI{next_n}" in used_ids:
+            next_n += 1
+        cid = f"ARI{next_n}"
+        used_ids.add(cid)
+        next_n += 1
+        return cid
+
+    protected = {"error", "contradicted", "changed_since_report"}
+    for use in uses:
+        if not isinstance(use, dict):
+            continue
+        comparison = _footing_comparison(use)
+        addend_comparison = (
+            comparison if use.get("matched")
+            else _footing_comparison(use, include_stated=False)
+        )
+        targets = []
+        for addend in use.get("addends") or []:
+            claim = _claim_for_quantity(
+                ledger,
+                addend.get("displayed") or addend.get("value"),
+                addend.get("location"),
+            )
+            if claim is not None:
+                targets.append(
+                    (
+                        claim,
+                        "addend",
+                        addend.get("location") or claim.get("location"),
+                    )
+                )
+        total = _claim_for_quantity(
+            ledger, use.get("stated_displayed") or use.get("stated"),
+            use.get("location"))
+        if total is not None:
+            targets.append(
+                (
+                    total,
+                    "total",
+                    use.get("location") or total.get("location"),
+                )
+            )
+        seen_claims = set()
+        for claim, role, target_location in targets:
+            cid = str(claim.get("id") or "")
+            if not cid or cid in seen_claims:
+                continue
+            seen_claims.add(cid)
+            if claim.get("classification") == "supporting_provenance":
+                continue
+            claim["verification_mode"] = "internal_arithmetic"
+            claim["found_by"] = claim.get("found_by") or "arithmetic"
+            if claim.get("outcome") in protected:
+                continue
+            if role == "total" and not use.get("matched"):
+                continue
+            claim["outcome"] = "confirmed"
+            check = {
+                "id": new_id(),
+                "claim_id": cid,
+                "type": "arithmetic",
+                "basis": "report",
+                "verdict": "confirmed",
+                "importance": claim.get("importance") or "material",
+                "severity": None,
+                "report_quote": str(claim.get("quote") or ""),
+                "location": target_location,
+                "explanation": "Used for internal arithmetic.",
+                "found_by": "arithmetic",
+                "comparison": addend_comparison if role == "addend" else comparison,
+            }
+            validated.append(check)
+            claim["check_id"] = check["id"]
+    return validated, ledger
 
 
 def attach_arithmetic_claims(ledger: list, findings: list) -> list:
@@ -1565,38 +1830,61 @@ def main() -> int:
         validated, ledger, sandbox, args.report)
     inventory = None
     internal_outcomes: list = []
+    arithmetic_uses: list = []
     if args.findings is not None and args.findings.is_file():
         try:
             findings_doc = json.loads(args.findings.read_text())
             inventory = findings_doc.get("inventory")
             internal_outcomes = list(findings_doc.get("internal_outcomes") or [])
+            arithmetic_uses = list(findings_doc.get("arithmetic_uses") or [])
         except (OSError, json.JSONDecodeError, TypeError):
             inventory = None
             internal_outcomes = []
+            arithmetic_uses = []
     if not isinstance(inventory, dict):
         inventory = inventory_for(args.report)
     ledger = apply_host_classifications(
         ledger, discarded_claims, inventory, internal_outcomes)
+    apply_inventory_importance(ledger, validated, inventory)
     validated, ledger, internal_conflicts = attach_internal_outcomes(
         validated, ledger, internal_outcomes)
     discarded.extend(internal_conflicts)
+    validated, ledger = attach_arithmetic_uses(ledger, validated, arithmetic_uses)
     apply_inventory_importance(ledger, validated, inventory)
     inventory_cover = cover(inventory, ledger)
     accepted_ids = {
         str(row.get("id") or "").strip() for row in validated if row.get("id")}
     presentation, presentation_problems = validate_presentation(
         checks_doc, text, accepted_ids)
+    material_ledger = [
+        row for row in ledger
+        if row.get("classification") != "supporting_provenance"
+        and row.get("importance") != "supporting"
+    ]
+    material_claim_ids = {
+        str(row.get("id") or "") for row in material_ledger if row.get("id")
+    }
+    material_proposed = [
+        row for row in proposed
+        if str(row.get("claim_id") or "") in material_claim_ids
+    ]
+    material_validated = [
+        row for row in validated
+        if str(row.get("claim_id") or "") in material_claim_ids
+    ]
     payload = {
         "checks": validated,
         "validated": validated,
         "discarded": discarded,
-        "proposed": len(proposed),
-        "grounded": len(validated),
+        "proposed": len(material_proposed),
+        "grounded": len(material_validated),
         "claims": ledger,
         "discarded_claims": discarded_claims,
-        "claims_in_ledger": len(ledger),
+        "claims_in_ledger": len(material_ledger),
+        "supporting_claims": len(ledger) - len(material_ledger),
         "claims_reached_by_a_check": sum(
-            1 for row in ledger if row.get("outcome") not in (None, "not_reached")
+            1 for row in material_ledger
+            if row.get("outcome") not in (None, "not_reached")
         ),
         "semantic_status": semantic_status(ledger, validated),
         "presentation": presentation,
@@ -1611,7 +1899,8 @@ def main() -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(payload, indent=2) + "\n")
     print(
-        f"accept: {len(validated)} grounded, {len(discarded)} discarded of {len(proposed)}; "
+        f"accept: {len(material_validated)} grounded, {len(discarded)} discarded "
+        f"of {len(material_proposed)}; "
         f"ledger {payload['claims_reached_by_a_check']} of {payload['claims_in_ledger']}"
     )
     for row in discarded_claims:

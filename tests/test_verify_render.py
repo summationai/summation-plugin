@@ -212,6 +212,62 @@ class RenderVerdictTests(unittest.TestCase):
         }
         self.assertEqual(render.verdict_of(raw), "fix_first")
 
+    def test_not_run_source_stays_not_run(self) -> None:
+        verification = render._verification_public(
+            {"evidence_files": []},
+            {"status": "not_run", "checks": [], "error": None},
+            [],
+        )
+        self.assertEqual(verification["live_source"]["status"], "not_run")
+
+    def test_supporting_contradiction_does_not_change_material_verdict(self) -> None:
+        verdict = render._combined_verdict(
+            "safe_to_share",
+            [{
+                "id": "S1",
+                "verdict": "contradicted",
+                "importance": "supporting",
+            }],
+            None,
+            {},
+        )
+        self.assertEqual(verdict, "safe_to_share")
+
+    def test_failed_live_source_keeps_complete_static_grade(self) -> None:
+        raw = {
+            "findings": [],
+            "findings_truncated": False,
+            "inventory_missing": [],
+            "inventory": {
+                "complete": True,
+                "items": [{"id": "INV1", "importance": "material"}],
+            },
+            "coverage": {
+                "checks_errored": 0,
+                "extractor_checkable_fraction": 1.0,
+                "engine_checkable_fraction": 1.0,
+                "inventory_material": 1,
+            },
+        }
+        checks = [{
+            "id": "C1",
+            "verdict": "confirmed",
+            "importance": "material",
+            "basis": "report",
+        }]
+        source = {"status": "failed", "error": "Source unavailable", "checks": []}
+        self.assertEqual(
+            render._combined_verdict("safe_to_share", checks, source, raw),
+            "safe_to_share",
+        )
+        art = _minimal_art([])
+        art["verification"]["live_source"] = {
+            "status": "failed",
+            "detail": "Source unavailable",
+        }
+        page = render.html_of(art)
+        self.assertIn("A live query was attempted but did not complete.", page)
+
 
 SCHEMA = ROOT / "skills" / "verify" / "schema.v1.json"
 
@@ -284,7 +340,7 @@ DESIGN = ROOT / "tests" / "design"
 SECTION_ORDER = [
     "Errors: fix these first",
     "Confirmed correct",
-    "Today’s value differs",
+    "A later value differs",
     "What we could not check, and why",
     "What ran",
 ]
@@ -350,7 +406,7 @@ def assert_page_structure(test, page: str, *, expect_errors: bool, expect_csr: b
     if not expect_errors:
         allowed.remove("Errors: fix these first")
     if not expect_csr:
-        allowed.remove("Today’s value differs")
+        allowed.remove("A later value differs")
     test.assertEqual(headings, allowed)
     buckets = re.findall(r'data-bucket="([^"]+)" data-count="([^"]+)"', page)
     test.assertEqual([item[0] for item in buckets], [
@@ -580,6 +636,7 @@ class RenderArtifactTests(unittest.TestCase):
                     "verdict": "changed_since_report",
                     "importance": "material",
                     "report_quote": "Inventory on hand is 4,200.",
+                    "report_value": 4200,
                     "evidence_file": "live.json",
                     "evidence_json": [{"pointer": "/on_hand", "value": 5100}],
                     "explanation": "Current on-hand is 5100 as of 2026-08-23.",
@@ -589,6 +646,7 @@ class RenderArtifactTests(unittest.TestCase):
                     ),
                     "current_value": 5100,
                     "current_as_of": "2026-08-23",
+                    "report_date": "2026-04-04",
                 }]
             }
             (folder / "checks.json").write_text(json.dumps(checks))
@@ -628,10 +686,24 @@ class RenderArtifactTests(unittest.TestCase):
             receipts = json.loads((folder / "receipts.json").read_text())
             self.assertTrue(receipts["checks"][0]["reconstruction_attempt"])
             self.assertEqual(receipts["checks"][0]["current_value"], 5100)
-            self.assertNotIn("reconstruction_attempt", art["evidence_checks"][0])
-            self.assertNotIn("current_value", art["evidence_checks"][0])
+            self.assertEqual(
+                art["evidence_checks"][0]["reconstruction_attempt"],
+                checks["checks"][0]["reconstruction_attempt"],
+            )
+            self.assertEqual(art["evidence_checks"][0]["current_value"], 5100)
+            self.assertEqual(
+                art["evidence_checks"][0]["current_source_kind"],
+                "supplied_recorded_evidence",
+            )
+            page = (out / "grade-artifact.html").read_text()
+            self.assertIn("4,200", page)
+            self.assertIn("5,100", page)
+            self.assertIn("April 4, 2026", page)
+            self.assertIn("August 23, 2026", page)
+            self.assertIn("Supplied recorded evidence", page)
+            self.assertIn("no live query ran", page)
             assert_page_structure(
-                self, (out / "grade-artifact.html").read_text(),
+                self, page,
                 expect_errors=False, expect_csr=True)
 
     def test_ledger_count_matches_proposed_checks(self) -> None:
@@ -704,6 +776,7 @@ class RenderArtifactTests(unittest.TestCase):
             self.assertTrue(footing)
             self.assertAlmostEqual(abs(footing[0]["detail"]["discrepancy"]), 9000.0)
             (folder / "claims.json").write_text(json.dumps({
+                "report_date": "2026-04-04",
                 "claims": [
                     {"id": "L19", "quote": "Both segments moved in the same direction.",
                      "importance": "material"},
@@ -715,13 +788,11 @@ class RenderArtifactTests(unittest.TestCase):
                     "id": "C19",
                     "claim_id": "L19",
                     "type": "semantic",
-                    "basis": "evidence",
-                    "verdict": "confirmed",
+                    "basis": "report",
+                    "verdict": "not_checkable",
                     "importance": "material",
                     "report_quote": "Both segments moved in the same direction.",
-                    "evidence_file": "note.json",
-                    "evidence_quote": "Both segments moved in the same direction.",
-                    "explanation": "The evidence repeats the segment direction claim.",
+                    "explanation": "No accepted receipt proves the direction claim.",
                 },
                 {
                     "id": "C20",
@@ -731,6 +802,7 @@ class RenderArtifactTests(unittest.TestCase):
                     "verdict": "changed_since_report",
                     "importance": "material",
                     "report_quote": "10,481",
+                    "report_value": 10481,
                     "evidence_file": "live.json",
                     "evidence_json": [{"pointer": "/units_now", "value": 10613}],
                     "explanation": "Current units are 10613 as of 2026-08-23.",
@@ -774,7 +846,7 @@ class RenderArtifactTests(unittest.TestCase):
             self.assertIn("SEGMENT_BETA", page)
             self.assertIn("Confirmed correct", page)
             self.assertIn("Both segments moved in the same direction.", page)
-            self.assertIn("Today&rsquo;s value differs", page)
+            self.assertIn("A later value differs", page)
             self.assertNotIn("changed since", page.lower())
             self.assertNotIn("differs from source", page.lower())
             self.assertNotIn("10613", page)
