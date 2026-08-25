@@ -1,8 +1,7 @@
-"""Machine claim inventory for the verify skill.
+"""Raw visible report inventory for the verify skill.
 
-HTML: table cells via html_arith plus alg numparse over visible text.
-Markdown, PDF, xlsx, and pptx use the same item shape and complete=True
-when the reader obtained visible text.
+HTML tables and visible blocks, Markdown lines, PDF lines, workbook cells,
+and slide text use one stable item shape. Readers assign no claim meaning.
 """
 from __future__ import annotations
 
@@ -15,14 +14,11 @@ SCRIPTS = pathlib.Path(__file__).resolve().parent
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from html_arith import _Tables, is_total_label, parse_number  # noqa: E402
-from numparse import iter_numbers  # noqa: E402
+from html_arith import _Tables  # noqa: E402
 
 COMPLETED = frozenset({
-    "confirmed", "contradicted", "not_checkable", "changed_since_report", "error",
+    "confirmed", "contradicted", "not_checkable", "changed_since_report",
 })
-DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
-TABLE_LOC_RE = re.compile(r"^table\d+$", re.I)
 READERS = {
     ".html": "html",
     ".htm": "html",
@@ -61,58 +57,6 @@ def _visible_text(html: str) -> str:
     return re.sub(r"\s+", " ", "".join(parser.parts))
 
 
-def _glued_to_identifier(text: str, tok) -> bool:
-    start = int(getattr(tok, "start", 0) or 0)
-    end = int(getattr(tok, "end", 0) or 0)
-    while start < end and text[start].isspace():
-        start += 1
-    while end > start and text[end - 1].isspace():
-        end -= 1
-    prev = text[start - 1] if start else ""
-    nxt = text[end] if end < len(text) else ""
-    if prev.isalnum() or prev == "_":
-        return True
-    if nxt.isalnum() or nxt == "_":
-        return True
-    return False
-
-
-def _structural_numbering(text: str, tok) -> bool:
-    """True for list/section markers such as '1. Title' or '(2)'."""
-    shown = str(tok.value_displayed or "").strip()
-    if re.fullmatch(r"\(?\d{1,3}\)", shown):
-        return True
-    start = int(getattr(tok, "start", 0) or 0)
-    end = int(getattr(tok, "end", 0) or 0)
-    nxt = text[end] if end < len(text) else ""
-    unit = getattr(tok, "unit", None)
-    if nxt != "." or unit not in {"unknown", None, ""}:
-        return False
-    if getattr(tok, "currency_code", None):
-        return False
-    if not shown.isdigit() or len(shown) > 3:
-        return False
-    prev = text[start - 1] if start else ""
-    after = text[end + 1: end + 2]
-    if prev and not prev.isspace():
-        return False
-    return bool(after.isupper())
-
-
-def _material_token(tok, text: str = "") -> bool:
-    """Keep load-bearing numbers. Drop dates, timestamps, and structural numbering."""
-    shown = str(tok.value_displayed or "").strip()
-    if not shown:
-        return False
-    if DATE_RE.search(shown):
-        return False
-    if text and _glued_to_identifier(text, tok):
-        return False
-    if text and _structural_numbering(text, tok):
-        return False
-    return True
-
-
 def _html_items(path: pathlib.Path) -> list[dict]:
     raw = path.read_text(errors="replace")
     items: list[dict] = []
@@ -120,7 +64,7 @@ def _html_items(path: pathlib.Path) -> list[dict]:
 
     def add(kind: str, displayed: str, location: str, importance: str) -> None:
         shown = re.sub(r"\s+", " ", displayed).strip()
-        if not shown or DATE_RE.fullmatch(shown):
+        if not shown:
             return
         key = (kind, shown, location)
         if key in seen:
@@ -139,30 +83,53 @@ def _html_items(path: pathlib.Path) -> list[dict]:
     tables.feed(raw)
     tables.close()
     for t_i, table in enumerate(tables.tables, start=1):
-        header = table[0] if table else []
         for r_i, row in enumerate(table):
-            if r_i == 0:
-                continue
-            row_label = str(row[0] if row else "").strip()
-            kind = "table_total" if is_total_label(row_label) else "table_cell"
             for c_i, cell in enumerate(row):
-                if c_i == 0:
-                    continue
-                if parse_number(cell) is None:
-                    continue
-                add(kind, cell, f"table{t_i}/r{r_i + 1}/c{c_i + 1}", "material")
+                add("table_cell", cell, f"table{t_i}/r{r_i + 1}/c{c_i + 1}", "material")
 
-    captured = {item["displayed"] for item in items}
-    visible = re.sub(r"(\d)([A-Za-z])", r"\1 \2", _visible_text(raw))
-    for tok in iter_numbers(visible, mask_dates=True):
-        shown = str(tok.value_displayed or "").strip()
-        if not shown or shown in captured:
-            continue
-        if DATE_RE.search(shown):
-            continue
-        if _material_token(tok, visible):
-            add("prose_number", shown, f"visible-text@{tok.start}", "material")
-            captured.add(shown)
+    class _Blocks(HTMLParser):
+        BLOCKS = frozenset({
+            "h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "caption",
+            "dt", "dd", "blockquote",
+        })
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.blocks: list[str] = []
+            self._parts: list[str] | None = None
+            self._skip = 0
+            self._table = 0
+
+        def handle_starttag(self, tag, attrs):
+            tag = tag.lower()
+            if tag in {"script", "style"}:
+                self._skip += 1
+            elif tag == "table":
+                self._table += 1
+            elif not self._skip and not self._table and tag in self.BLOCKS:
+                self._parts = []
+
+        def handle_endtag(self, tag):
+            tag = tag.lower()
+            if tag in {"script", "style"} and self._skip:
+                self._skip -= 1
+            elif tag == "table" and self._table:
+                self._table -= 1
+            elif tag in self.BLOCKS and self._parts is not None:
+                shown = re.sub(r"\s+", " ", "".join(self._parts)).strip()
+                if shown:
+                    self.blocks.append(shown)
+                self._parts = None
+
+        def handle_data(self, data):
+            if not self._skip and not self._table and self._parts is not None:
+                self._parts.append(data)
+
+    blocks = _Blocks()
+    blocks.feed(raw)
+    blocks.close()
+    for index, shown in enumerate(blocks.blocks, 1):
+        add("html_block", shown, f"block{index}", "material")
     return items
 
 
@@ -192,9 +159,7 @@ def _md_items(path: pathlib.Path) -> list[dict]:
         line = raw.strip()
         if not line:
             continue
-        if line.startswith("#"):
-            continue
-        shown = re.sub(r"^[-*]\s+", "", line).strip()
+        shown = re.sub(r"^(?:#{1,6}|[-*])\s+", "", line).strip()
         if not shown:
             continue
         _bag_add(items, seen, "md_line", shown, f"line{index}", "material")
@@ -217,15 +182,12 @@ def _pdf_items(path: pathlib.Path) -> tuple[list[dict], str, str | None]:
     items: list[dict] = []
     seen: set[tuple] = set()
     pages: list[str] = []
-    skip = {"rank", "segment", "revenue ($k)", "revenue"}
     for page_i, page in enumerate(reader.pages, start=1):
         text = page.extract_text() or ""
         pages.append(text)
         for line_i, raw in enumerate(text.splitlines(), start=1):
             shown = re.sub(r"\s+", " ", raw).strip()
-            if not shown or shown.lower() in skip:
-                continue
-            if re.fullmatch(r"\d{1,2}", shown):
+            if not shown:
                 continue
             _bag_add(
                 items, seen, "pdf_line", shown, f"page{page_i}/line{line_i}", "material")
@@ -279,14 +241,9 @@ def _xlsx_items(path: pathlib.Path) -> tuple[list[dict], str, str | None]:
                 if shown is None:
                     continue
                 lines.append(f"{sheet.title}!{cell.coordinate} {shown}")
-                numeric = isinstance(cell.value, (int, float)) and not isinstance(
-                    cell.value, bool)
-                note = shown.lower().startswith("note:")
-                importance = "material" if numeric or note else "supporting"
-                kind = "xlsx_note" if note else "xlsx_cell"
                 _bag_add(
-                    items, seen, kind, shown,
-                    f"{sheet.title}/{cell.coordinate}", importance)
+                    items, seen, "xlsx_cell", shown,
+                    f"{sheet.title}/{cell.coordinate}", "material")
     visible = "\n".join(lines)
     if not visible:
         return [], "", "no visible xlsx cells"
@@ -393,20 +350,6 @@ def inventory_for(path: pathlib.Path) -> dict:
     }
 
 
-def item_matches_claim(item: dict, claim: dict) -> bool:
-    quote = str(claim.get("quote") or "")
-    shown = str(item.get("displayed") or "")
-    if not shown or not quote:
-        return False
-    if shown in quote:
-        return True
-    collapsed_q = quote.replace(",", "")
-    collapsed_s = shown.replace(",", "")
-    if collapsed_s and collapsed_s in collapsed_q:
-        return True
-    return False
-
-
 def claim_inventory_ids(claim: dict) -> list[str]:
     raw = claim.get("inventory_ids")
     if isinstance(raw, str):
@@ -423,29 +366,11 @@ def claim_inventory_ids(claim: dict) -> list[str]:
     return []
 
 
-def _row_label(item: dict) -> str:
-    loc = str(item.get("location") or "")
-    parts = loc.split("/")
-    if len(parts) >= 2 and TABLE_LOC_RE.fullmatch(parts[0] or ""):
-        return parts[1]
-    return ""
-
-
-def _quote_names_location(claim: dict, item: dict) -> bool:
-    quote = str(claim.get("quote") or "")
-    label = _row_label(item)
-    if label and label in quote:
-        return True
-    loc = str(item.get("location") or "")
-    return bool(loc) and loc in quote
-
-
 def cover(inventory: dict, claims: list) -> dict:
     """Map material inventory items to claims by explicit inventory_ids.
 
-    Each material item is consumed at most once. A claim that lists two items
-    with the same displayed value covers both only when the quote names both
-    locations.
+    Each material item is consumed at most once. No quote or value fuzzing is
+    used; only the ids supplied by the claim-taker establish coverage.
     """
     items = [
         item for item in (inventory.get("items") or [])
@@ -458,20 +383,13 @@ def cover(inventory: dict, claims: list) -> dict:
     completed = 0
     mapping = []
     for claim in claims:
-        seen_shown: list[str] = []
         for iid in claim_inventory_ids(claim):
             if iid in consumed:
                 continue
             item = by_id.get(iid)
             if item is None:
                 continue
-            if not item_matches_claim(item, claim):
-                continue
-            shown = str(item.get("displayed") or "")
-            if shown in seen_shown and not _quote_names_location(claim, item):
-                continue
             consumed[iid] = claim
-            seen_shown.append(shown)
             accounted += 1
             outcome = claim.get("outcome")
             done = outcome in COMPLETED

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import inspect
 import json
 import pathlib
 import re
@@ -31,6 +32,7 @@ accept = load("accept")
 artifact_audit = load("artifact_audit")
 html_arith = load("html_arith")
 internal = load("internal")
+inventory = load("inventory")
 render = load("render")
 
 
@@ -100,72 +102,34 @@ def public_artifact(checks: list[dict]) -> dict:
         "evidence_file": "project-status.json",
         "result_sha256": "a" * 64,
     }
-    public_checks = render._public_layer2(checks, sources=[source])
     claims = [{
         "id": str(check["claim_id"]),
         "quote": str(check["public_receipt"]["report_operand"]["value"]),
+        "public_label": str(check["public_receipt"]["report_operand"]["label"]),
         "importance": "material",
         "classification": "material_claim",
         "outcome": str(check["verdict"]),
         "check_id": str(check["id"]),
-        "verification_mode": "external_evidence",
+        "inventory_ids": [f"INV-{check['id']}"],
     } for check in checks]
-    n = len(checks)
-    return {
-        "schema_version": "grade-artifact/public-receipt-v1",
-        "run_id": "boundary-cards",
-        "generated_at": "2026-08-25T13:10:00Z",
-        "source": {"path": "report.md", "format": "md"},
-        "source_result": None,
+    raw = {
+        "source": {"path": "report.md", "format": "md", "sha256": "b" * 64},
         "sources": [source],
-        "verdict": "safe_to_share",
-        "score": {"kind": "tier_d_per_100_claims", "value": 0},
         "findings": [],
-        "evidence_checks": public_checks,
-        "evidence_findings": [],
-        "evidence_coverage": {
-            "document_claims_total": n,
-            "document_claims_reached": n,
-            "claim_outcomes_proposed": n,
-            "material_claims_reviewed": n,
-            "supporting_claims_reviewed": 0,
-            "confirmed": n,
-            "contradicted": 0,
-            "not_checkable": 0,
-            "evidence_confirmed": n,
-            "evidence_contradicted": 0,
-            "evidence_not_checkable": 0,
-            "report_confirmed": 0,
-            "report_contradicted": 0,
-            "report_not_checkable": 0,
-            "validated_outcomes": n,
-            "receipt_failures": 0,
-            "evidence_files_supplied": 1,
-            "evidence_files_cited": ["Project status snapshot"],
-            "provenance_groups": [{
-                "source_id": "project-status",
-                "kind": "supplied_file",
-                "label": "Project status snapshot",
-            }],
-            "source_independence": "grouped_by_declared_provenance",
-        },
-        "decision": None,
-        "actions": [],
-        "decision_limits": [],
-        "diagnostics": [],
-        "checks": {
-            "registered": 0, "with_findings": 0, "found_nothing": 0,
-            "errored": 0, "skipped_note": "",
+        "coverage": {
+            "checks_registered": 0, "checks_with_findings": 0,
+            "checks_found_nothing": 0, "checks_errored": 0,
         },
         "verification": {
             "document": {"status": "complete", "detail": None},
             "semantic": {"status": "complete", "detail": None},
             "live_source": {"status": "not_run", "detail": None},
         },
-        "limitations": [],
-        "offer": {"text": "", "accepted": None},
         "claims": claims,
     }
+    return render.artifact_from_findings(
+        raw, run_id="boundary-cards",
+        generated_at="2026-08-25T13:10:00Z", layer2=checks)
 
 
 class SourceContractTests(unittest.TestCase):
@@ -299,6 +263,7 @@ class SchemaContractTests(unittest.TestCase):
             "claims": [{
                 "id": "L-REPORT",
                 "quote": "Active projects: 12",
+                "public_label": "Reported active projects",
                 "importance": "material",
                 "classification": "material_claim",
                 "outcome": "confirmed",
@@ -338,6 +303,7 @@ class ReceiptContractTests(unittest.TestCase):
         return accept.validate_receipts(
             "On-time delivery was 94%.", folder, [check], {"L1"},
             folder / "report.md", sources=accepted_sources,
+            claim_labels={"L1": "Reported on-time delivery rate"},
         )
 
     def test_explicit_public_receipt_is_grounded(self) -> None:
@@ -351,6 +317,29 @@ class ReceiptContractTests(unittest.TestCase):
             self.assertEqual(discarded, [])
             self.assertEqual(validated[0]["public_receipt"], evidence_check()["public_receipt"])
             self.assertEqual(validated[0]["evidence_mode"], "supplied_file")
+
+    def test_deleted_discovery_helpers_stay_deleted(self) -> None:
+        for name in (
+            "json_field_receipt", "_DATE_KEYS", "_dates_on_object",
+            "_dates_on_same_record", "_csv_dates_for_value",
+        ):
+            self.assertFalse(hasattr(accept, name), name)
+
+    def test_quote_grounding_does_not_discover_numeric_equivalence(self) -> None:
+        self.assertTrue(accept.quote_in_text("Revenue was $4.2M.", "Revenue was $4.2M."))
+        self.assertFalse(accept.quote_in_text("$4.2M", "Revenue was 4200000."))
+        self.assertFalse(accept.quote_in_text("94", "On-time delivery was 94%."))
+        source = inspect.getsource(accept.quote_in_text)
+        self.assertNotIn("parse_quantity", source)
+        self.assertNotIn("quantities_equal", source)
+        self.assertNotIn("values_equal", source)
+
+    def test_schema_load_failure_is_fatal_without_fallback_verdicts(self) -> None:
+        self.assertFalse(hasattr(accept, "FALLBACK_VERDICTS"))
+        with tempfile.TemporaryDirectory() as raw:
+            missing = pathlib.Path(raw) / "missing-schema.json"
+            with self.assertRaises(RuntimeError):
+                accept.load_known_verdicts(missing)
 
     def test_missing_private_and_vague_labels_fail_closed(self) -> None:
         bad_labels = ("", "row 2", "operand 4", "item 1", "value 9", "/Users/eric/private")
@@ -453,7 +442,7 @@ class ReceiptContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
             report = folder / "report.md"
-            report.write_text("Inventory was 10,481 units.")
+            report.write_text("Inventory was 10,481 units as of 2026-04-04.")
             evidence = folder / "inventory-snapshot.json"
             evidence.write_text(
                 '{"units": 10613, "as_of": "2026-08-23"}\n')
@@ -464,24 +453,36 @@ class ReceiptContractTests(unittest.TestCase):
                 "id": "C-TIME", "claim_id": "L-TIME", "type": "temporal",
                 "basis": "evidence", "verdict": "changed_since_report",
                 "importance": "material",
-                "report_quote": "Inventory was 10,481 units.",
+                "report_quote": "Inventory was 10,481 units as of 2026-04-04.",
                 "report_value": 10481, "report_date": "2026-04-04",
                 "current_value": 10613, "current_as_of": "2026-08-23",
                 "reconstruction_attempt": (
                     "The approved history source was checked, but it did not retain the report-date row."
                 ),
                 "evidence_json": [{"pointer": "/units", "value": 10613}],
+                "date_receipt": {
+                    "pointer": "/as_of", "value": "2026-08-23",
+                },
                 "public_receipt": {
                     "report_operand": {
                         "label": "Reported inventory units", "value": 10481,
                         "location": "Inventory summary, units line",
                     },
                     "decisive_operands": [{
+                        "label": "Report date", "value": "2026-04-04",
+                        "location": "Inventory summary, as-of date",
+                    }, {
                         "label": "Later recorded inventory units", "value": 10613,
                         "location": "Inventory units snapshot, current row",
+                    }, {
+                        "label": "Later snapshot date", "value": "2026-08-23",
+                        "location": "Inventory units snapshot, as-of field",
                     }],
                     "explanation": (
                         "The later snapshot records 10,613 units after the report recorded 10,481 units."
+                    ),
+                    "reconstruction_attempt": (
+                        "The approved history source was checked, but it did not retain the report-date row."
                     ),
                     "source_id": "inventory-snapshot",
                 },
@@ -492,6 +493,7 @@ class ReceiptContractTests(unittest.TestCase):
             validated, discarded = accept.validate_receipts(
                 report.read_text(), folder, [check], {"L-TIME"}, report,
                 sources=accepted_sources,
+                claim_labels={"L-TIME": "Reported inventory units"},
             )
             self.assertEqual(discarded, [])
             self.assertEqual(validated[0]["current_as_of"], "2026-08-23")
@@ -501,15 +503,80 @@ class ReceiptContractTests(unittest.TestCase):
             validated, discarded = accept.validate_receipts(
                 report.read_text(), folder, [wrong_date], {"L-TIME"}, report,
                 sources=accepted_sources,
+                claim_labels={"L-TIME": "Reported inventory units"},
             )
             self.assertEqual(validated, [])
             self.assertIn(
-                "current_as_of does not match evidence date",
+                "current_as_of does not match date_receipt value",
                 discarded[0]["problems"],
             )
 
+            missing_date_receipt = json.loads(json.dumps(check))
+            missing_date_receipt.pop("date_receipt")
+            validated, discarded = accept.validate_receipts(
+                report.read_text(), folder, [missing_date_receipt], {"L-TIME"}, report,
+                sources=accepted_sources,
+                claim_labels={"L-TIME": "Reported inventory units"},
+            )
+            self.assertEqual(validated, [])
+            self.assertIn(
+                "changed_since_report date_receipt is missing or invalid",
+                discarded[0]["problems"],
+            )
+
+    def test_not_checkable_requires_agent_authored_public_receipt(self) -> None:
+        check = {
+            "id": "C-NC", "claim_id": "L1", "type": "semantic",
+            "basis": "report", "verdict": "not_checkable",
+            "importance": "material", "report_quote": "On-time delivery was 94%.",
+            "public_receipt": {
+                "report_operand": {
+                    "label": "Reported on-time delivery rate", "value": "94%",
+                    "location": "KPI summary, on-time delivery line",
+                },
+                "decisive_operands": [],
+                "explanation": (
+                    "No approved source was available to verify the reported delivery rate."
+                ),
+            },
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            report = folder / "report.md"
+            report.write_text("On-time delivery was 94%.")
+            validated, discarded = accept.validate_receipts(
+                report.read_text(), folder, [check], {"L1"}, report, sources=[],
+                claim_labels={"L1": "Reported on-time delivery rate"})
+            self.assertEqual(discarded, [])
+            self.assertEqual(validated[0]["public_receipt"], check["public_receipt"])
+            missing = json.loads(json.dumps(check))
+            missing.pop("public_receipt")
+            validated, discarded = accept.validate_receipts(
+                report.read_text(), folder, [missing], {"L1"}, report, sources=[],
+                claim_labels={"L1": "Reported on-time delivery rate"})
+            self.assertEqual(validated, [])
+            self.assertIn("public_receipt is missing or not an object", discarded[0]["problems"])
+
 
 class MechanicalBoundaryTests(unittest.TestCase):
+    def test_html_inventory_keeps_raw_headers_labels_values_and_prose(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            report = pathlib.Path(raw) / "table.html"
+            report.write_text(
+                "<h1>Quarter summary</h1><p>As of 2026-04-04.</p>"
+                "<table><tr><th>Segment</th><th>Revenue</th></tr>"
+                "<tr><td>Enterprise</td><td>$520</td></tr>"
+                "<tr><td>Total</td><td>$520</td></tr></table>"
+            )
+            inv = inventory.inventory_for(report)
+            shown = {row["displayed"] for row in inv["items"]}
+            for value in (
+                "Quarter summary", "As of 2026-04-04.", "Segment", "Revenue",
+                "Enterprise", "$520", "Total",
+            ):
+                self.assertIn(value, shown)
+            self.assertFalse(any(row["kind"] == "table_total" for row in inv["items"]))
+
     def test_discarded_source_metadata_blocks_a_complete_review(self) -> None:
         receipts = {
             "semantic_status": "complete",
@@ -529,7 +596,7 @@ class MechanicalBoundaryTests(unittest.TestCase):
         }
         self.assertEqual(
             render.ungraded_reason({}, True, receipts),
-            "receipt failures remain",
+            "retained source metadata did not validate",
         )
 
     def test_arithmetic_use_marks_claim_without_creating_confirmation(self) -> None:
@@ -545,8 +612,9 @@ class MechanicalBoundaryTests(unittest.TestCase):
         }]
         checks, updated = accept.attach_arithmetic_uses(ledger, [], uses)
         self.assertEqual(checks, [])
-        self.assertEqual(updated[0]["outcome"], "used_for_internal_arithmetic")
+        self.assertEqual(updated[0]["outcome"], "not_reached")
         self.assertIsNone(updated[0]["check_id"])
+        self.assertEqual(updated[0]["arithmetic_inventory_ids"], ["html-t1-r2-c2"])
 
     def test_internal_candidates_contain_facts_not_public_semantics(self) -> None:
         inventory = {"items": [
@@ -556,17 +624,7 @@ class MechanicalBoundaryTests(unittest.TestCase):
             {"id": "i4", "displayed": "Beta", "location": "page 1"},
             {"id": "i5", "displayed": "120", "location": "page 1"},
         ]}
-        candidates = internal.check_inventory(inventory)
-        self.assertTrue(candidates)
-        blob = json.dumps(candidates)
-        for forbidden in ("verdict", "explanation", "report_quote", "comparison"):
-            self.assertNotIn(f'"{forbidden}"', blob)
-        rank = candidates[0]
-        self.assertTrue(rank["facts"]["mismatch"])
-        self.assertEqual(
-            [row["displayed"] for row in rank["facts"]["values"]],
-            ["100", "120"],
-        )
+        self.assertEqual(internal.check_inventory(inventory), [])
 
     def test_blank_html_labels_remain_missing_with_exact_coordinates(self) -> None:
         tables = [[
@@ -575,11 +633,9 @@ class MechanicalBoundaryTests(unittest.TestCase):
             ["Beta", "60"],
             ["Total", "100"],
         ]]
-        _findings, _checked, uses = html_arith.footing_findings(tables)
-        first = uses[0]["addends"][0]
-        self.assertIsNone(first["label"])
-        self.assertEqual(first["coordinate"], "table1/r2/c2")
-        self.assertNotIn("row ", json.dumps(uses).lower())
+        findings, checked, uses = html_arith.footing_findings(tables)
+        self.assertEqual((findings, checked, uses), ([], 0, []))
+        self.assertFalse(hasattr(html_arith, "is_total_label"))
 
     def test_int9_and_clean_xlsx_percentage_points_stay_explicit(self) -> None:
         report = (
@@ -596,7 +652,7 @@ class MechanicalBoundaryTests(unittest.TestCase):
                 "basis": "report",
                 "verdict": verdict,
                 "importance": "material",
-                "report_quote": quote,
+                "report_quote": report,
                 "public_receipt": {
                     "report_operand": {
                         "label": "Reported gross margin improvement",
@@ -634,6 +690,10 @@ class MechanicalBoundaryTests(unittest.TestCase):
         validated, discarded = accept.validate_receipts(
             report, pathlib.Path("."), [planted, clean],
             {"L-INT9", "L-C-CLEAN"}, sources=[],
+            claim_labels={
+                "L-INT9": "Reported gross margin improvement",
+                "L-C-CLEAN": "Reported gross margin improvement",
+            },
         )
         self.assertEqual(discarded, [])
         self.assertEqual([row["id"] for row in validated], ["INT9", "C-CLEAN"])
@@ -683,7 +743,7 @@ class RendererBoundaryTests(unittest.TestCase):
         check = evidence_check()
         art = public_artifact([check])
         page = render.html_of(art)
-        opening = re.search(r'<div class="card ok"[^>]*>', page)
+        opening = re.search(r'<article class="material-card"[^>]*>', page)
         self.assertIsNotNone(opening)
         tag = opening.group(0)
         self.assertEqual(tag.count('data-card-id="C1"'), 1)
@@ -717,8 +777,8 @@ class RendererBoundaryTests(unittest.TestCase):
         self.assertTrue(artifact_audit._card_identity_problems(art, duplicate_id))
 
         mismatch = page.replace(
-            'data-disposition="confirmed"',
-            'data-disposition="contradicted"',
+            'data-card-id="C1" data-disposition="confirmed"',
+            'data-card-id="C1" data-disposition="contradicted"',
             1,
         )
         self.assertTrue(artifact_audit._card_identity_problems(art, mismatch))
@@ -746,9 +806,19 @@ class RendererBoundaryTests(unittest.TestCase):
             ),
         })
         changed["public_receipt"]["decisive_operands"][0]["value"] = "95%"
+        changed["public_receipt"]["decisive_operands"].extend([{
+            "label": "Report date", "value": "2026-04-04",
+            "location": "KPI summary, report date",
+        }, {
+            "label": "Later snapshot date", "value": "2026-08-23",
+            "location": "Project status snapshot, as-of field",
+        }])
         changed["public_receipt"].pop("calculation")
         changed["public_receipt"]["explanation"] = (
             "The later recorded rate is 95%, compared with the report's 94% rate."
+        )
+        changed["public_receipt"]["reconstruction_attempt"] = (
+            "The approved history source does not retain the report-date row."
         )
 
         art = public_artifact([confirmed, contradicted, changed])
@@ -758,7 +828,7 @@ class RendererBoundaryTests(unittest.TestCase):
             "C-ERROR": "contradicted",
             "C-CHANGED": "changed_since_report",
         }
-        openings = re.findall(r'<div class="card [^"]+"[^>]*>', page)
+        openings = re.findall(r'<article class="material-card"[^>]*>', page)
         found = {}
         for opening in openings:
             check_id = re.search(r'data-card-id="([^"]+)"', opening)
@@ -773,7 +843,7 @@ class RendererBoundaryTests(unittest.TestCase):
         check = evidence_check()
         static_art = public_artifact([check])
         static_page = render.html_of(static_art)
-        self.assertIn("Supplied recorded evidence", static_page)
+        self.assertIn("supplied_file", static_page)
         self.assertNotIn("Actual live query", static_page)
 
         live_art = json.loads(json.dumps(static_art))
@@ -785,7 +855,7 @@ class RendererBoundaryTests(unittest.TestCase):
         }
         live_art["evidence_coverage"]["provenance_groups"][0]["kind"] = "live_tool"
         live_page = render.html_of(live_art)
-        self.assertIn("Actual live query", live_page)
+        self.assertIn("live_tool", live_page)
         self.assertNotIn("Supplied recorded evidence", live_page)
 
     def test_rank_receipt_renders_agent_ordered_values_in_order(self) -> None:
@@ -818,7 +888,7 @@ class RendererBoundaryTests(unittest.TestCase):
         }
         art = public_artifact([check])
         page = render.html_of(art)
-        positions = [page.index(f"{label}</strong>: {value}") for label, value in values]
+        positions = [page.index(f"{label}</strong><span class=\"value\">{value}") for label, value in values]
         self.assertEqual(positions, sorted(positions))
 
 

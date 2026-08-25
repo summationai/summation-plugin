@@ -1,0 +1,64 @@
+{
+  "contract_version": "verify-role-handoff/public-receipt-v1",
+  "claim_taker": {
+    "input": {
+      "required": ["partition_id", "visible_text", "inventory", "report_metadata"],
+      "inventory_item_required": ["id", "displayed", "location"]
+    },
+    "output": {
+      "required": ["partition_id", "claims"],
+      "claim_required": [
+        "id",
+        "quote",
+        "public_label",
+        "importance",
+        "classification",
+        "inventory_ids"
+      ]
+    }
+  },
+  "evidence_verifier": {
+    "input": {
+      "required": ["partition_id", "visible_text", "claims", "sources"],
+      "claim_required": [
+        "id",
+        "quote",
+        "public_label",
+        "importance",
+        "classification",
+        "inventory_ids"
+      ]
+    },
+    "output": {
+      "required": ["partition_id", "sources", "checks"],
+      "check_required": [
+        "id",
+        "claim_id",
+        "type",
+        "basis",
+        "verdict",
+        "importance",
+        "public_receipt"
+      ],
+      "public_receipt_required": [
+        "report_operand",
+        "decisive_operands",
+        "explanation"
+      ]
+    }
+  },
+  "routes": {
+    "native_subagents": {
+      "primary": true,
+      "stages": ["claim_taker", "evidence_verifier"],
+      "input_contracts": ["claim_taker.input", "evidence_verifier.input"],
+      "output_contracts": ["claim_taker.output", "evidence_verifier.output"]
+    },
+    "sequential": {
+      "primary": false,
+      "stages": ["claim_taker", "evidence_verifier"],
+      "input_contracts": ["claim_taker.input", "evidence_verifier.input"],
+      "output_contracts": ["claim_taker.output", "evidence_verifier.output"]
+    }
+  }
+}

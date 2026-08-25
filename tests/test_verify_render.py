@@ -1,1268 +1,485 @@
-"""Fail-closed artifact for the verify skill."""
+"""Focused renderer tests for exact public-receipt serialization."""
 from __future__ import annotations
 
-import html
+import copy
 import importlib.util
 import json
 import pathlib
 import re
-import sys
-import tempfile
 import unittest
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "verify" / "scripts"
-FIX = ROOT / "tests" / "fixtures" / "verify" / "tiny-findings.json"
-PLANTED = ROOT / "tests" / "fixtures" / "verify" / "weekly-sales-snapshot.html"
-
-sys.path.insert(0, str(SCRIPTS))
-spec = importlib.util.spec_from_file_location("verify_render", SCRIPTS / "render.py")
-render = importlib.util.module_from_spec(spec)
-assert spec.loader is not None
-spec.loader.exec_module(render)
-
-try:
-    import jsonschema  # noqa: F401
-except ImportError:
-    jsonschema = None
-
-HAS_JSONSCHEMA = jsonschema is not None
-
-accept_spec = importlib.util.spec_from_file_location(
-    "verify_accept", SCRIPTS / "accept.py")
-accept = importlib.util.module_from_spec(accept_spec)
-assert accept_spec.loader is not None
-accept_spec.loader.exec_module(accept)
-
-arith_spec = importlib.util.spec_from_file_location(
-    "verify_html_arith", SCRIPTS / "html_arith.py")
-html_arith = importlib.util.module_from_spec(arith_spec)
-assert arith_spec.loader is not None
-arith_spec.loader.exec_module(html_arith)
 
 
-def write_incomplete_md_findings(folder: pathlib.Path, extra: dict | None = None) -> None:
-    """Ledger tests that skip extract.py must not pick up a complete Markdown inventory."""
-    doc = {
-        "findings": [],
-        "coverage": {
-            "claims_in_ledger": 0,
-            "claims_reached_by_a_check": 0,
-            "extractor_checkable_fraction": 1.0,
-            "engine_checkable_fraction": 1.0,
-            "checks_registered": 0,
-            "checks_with_findings": 0,
-            "checks_found_nothing": 0,
-            "checks_errored": 0,
-        },
-        "source": {"path": "report.md", "format": "md", "sha256": "abc"},
-        "findings_truncated": False,
-        "inventory": {
-            "reader": "md",
-            "complete": False,
-            "items": [],
-            "reason": "synthetic ledger test",
-        },
-    }
-    if extra:
-        doc.update(extra)
-    (folder / "findings.json").write_text(json.dumps(doc))
+def load(name: str):
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
-def claims_from_checks(checks_path: pathlib.Path) -> pathlib.Path:
-    doc = json.loads(checks_path.read_text())
-    items = doc if isinstance(doc, list) else list(doc.get("checks") or [])
-    claims = []
-    for index, check in enumerate(items, 1):
-        check.setdefault("claim_id", f"L{index}")
-        claims.append({
-            "id": check["claim_id"],
-            "quote": check.get("report_quote") or "",
-            "importance": check.get("importance") or "material",
-        })
-    if isinstance(doc, dict):
-        doc["checks"] = items
-        checks_path.write_text(json.dumps(doc))
-    else:
-        checks_path.write_text(json.dumps({"checks": items}))
-    path = checks_path.parent / "claims.json"
-    path.write_text(json.dumps({"claims": claims}))
-    return path
+render = load("render")
+audit = load("artifact_audit")
 
 
-def pad_inventory(folder: pathlib.Path, report: pathlib.Path | None = None) -> None:
-    """Give every material inventory item a not_checkable claim so HTML can render."""
-    import inventory as invmod
-    claims_path = folder / "claims.json"
-    checks_path = folder / "checks.json"
-    if not claims_path.is_file():
-        return
-    report = report or folder / "report.html"
-    if not report.is_file():
-        htmls = list(folder.glob("*.html"))
-        report = htmls[0] if htmls else report
-    items = invmod.inventory_for(report).get("items") or []
-    claims_doc = json.loads(claims_path.read_text())
-    claims = list(claims_doc.get("claims") or [])
-    if checks_path.is_file():
-        checks_doc = json.loads(checks_path.read_text())
-        if isinstance(checks_doc, dict):
-            checks = list(checks_doc.get("checks") or [])
-            wrap = True
-        else:
-            checks = list(checks_doc)
-            wrap = False
-            checks_doc = {}
-    else:
-        checks, wrap, checks_doc = [], True, {}
-    referenced = set()
-    for claim in claims:
-        referenced.update(invmod.claim_inventory_ids(claim))
-    checked = {str(row.get("claim_id") or "") for row in checks}
-    n = 0
-    for item in items:
-        if item.get("importance") != "material":
-            continue
-        iid = str(item.get("id") or "")
-        shown = str(item.get("displayed") or "")
-        if not iid:
-            continue
-        hit = next(
-            (claim for claim in claims
-             if iid in invmod.claim_inventory_ids(claim)),
-            None,
-        )
-        if hit is not None and str(hit.get("id") or "") in checked:
-            continue
-        n += 1
-        if hit is None:
-            cid = f"P{n}"
-            claims.append({
-                "id": cid,
-                "quote": shown,
-                "importance": "material",
-                "inventory_ids": [iid],
-            })
-            referenced.add(iid)
-        else:
-            cid = str(hit.get("id") or f"P{n}")
-        checks.append({
-            "id": f"PC{n}",
-            "claim_id": cid,
-            "type": "semantic",
-            "basis": "report",
-            "verdict": "not_checkable",
-            "importance": "material",
-            "report_quote": shown,
-            "explanation": "No evidence file covers this inventory item.",
-        })
-        checked.add(cid)
-    claims_doc["claims"] = claims
-    claims_path.write_text(json.dumps(claims_doc))
-    if wrap:
-        checks_doc["checks"] = checks
-        checks_path.write_text(json.dumps(checks_doc))
-    else:
-        checks_path.write_text(json.dumps(checks))
-
-
-def run_mod(mod, name: str, args: list[str]) -> int:
-    args = list(args)
-    if name == "accept.py" and "--claims" not in args and "--checks" in args:
-        checks_path = pathlib.Path(args[args.index("--checks") + 1])
-        args.extend(["--claims", str(claims_from_checks(checks_path))])
-    if name == "accept.py" and "--findings" not in args and "--checks" in args:
-        sibling = pathlib.Path(args[args.index("--checks") + 1]).parent / "findings.json"
-        if sibling.is_file():
-            args.extend(["--findings", str(sibling)])
-    argv = sys.argv
-    sys.argv = [name, *args]
-    try:
-        return mod.main()
-    finally:
-        sys.argv = argv
-
-
-class RenderVerdictTests(unittest.TestCase):
-    def test_tiny_fixture_verdict_is_fix_first(self) -> None:
-        raw = json.loads(FIX.read_text())
-        self.assertEqual(render.verdict_of(raw), "fix_first")
-
-    def test_d_finding_is_fix_first_without_a_synthetic_ledger(self) -> None:
-        raw = {
-            "findings": [{
-                "check_id": "ari_total_footing",
-                "family": "internal_arithmetic",
-                "tier": "D",
-                "statement": "gap",
-                "claim_ids": [],
-            }],
-            "coverage": {
-                "claims_in_ledger": 0,
-                "claims_reached_by_a_check": 0,
-                "extractor_checkable_fraction": 1.0,
-                "engine_checkable_fraction": 1.0,
-                "checks_registered": 2,
-                "checks_with_findings": 1,
-                "checks_found_nothing": 1,
-                "checks_errored": 0,
-            },
-            "source": {"path": "report.html", "format": "html"},
-            "findings_truncated": False,
-        }
-        self.assertEqual(render.verdict_of(raw), "fix_first")
-
-    def test_not_run_source_stays_not_run(self) -> None:
-        verification = render._verification_public(
-            {"evidence_files": []},
-            {"status": "not_run", "checks": [], "error": None},
-            [],
-        )
-        self.assertEqual(verification["live_source"]["status"], "not_run")
-
-    def test_supporting_contradiction_does_not_change_material_verdict(self) -> None:
-        verdict = render._combined_verdict(
-            "safe_to_share",
-            [{
-                "id": "S1",
-                "verdict": "contradicted",
-                "importance": "supporting",
-            }],
-            None,
-            {},
-        )
-        self.assertEqual(verdict, "safe_to_share")
-
-    def test_failed_live_source_keeps_complete_static_grade(self) -> None:
-        raw = {
-            "findings": [],
-            "findings_truncated": False,
-            "inventory_missing": [],
-            "inventory": {
-                "complete": True,
-                "items": [{"id": "INV1", "importance": "material"}],
-            },
-            "coverage": {
-                "checks_errored": 0,
-                "extractor_checkable_fraction": 1.0,
-                "engine_checkable_fraction": 1.0,
-                "inventory_material": 1,
-            },
-        }
-        checks = [{
-            "id": "C1",
-            "verdict": "confirmed",
-            "importance": "material",
-            "basis": "report",
-        }]
-        source = {"status": "failed", "error": "Source unavailable", "checks": []}
-        self.assertEqual(
-            render._combined_verdict("safe_to_share", checks, source, raw),
-            "safe_to_share",
-        )
-        art = _minimal_art([])
-        art["verification"]["live_source"] = {
-            "status": "failed",
-            "detail": "Source unavailable",
-        }
-        page = render.html_of(art)
-        self.assertIn("A live query was attempted but did not complete.", page)
-
-
-SCHEMA = ROOT / "skills" / "verify" / "schema.v1.json"
-
-
-def schema_claim_verdicts() -> list:
-    schema = json.loads(SCHEMA.read_text())
-    return list(
-        schema["properties"]["evidence_checks"]["items"]["properties"]["verdict"]["enum"]
-    )
-
-
-def _minimal_art(evidence_checks: list) -> dict:
-    contradicted = [row for row in evidence_checks if row.get("verdict") == "contradicted"]
-    source_ids = sorted({
-        str((row.get("public_receipt") or {}).get("source_id") or "")
-        for row in evidence_checks
-        if row.get("basis") == "evidence" and row.get("public_receipt")
-    } - {""})
-    sources = [{
-        "id": source_id,
-        "kind": "supplied_file",
-        "label": f"Recorded {source_id.replace('-', ' ')} snapshot",
-        "evidence_file": f"{source_id}.json",
-        "result_sha256": "a" * 64,
-    } for source_id in source_ids]
-    cited = [row["label"] for row in sources]
-    return {
-        "schema_version": "grade-artifact/public-receipt-v1",
-        "run_id": "parity",
-        "generated_at": "2026-08-23T00:00:00Z",
-        "source": {"path": "report.md", "format": "md"},
-        "source_result": None,
-        "verdict": "share_with_caveats",
-        "score": None,
-        "findings": [],
-        "evidence_checks": evidence_checks,
-        "evidence_findings": contradicted,
-        "evidence_coverage": {
-            "document_claims_total": len(evidence_checks),
-            "document_claims_reached": len(evidence_checks),
-            "claim_outcomes_proposed": len(evidence_checks),
-            "material_claims_reviewed": len(evidence_checks),
-            "supporting_claims_reviewed": 0,
-            "confirmed": 0,
-            "contradicted": 0,
-            "not_checkable": 0,
-            "evidence_confirmed": 0,
-            "evidence_contradicted": 0,
-            "evidence_not_checkable": 0,
-            "report_confirmed": 0,
-            "report_contradicted": 0,
-            "report_not_checkable": 0,
-            "validated_outcomes": len(evidence_checks),
-            "receipt_failures": 0,
-            "evidence_files_supplied": len(sources),
-            "evidence_files_cited": cited,
-            "provenance_groups": [
-                {"source_id": row["id"], "kind": row["kind"], "label": row["label"]}
-                for row in sources
-            ],
-            "source_independence": (
-                "grouped_by_declared_provenance" if sources else "not_assessed"
-            ),
-        },
-        "decision": None,
-        "actions": [],
-        "decision_limits": [],
-        "diagnostics": [],
-        "checks": {
-            "registered": 0,
-            "with_findings": 0,
-            "found_nothing": 0,
-            "errored": 0,
-            "skipped_note": "",
-        },
-        "verification": {
-            "document": {"status": "not_run", "detail": None},
-            "semantic": {"status": "complete", "detail": None},
-            "live_source": {"status": "not_run", "detail": None},
-        },
-        "limitations": [],
-        "offer": {"text": "Next: stop.", "accepted": None},
-        "claims": [],
-        "sources": sources,
-    }
-
-
-DESIGN = ROOT / "tests" / "design"
-SECTION_ORDER = [
-    "Errors: fix these first",
-    "Confirmed correct",
-    "A later value differs",
-    "What we could not check, and why",
-    "What ran",
-]
-EM_EN_DASH = re.compile(r"[\u2013\u2014]")
-E2E = ROOT / "tests" / "fixtures" / "verify" / "e2e"
-_COUNT_WORDS = {
-    "no": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-    "six": 6, "seven": 7, "eight": 8, "nine": 9,
-}
-
-
-def prose_claim_total(page: str) -> int:
-    match = re.search(r"The report makes ([^.]+?) claims?\.", page)
-    test_msg = "page does not state a claim total"
-    if not match:
-        raise AssertionError(test_msg)
-    raw = match.group(1).strip().lower().replace(",", "")
-    raw = re.sub(r"\s+material$", "", raw)
-    if raw in _COUNT_WORDS:
-        return _COUNT_WORDS[raw]
-    return int(raw)
-
-
-def tile_counts(page: str) -> dict[str, int | None]:
-    found = re.findall(r'data-bucket="([^"]+)" data-count="([^"]+)"', page)
-    out = {}
-    for slug, count in found:
-        out[slug] = None if count == "not-run" else int(count)
-    return out
-
-
-def _headings(page: str) -> list[str]:
-    raw = re.findall(r"<h2>(.*?)</h2>", page, flags=re.S)
-    out = []
-    for item in raw:
-        text = re.sub(r"<[^>]+>", "", item)
-        text = (text.replace("&rsquo;", "’").replace("&#8217;", "’")
-                .replace("&ldquo;", "“").replace("&rdquo;", "”"))
-        out.append(re.sub(r"\s+", " ", text).strip())
-    return out
-
-
-def assert_page_structure(test, page: str, *, expect_errors: bool, expect_csr: bool) -> None:
-    test.assertNotIn('class="sample"', page)
-    test.assertNotIn("Design sample", page)
-    test.assertIn("Summation", page)
-    test.assertIn("/ Verify", page)
-    expected_next = 1 if expect_errors else 0
-    test.assertEqual(
-        page.count('class="next"') + page.count("class='next'"), expected_next)
-    if expected_next:
-        test.assertIn("<b>Next:</b>", page)
-    else:
-        test.assertNotIn("<b>Next:</b>", page)
-    test.assertIsNone(EM_EN_DASH.search(page), "em or en dash in generated page")
-    test.assertNotIn("changed since", page.lower())
-    test.assertNotIn("differs from source", page.lower())
-    test.assertNotIn("NEEDS REVIEW", page)
-    test.assertIn("Technical detail", page)
-    test.assertIn("Checked automatically by Summation Verify", page)
-    headings = _headings(page)
-    allowed = list(SECTION_ORDER)
-    if not expect_errors:
-        allowed.remove("Errors: fix these first")
-    if not expect_csr:
-        allowed.remove("A later value differs")
-    test.assertEqual(headings, allowed)
-    buckets = re.findall(r'data-bucket="([^"]+)" data-count="([^"]+)"', page)
-    test.assertEqual([item[0] for item in buckets], [
-        "errors", "confirmed", "today-differs", "not-checkable"])
-    numeric = 0
-    for _slug, count in buckets:
-        if count != "not-run":
-            numeric += int(count)
-    data_ledger = int(re.search(r'data-ledger="(\d+)"', page).group(1))
-    test.assertEqual(numeric, data_ledger)
-    test.assertEqual(prose_claim_total(page), data_ledger)
-    if "listed under technical detail" in page:
-        test.assertIn("<details>", page)
-        test.assertIn("<li>", page)
-    for match in re.finditer(r'<div class="card [^"]+" data-kind="[^"]+"[^>]*>', page):
-        chunk = page[match.start(): match.start() + 1600]
-        test.assertIn('class="tag"', chunk)
-        test.assertIn("<h3>", chunk)
-        test.assertIn("Checked by a program:", chunk)
-        opening = match.group(0)
-        test.assertEqual(opening.count("data-card-id="), 1)
-        test.assertEqual(opening.count("data-disposition="), 1)
-
-
-def _check(verdict: str, **extra) -> dict:
-    report_quote = str(extra.pop("report_quote", f"Visible quote for {verdict}."))
-    basis = str(extra.pop("basis", "evidence"))
-    report_value = extra.get("report_value")
-    current_value = extra.get("current_value")
-    report_operand_value = report_value if report_value not in (None, "") else report_quote
-    decisive_value = current_value
-    if decisive_value in (None, ""):
-        observed = extra.pop("observed", None) or []
-        decisive_value = (
-            observed[0].get("value")
-            if observed and isinstance(observed[0], dict)
-            else extra.pop("evidence_quote", None)
-        )
-    if decisive_value in (None, ""):
-        decisive_value = extra.pop("report_quote_2", None) or report_operand_value
-    else:
-        extra.pop("evidence_quote", None)
-        extra.pop("report_quote_2", None)
-    explanation = str(extra.pop(
-        "explanation",
-        f"The explicit operands support the agent-authored {verdict} outcome.",
-    ))
-    extra.pop("evidence_file", None)
-    extra.pop("evidence_json", None)
-    extra.pop("evidence_receipts", None)
-    extra.pop("evidence_receipt_mode", None)
-    extra.pop("comparison", None)
-    extra.pop("current_source_kind", None)
+def retained_source(*, kind: str = "supplied_file") -> dict:
     row = {
-        "id": f"id-{verdict}",
-        "claim_id": f"claim-{verdict}",
+        "id": "status-snapshot",
+        "kind": kind,
+        "label": "Project status snapshot",
+        "evidence_file": "status.json",
+        "result_sha256": "a" * 64,
+    }
+    if kind == "live_tool":
+        row["retrieval"] = {
+            "retrieved_at": "2026-08-25T13:10:00Z",
+            "tool": "status_api.get_week",
+            "arguments": {"week": "2026-W34"},
+        }
+    return row
+
+
+def public_receipt(label: str, report_value, *, source_id: str | None = "status-snapshot",
+                   decisive: list[dict] | None = None,
+                   explanation: str | None = None) -> dict:
+    if decisive is None:
+        decisive = [{
+            "label": f"Recorded {label.lower()}",
+            "value": report_value,
+            "location": "Project status snapshot, retained field",
+        }]
+    row = {
+        "report_operand": {
+            "label": label,
+            "value": report_value,
+            "location": "Report summary, displayed value",
+        },
+        "decisive_operands": decisive,
+        "explanation": explanation or (
+            "The retained source value matches the exact value displayed in the report."
+        ),
+    }
+    if source_id:
+        row["source_id"] = source_id
+    return row
+
+
+def accepted_check(index: int, verdict: str = "confirmed", *,
+                   basis: str = "evidence") -> dict:
+    label = f"Reported metric {index}"
+    receipt = public_receipt(label, index, source_id=(
+        "status-snapshot" if basis == "evidence" else None))
+    if verdict == "not_checkable":
+        basis = "report"
+        receipt = public_receipt(
+            label, index, source_id=None, decisive=[],
+            explanation=(
+                "No approved source was available to verify this displayed report metric."
+            ),
+        )
+    if verdict == "changed_since_report":
+        receipt = public_receipt(
+            label, index, decisive=[
+                {
+                    "label": "Report date", "value": "2026-04-04",
+                    "location": "Report summary, as-of date",
+                },
+                {
+                    "label": f"Later recorded metric {index}", "value": index + 1,
+                    "location": "Project status snapshot, retained field",
+                },
+                {
+                    "label": "Later snapshot date", "value": "2026-08-23",
+                    "location": "Project status snapshot, as-of field",
+                },
+            ],
+            explanation=(
+                "The later retained snapshot differs from the value recorded in the dated report."
+            ),
+        )
+        receipt["reconstruction_attempt"] = (
+            "The approved history source was checked, but no report-date record was retained."
+        )
+    return {
+        "id": f"C{index}",
+        "claim_id": f"L{index}",
         "type": "semantic",
         "basis": basis,
         "verdict": verdict,
         "importance": "material",
         "severity": "high" if verdict == "contradicted" else None,
+        "public_receipt": receipt,
     }
-    if verdict in {"confirmed", "contradicted", "changed_since_report"}:
-        receipt = {
-            "report_operand": {
-                "label": "Reported metric",
-                "value": report_operand_value,
-                "location": "Report summary",
-            },
-            "decisive_operands": [{
-                "label": "Recorded metric",
-                "value": decisive_value,
-                "location": "Recorded status snapshot",
-            }],
-            "explanation": explanation,
-        }
-        if basis == "evidence":
-            receipt["source_id"] = "recorded-source"
-        row["public_receipt"] = receipt
-    elif verdict == "not_checkable":
-        row.update({"report_quote": report_quote, "explanation": explanation})
-    else:
-        row.update({"report_quote": report_quote, "explanation": explanation})
-    row.update(extra)
-    return row
 
 
-class HtmlParityTests(unittest.TestCase):
-    def test_every_schema_claim_verdict_appears_in_html(self) -> None:
-        verdicts = schema_claim_verdicts()
-        self.assertTrue(verdicts)
-        rows = []
-        for verdict in verdicts:
-            extra = {}
-            if verdict == "changed_since_report":
-                extra = {
-                    "reconstruction_attempt": "No history table remains.",
-                    "current_value": 10613,
-                    "current_as_of": "2026-08-23",
-                }
-            rows.append(_check(verdict, **extra))
-        page = render.html_of(_minimal_art(rows))
-        for row in rows:
-            with self.subTest(verdict=row["verdict"]):
-                receipt = row.get("public_receipt") or {}
-                expected = (
-                    (receipt.get("report_operand") or {}).get("value")
-                    if receipt else row.get("report_quote")
-                )
-                self.assertIn(
-                    str(expected), page,
-                    f"{row['verdict']} report operand missing from HTML",
-                )
-                self.assertNotIn(
-                    "The report claim", page,
-                    f"{row['verdict']} generic verdict stamp in HTML",
-                )
-                explanation = receipt.get("explanation") or row.get("explanation")
-                self.assertIn(str(explanation), page)
-
-    def test_unhandled_verdict_fails_closed_before_render(self) -> None:
-        row = _check("unmodeled_verdict")
-        with self.assertRaisesRegex(SystemExit, "unknown accepted verdict"):
-            render._public_layer2([row], sources=[])
-
-    def test_html_has_exactly_one_next_block(self) -> None:
-        art = _minimal_art([_check("contradicted")])
-        art["verdict"] = "fix_first"
-        page = render.html_of(art)
-        self.assertEqual(page.count('class="next"') + page.count("class='next'"), 1)
-        safe = render.html_of(_minimal_art([_check("confirmed")]))
-        self.assertEqual(safe.count('class="next"') + safe.count("class='next'"), 0)
-
-    def test_needs_review_is_shown_as_share_with_caveats(self) -> None:
-        art = _minimal_art([_check("confirmed")])
-        art["verdict"] = "needs_review"
-        page = render.html_of(art)
-        self.assertIn("SHARE WITH CAVEATS", page)
-        self.assertNotIn("NEEDS REVIEW", page)
-        self.assertNotIn("needs_review", page)
-
-    def test_design_samples_are_the_frozen_reference(self) -> None:
-        files = {
-            "grade-artifact-exemplar.html": "FIX FIRST",
-            "grade-artifact-exemplar-safe.html": "SAFE TO SHARE",
-            "grade-artifact-exemplar-caveats.html": "SHARE WITH CAVEATS",
-        }
-        for name, chip in files.items():
-            page = (DESIGN / name).read_text()
-            self.assertIn(chip, page)
-            self.assertIn("Design sample", page)
-            self.assertIn("Confirmed correct", page)
-            self.assertIn("What we could not check, and why", page)
-            self.assertIn("What ran", page)
-            self.assertIn("Technical detail", page)
-            self.assertEqual(page.count('class="next"'), 1)
-
-    def test_named_missing_inputs_exit_2(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            folder = pathlib.Path(raw)
-            findings = folder / "findings.json"
-            findings.write_text(json.dumps({
-                "findings": [],
-                "coverage": {
-                    "claims_in_ledger": 0,
-                    "claims_reached_by_a_check": 0,
-                    "extractor_checkable_fraction": 1.0,
-                    "engine_checkable_fraction": 1.0,
-                    "checks_registered": 0,
-                    "checks_with_findings": 0,
-                    "checks_found_nothing": 0,
-                    "checks_errored": 0,
-                },
-                "source": {"path": "report.md", "format": "md"},
-                "findings_truncated": False,
-            }))
-            out = folder / "artifact"
-            self.assertEqual(run_mod(render, "render.py", [
-                "--findings", str(folder / "no-findings.json"),
-                "--out-dir", str(out),
-            ]), 2)
-            self.assertEqual(run_mod(render, "render.py", [
-                "--findings", str(findings),
-                "--layer2", str(folder / "no-layer2.json"),
-                "--out-dir", str(out),
-            ]), 2)
-            self.assertEqual(run_mod(render, "render.py", [
-                "--findings", str(findings),
-                "--claims", str(folder / "no-claims.json"),
-                "--out-dir", str(out),
-            ]), 2)
-
-
-@unittest.skipUnless(HAS_JSONSCHEMA, "jsonschema is not installed")
-class RenderArtifactTests(unittest.TestCase):
-    def test_tiny_fixture_is_fix_first(self) -> None:
-        raw = json.loads(FIX.read_text())
-        art = render.artifact_from_findings(
-            raw, run_id="sf-001", generated_at="2026-08-17T00:00:00Z")
-        self.assertEqual(art["source"]["path"], "2026-04-04-weekly-sales-snapshot.html")
-        page = render.html_of(art)
-        self.assertNotIn("/Users/", page)
-        self.assertNotIn("Layer 1", page)
-        self.assertNotIn("Layer 2", page)
-
-    def test_receipted_contradiction_is_fix_first(self) -> None:
-        raw = {
-            "findings": [],
-            "coverage": {
-                "claims_in_ledger": 11,
-                "claims_reached_by_a_check": 11,
-                "extractor_checkable_fraction": 1.0,
-                "engine_checkable_fraction": 1.0,
-                "checks_registered": 1,
-                "checks_with_findings": 0,
-                "checks_found_nothing": 1,
-                "checks_errored": 0,
-            },
-            "source": {"path": "clean.html", "format": "html", "sha256": "abc"},
-            "findings_truncated": False,
-        }
-        layer2 = [{
-            "id": "C1",
-            "type": "semantic",
-            "basis": "evidence",
-            "verdict": "contradicted",
+def raw_for(checks: list[dict], *, sources: list[dict] | None = None,
+            supporting: bool = False) -> dict:
+    source_rows = list(sources if sources is not None else [retained_source()])
+    claims = [
+        {
+            "id": check["claim_id"],
+            "quote": f"Visible report claim {index}.",
+            "public_label": check["public_receipt"]["report_operand"]["label"],
             "importance": "material",
-            "severity": "high",
-            "report_quote": "The kickoff is Thursday.",
-            "evidence_file": "evidence.json",
-            "evidence_quote": "kickoff Wednesday",
-            "explanation": "The report names the wrong day.",
-        }]
-        art = render.artifact_from_findings(
-            raw, run_id="t", generated_at="2026-08-20T00:00:00Z", layer2=layer2)
-        self.assertEqual(art["verdict"], "fix_first")
-        page = render.html_of(art)
-        self.assertIn("FIX FIRST", page)
-        self.assertIn("The kickoff is Thursday.", page)
-
-    def test_cli_writes_html_and_json(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            out = pathlib.Path(raw)
-            code = run_mod(render, "render.py", [
-                "--findings", str(FIX),
-                "--out-dir", str(out),
-                "--run-id", "test-run",
-            ])
-            self.assertEqual(code, 0)
-            html = (out / "grade-artifact.html").read_text()
-            art = json.loads((out / "grade-artifact.json").read_text())
-            self.assertEqual(art["verdict"], "fix_first")
-            self.assertIn("Summation", html)
-            self.assertIn("FIX FIRST", html)
-            self.assertNotIn('class="sample"', html)
-
-    def test_changed_since_report_writes_artifact(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            folder = pathlib.Path(raw)
-            report = folder / "report.md"
-            report.write_text("Inventory on hand is 4,200.")
-            (folder / "live.json").write_text(
-                '{"on_hand": 5100, "as_of": "2026-08-23"}\n')
-            checks = {
-                "checks": [{
-                    "id": "C11",
-                    "type": "staleness",
-                    "basis": "evidence",
-                    "verdict": "changed_since_report",
-                    "importance": "material",
-                    "report_quote": "Inventory on hand is 4,200.",
-                    "report_value": 4200,
-                    "evidence_file": "live.json",
-                    "evidence_json": [{"pointer": "/on_hand", "value": 5100}],
-                    "explanation": "Current on-hand is 5100 as of 2026-08-23.",
-                    "reconstruction_attempt": (
-                        "Queried inventory_history and the daily snapshot table; "
-                        "neither retains 2026-04-04 on-hand."
-                    ),
-                    "current_value": 5100,
-                    "current_as_of": "2026-08-23",
-                    "report_date": "2026-04-04",
-                }]
-            }
-            (folder / "checks.json").write_text(json.dumps(checks))
-            write_incomplete_md_findings(folder, {
-                "agentic_only": True,
-                "agentic_scan_completed": True,
-                "extraction_method": "host-agent visible text",
-                "coverage": {
-                    "claims_in_ledger": 0,
-                    "claims_reached_by_a_check": 0,
-                    "extractor_checkable_fraction": 0.0,
-                    "engine_checkable_fraction": 0.0,
-                    "checks_registered": 0,
-                    "checks_with_findings": 0,
-                    "checks_found_nothing": 0,
-                    "checks_errored": 0,
-                },
-            })
-            self.assertEqual(run_mod(accept, "accept.py", [
-                "--report", str(report),
-                "--checks", str(folder / "checks.json"),
-                "--evidence-dir", str(folder),
-                "--out", str(folder / "receipts.json"),
-            ]), 0)
-            out = folder / "artifact"
-            code = run_mod(render, "render.py", [
-                "--findings", str(folder / "findings.json"),
-                "--layer2", str(folder / "receipts.json"),
-                "--out-dir", str(out),
-                "--run-id", "csr-run",
-            ])
-            self.assertEqual(code, 0)
-            self.assertTrue((out / "grade-artifact.html").is_file())
-            art = json.loads((out / "grade-artifact.json").read_text())
-            verdicts = {row["verdict"] for row in art["evidence_checks"]}
-            self.assertIn("changed_since_report", verdicts)
-            receipts = json.loads((folder / "receipts.json").read_text())
-            self.assertTrue(receipts["checks"][0]["reconstruction_attempt"])
-            self.assertEqual(receipts["checks"][0]["current_value"], 5100)
-            self.assertEqual(
-                art["evidence_checks"][0]["reconstruction_attempt"],
-                checks["checks"][0]["reconstruction_attempt"],
-            )
-            self.assertEqual(art["evidence_checks"][0]["current_value"], 5100)
-            self.assertEqual(
-                art["evidence_checks"][0]["current_source_kind"],
-                "supplied_recorded_evidence",
-            )
-            page = (out / "grade-artifact.html").read_text()
-            self.assertIn("4,200", page)
-            self.assertIn("5,100", page)
-            self.assertIn("April 4, 2026", page)
-            self.assertIn("August 23, 2026", page)
-            self.assertIn("Supplied recorded evidence", page)
-            self.assertIn("no live query ran", page)
-            assert_page_structure(
-                self, page,
-                expect_errors=False, expect_csr=True)
-
-    def test_ledger_count_matches_proposed_checks(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            folder = pathlib.Path(raw)
-            report = folder / "report.md"
-            report.write_text("Alpha is 1. Beta is 2. Gamma is 3. Delta is 4. Epsilon is 5.")
-            (folder / "ev.json").write_text(json.dumps({
-                "alpha": 1, "beta": 2, "gamma": 3, "delta": 4, "epsilon": 5,
-            }))
-            rows = []
-            for i, (name, quote) in enumerate([
-                ("Alpha", "Alpha is 1."),
-                ("Beta", "Beta is 2."),
-                ("Gamma", "Gamma is 3."),
-                ("Delta", "Delta is 4."),
-                ("Epsilon", "Epsilon is 5."),
-            ], start=1):
-                rows.append({
-                    "id": f"C{i}",
-                    "type": "semantic",
-                    "basis": "evidence",
-                    "verdict": "confirmed",
-                    "importance": "material",
-                    "report_quote": quote,
-                    "evidence_file": "ev.json",
-                    "evidence_json": [{"pointer": f"/{name.lower()}", "value": i}],
-                    "explanation": f"{name} matches.",
-                })
-            (folder / "checks.json").write_text(json.dumps({"checks": rows}))
-            write_incomplete_md_findings(folder, {
-                "agentic_only": True,
-                "agentic_scan_completed": True,
-            })
-            self.assertEqual(run_mod(accept, "accept.py", [
-                "--report", str(report),
-                "--checks", str(folder / "checks.json"),
-                "--evidence-dir", str(folder),
-                "--out", str(folder / "receipts.json"),
-            ]), 0)
-            receipts = json.loads((folder / "receipts.json").read_text())
-            self.assertEqual(receipts["proposed"], 5)
-            out = folder / "artifact"
-            self.assertEqual(run_mod(render, "render.py", [
-                "--findings", str(folder / "findings.json"),
-                "--layer2", str(folder / "receipts.json"),
-                "--out-dir", str(out),
-                "--run-id", "ledger-run",
-            ]), 0)
-            art = json.loads((out / "grade-artifact.json").read_text())
-            self.assertEqual(art["evidence_coverage"]["document_claims_total"], 5)
-            self.assertEqual(art["evidence_coverage"]["claim_outcomes_proposed"], 5)
-
-    def test_planted_html_with_changed_since_report_is_fix_first(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            folder = pathlib.Path(raw)
-            report = folder / "report.html"
-            report.write_text(PLANTED.read_text())
-            (folder / "live.json").write_text(
-                '{"units_now": 10613, "as_of": "2026-08-23"}\n')
-            (folder / "note.json").write_text(
-                '{"note": "Both segments moved in the same direction."}\n')
-            self.assertEqual(run_mod(html_arith, "html_arith.py", [
-                "--report", str(report),
-                "--out", str(folder / "findings.json"),
-            ]), 0)
-            findings = json.loads((folder / "findings.json").read_text())
-            footing = [
-                f for f in findings["findings"] if f["check_id"] == "ari_total_footing"]
-            self.assertTrue(footing)
-            self.assertAlmostEqual(abs(footing[0]["detail"]["discrepancy"]), 9000.0)
-            (folder / "claims.json").write_text(json.dumps({
-                "report_date": "2026-04-04",
-                "claims": [
-                    {"id": "L19", "quote": "Both segments moved in the same direction.",
-                     "importance": "material"},
-                    {"id": "L20", "quote": "10,481", "importance": "material"},
-                ],
-            }))
-            (folder / "checks.json").write_text(json.dumps({"checks": [
-                {
-                    "id": "C19",
-                    "claim_id": "L19",
-                    "type": "semantic",
-                    "basis": "report",
-                    "verdict": "not_checkable",
-                    "importance": "material",
-                    "report_quote": "Both segments moved in the same direction.",
-                    "explanation": "No accepted receipt proves the direction claim.",
-                },
-                {
-                    "id": "C20",
-                    "claim_id": "L20",
-                    "type": "staleness",
-                    "basis": "evidence",
-                    "verdict": "changed_since_report",
-                    "importance": "material",
-                    "report_quote": "10,481",
-                    "report_value": 10481,
-                    "evidence_file": "live.json",
-                    "evidence_json": [{"pointer": "/units_now", "value": 10613}],
-                    "explanation": "Current units are 10613 as of 2026-08-23.",
-                    "reconstruction_attempt": (
-                        "The source was re-queried with the week ending April 4 "
-                        "as the filter; the units source has no date column, so "
-                        "the April 4 value could not be rebuilt."
-                    ),
-                    "current_value": 10613,
-                    "current_as_of": "2026-08-23",
-                },
-            ]}))
-            pad_inventory(folder)
-            self.assertEqual(run_mod(accept, "accept.py", [
-                "--report", str(report),
-                "--claims", str(folder / "claims.json"),
-                "--checks", str(folder / "checks.json"),
-                "--findings", str(folder / "findings.json"),
-                "--evidence-dir", str(folder),
-                "--out", str(folder / "receipts.json"),
-            ]), 0)
-            receipts = json.loads((folder / "receipts.json").read_text())
-            self.assertGreaterEqual(receipts["grounded"], 2)
-            out = folder / "artifact"
-            self.assertEqual(run_mod(render, "render.py", [
-                "--findings", str(folder / "findings.json"),
-                "--layer2", str(folder / "receipts.json"),
-                "--out-dir", str(out),
-                "--run-id", "planted-csr",
-            ]), 0)
-            art = json.loads((out / "grade-artifact.json").read_text())
-            self.assertEqual(art["verdict"], "fix_first")
-            self.assertIn(
-                "changed_since_report",
-                {row["verdict"] for row in art["evidence_checks"]},
-            )
-            page = (out / "grade-artifact.html").read_text()
-            self.assertIn("9,000", page)
-            self.assertIn("SEGMENT_ALPHA", page)
-            self.assertIn("218,385.67", page)
-            self.assertIn("SEGMENT_BETA", page)
-            self.assertIn("Confirmed correct", page)
-            self.assertIn("Both segments moved in the same direction.", page)
-            self.assertIn("A later value differs", page)
-            self.assertNotIn("changed since", page.lower())
-            self.assertNotIn("differs from source", page.lower())
-            self.assertNotIn("10613", page)
-            self.assertIn("10,481", page)
-            self.assertEqual(page.count('class="next"') + page.count("class='next'"), 1)
-            self.assertGreaterEqual(art["evidence_coverage"]["document_claims_total"], 1)
-            assert_page_structure(self, page, expect_errors=True, expect_csr=True)
-
-    def test_fifty_claim_ledger_shows_one_of_fifty(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            folder = pathlib.Path(raw)
-            quotes = [f"Claim number {index} holds." for index in range(1, 51)]
-            (folder / "report.md").write_text(" ".join(quotes))
-            claims = [
-                {"id": f"L{index}", "quote": quote, "importance": "material"}
-                for index, quote in enumerate(quotes, 1)
-            ]
-            (folder / "claims.json").write_text(json.dumps({"claims": claims}))
-            (folder / "ev.json").write_text('{"ok": true, "n": 1}\n')
-            (folder / "checks.json").write_text(json.dumps({"checks": [{
-                "id": "C1",
-                "claim_id": "L1",
-                "type": "semantic",
-                "basis": "evidence",
-                "verdict": "confirmed",
-                "importance": "material",
-                "report_quote": quotes[0],
-                "evidence_file": "ev.json",
-                "evidence_quote": '"ok": true',
-                "explanation": "The first claim matches.",
-            }]}))
-            write_incomplete_md_findings(folder)
-            self.assertEqual(run_mod(accept, "accept.py", [
-                "--report", str(folder / "report.md"),
-                "--claims", str(folder / "claims.json"),
-                "--checks", str(folder / "checks.json"),
-                "--evidence-dir", str(folder),
-                "--out", str(folder / "receipts.json"),
-            ]), 0)
-            receipts = json.loads((folder / "receipts.json").read_text())
-            self.assertEqual(receipts["claims_in_ledger"], 50)
-            self.assertEqual(receipts["claims_reached_by_a_check"], 1)
-            out = folder / "artifact"
-            self.assertEqual(run_mod(render, "render.py", [
-                "--findings", str(folder / "findings.json"),
-                "--layer2", str(folder / "receipts.json"),
-                "--out-dir", str(out),
-                "--run-id", "fifty",
-            ]), 0)
-            art = json.loads((out / "grade-artifact.json").read_text())
-            self.assertEqual(art["evidence_coverage"]["document_claims_total"], 50)
-            self.assertEqual(art["evidence_coverage"]["document_claims_reached"], 1)
-            page = (out / "grade-artifact.html").read_text()
-            self.assertIn('data-ledger="50"', page)
-            self.assertIn('data-bucket="confirmed" data-count="1"', page)
-
-    def test_clean_report_all_material_confirmed_is_safe_to_share(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            folder = pathlib.Path(raw)
-            report = folder / "report.html"
-            report.write_text(
-                (ROOT / "tests" / "fixtures" / "verify"
-                 / "weekly-sales-snapshot-clean.html").read_text())
-            self.assertEqual(run_mod(html_arith, "html_arith.py", [
-                "--report", str(report),
-                "--out", str(folder / "findings.json"),
-            ]), 0)
-            quote = "Both segments moved in the same direction."
-            (folder / "note.json").write_text(json.dumps({"note": quote}))
-            findings_doc = json.loads((folder / "findings.json").read_text())
-            claims = [{"id": "L0", "quote": quote, "importance": "supporting"}]
-            checks = [{
-                "id": "C0",
-                "claim_id": "L0",
-                "type": "semantic",
-                "basis": "evidence",
-                "verdict": "confirmed",
-                "importance": "supporting",
-                "report_quote": quote,
-                "evidence_file": "note.json",
-                "evidence_quote": quote,
-                "explanation": "The note matches the report.",
-            }]
-            ev = {"note": quote}
-            for index, item in enumerate(findings_doc.get("inventory", {}).get("items") or [], 1):
-                shown = item["displayed"]
-                cid = f"L{index}"
-                key = f"v{index}"
-                claims.append({
-                    "id": cid,
-                    "quote": shown,
-                    "importance": "material",
-                    "inventory_ids": [item["id"]],
-                })
-                ev[key] = shown
-                checks.append({
-                    "id": f"C{index}",
-                    "claim_id": cid,
-                    "type": "semantic",
-                    "basis": "evidence",
-                    "verdict": "confirmed",
-                    "importance": "material",
-                    "report_quote": shown,
-                    "evidence_file": "ev.json",
-                    "evidence_json": [{"pointer": f"/{key}", "value": shown}],
-                    "explanation": f"The evidence matches {shown}.",
-                })
-            (folder / "ev.json").write_text(json.dumps(ev) + "\n")
-            (folder / "claims.json").write_text(json.dumps({"claims": claims}))
-            (folder / "checks.json").write_text(json.dumps({"checks": checks}))
-            self.assertEqual(run_mod(accept, "accept.py", [
-                "--report", str(report),
-                "--claims", str(folder / "claims.json"),
-                "--checks", str(folder / "checks.json"),
-                "--findings", str(folder / "findings.json"),
-                "--evidence-dir", str(folder),
-                "--out", str(folder / "receipts.json"),
-            ]), 0)
-            out = folder / "artifact"
-            self.assertEqual(run_mod(render, "render.py", [
-                "--findings", str(folder / "findings.json"),
-                "--layer2", str(folder / "receipts.json"),
-                "--out-dir", str(out),
-                "--run-id", "clean-complete",
-            ]), 0)
-            art = json.loads((out / "grade-artifact.json").read_text())
-            self.assertEqual(art["verdict"], "safe_to_share")
-            self.assertEqual(art["verification"]["semantic"]["status"], "complete")
-            assert_page_structure(
-                self, (out / "grade-artifact.html").read_text(),
-                expect_errors=False, expect_csr=False)
-
-    def test_half_material_unreached_is_partial(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            folder = pathlib.Path(raw)
-            (folder / "report.md").write_text("Alpha is 1. Beta is 2.")
-            (folder / "ev.json").write_text('{"alpha": 1}\n')
-            (folder / "claims.json").write_text(json.dumps({"claims": [
-                {"id": "L1", "quote": "Alpha is 1.", "importance": "material"},
-                {"id": "L2", "quote": "Beta is 2.", "importance": "material"},
-            ]}))
-            (folder / "checks.json").write_text(json.dumps({"checks": [{
-                "id": "C1",
-                "claim_id": "L1",
-                "type": "semantic",
-                "basis": "evidence",
-                "verdict": "confirmed",
-                "importance": "material",
-                "report_quote": "Alpha is 1.",
-                "evidence_file": "ev.json",
-                "evidence_json": [{"pointer": "/alpha", "value": 1}],
-                "explanation": "Alpha matches.",
-            }]}))
-            write_incomplete_md_findings(folder)
-            self.assertEqual(run_mod(accept, "accept.py", [
-                "--report", str(folder / "report.md"),
-                "--claims", str(folder / "claims.json"),
-                "--checks", str(folder / "checks.json"),
-                "--evidence-dir", str(folder),
-                "--out", str(folder / "receipts.json"),
-            ]), 0)
-            receipts = json.loads((folder / "receipts.json").read_text())
-            self.assertEqual(receipts["semantic_status"], "partial")
-            out = folder / "artifact"
-            self.assertEqual(run_mod(render, "render.py", [
-                "--findings", str(folder / "findings.json"),
-                "--layer2", str(folder / "receipts.json"),
-                "--out-dir", str(out),
-                "--run-id", "partial",
-            ]), 0)
-            art = json.loads((out / "grade-artifact.json").read_text())
-            self.assertEqual(art["verification"]["semantic"]["status"], "partial")
-            self.assertEqual(art["evidence_coverage"]["document_claims_total"], 2)
-            self.assertEqual(art["evidence_coverage"]["document_claims_reached"], 1)
-
-    def test_not_checkable_is_reached_not_confirmed(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            folder = pathlib.Path(raw)
-            (folder / "report.md").write_text("Alpha is 1.")
-            (folder / "claims.json").write_text(json.dumps({
-                "claims": [{"id": "L1", "quote": "Alpha is 1.", "importance": "material"}],
-            }))
-            (folder / "checks.json").write_text(json.dumps({"checks": [{
-                "id": "C1",
-                "claim_id": "L1",
-                "type": "semantic",
-                "basis": "report",
-                "verdict": "not_checkable",
-                "importance": "material",
-                "report_quote": "Alpha is 1.",
-                "explanation": "No warehouse snapshot remains for this figure.",
-            }]}))
-            write_incomplete_md_findings(folder)
-            self.assertEqual(run_mod(accept, "accept.py", [
-                "--report", str(folder / "report.md"),
-                "--claims", str(folder / "claims.json"),
-                "--checks", str(folder / "checks.json"),
-                "--out", str(folder / "receipts.json"),
-            ]), 0)
-            receipts = json.loads((folder / "receipts.json").read_text())
-            self.assertEqual(receipts["claims_reached_by_a_check"], 1)
-            self.assertEqual(receipts["claims"][0]["outcome"], "not_checkable")
-            out = folder / "artifact"
-            self.assertEqual(run_mod(render, "render.py", [
-                "--findings", str(folder / "findings.json"),
-                "--layer2", str(folder / "receipts.json"),
-                "--out-dir", str(out),
-                "--run-id", "uncheckable",
-            ]), 0)
-            art = json.loads((out / "grade-artifact.json").read_text())
-            self.assertEqual(art["evidence_coverage"]["document_claims_reached"], 1)
-            self.assertEqual(art["evidence_coverage"]["confirmed"], 0)
-            self.assertEqual(art["evidence_coverage"]["not_checkable"], 1)
-
-    def test_repro_ledger_tiles_match_receipts_not_bucket_sum(self) -> None:
-        """The 3-claim sloppy e2e input must not invent a fifth claim."""
-        with tempfile.TemporaryDirectory() as raw:
-            folder = pathlib.Path(raw)
-            report = folder / "weekly-sales-snapshot.html"
-            report.write_text(PLANTED.read_text())
-            evidence = folder / "evidence"
-            evidence.mkdir()
-            for name in ("q3.json", "live-units.json"):
-                (evidence / name).write_text((E2E / "evidence" / name).read_text())
-            claims = folder / "claims.json"
-            checks = folder / "checks.json"
-            findings = folder / "findings.json"
-            claims.write_text((E2E / "claims-r5.json").read_text())
-            checks.write_text((E2E / "checks-r5.json").read_text())
-            findings.write_text((E2E / "findings.json").read_text())
-            pad_inventory(folder, report)
-            self.assertEqual(run_mod(accept, "accept.py", [
-                "--report", str(report),
-                "--claims", str(claims),
-                "--checks", str(checks),
-                "--findings", str(findings),
-                "--evidence-dir", str(evidence),
-                "--out", str(folder / "receipts.json"),
-            ]), 0)
-            receipts = json.loads((folder / "receipts.json").read_text())
-            ledger_n = int(receipts["claims_in_ledger"])
-            self.assertGreaterEqual(ledger_n, 4)
-            outcomes = {row["id"]: row.get("outcome") for row in receipts["claims"]}
-            self.assertEqual(outcomes["L1"], "changed_since_report")
-            self.assertEqual(outcomes["L2"], "not_checkable")
-            self.assertIn(outcomes["L3"], {"not_reached", "not_checkable"})
-            synthetic = [row for row in receipts["claims"] if row.get("found_by") == "arithmetic"]
-            self.assertEqual(len(synthetic), 1)
-            self.assertEqual(synthetic[0]["outcome"], "error")
-            out = folder / "artifact"
-            self.assertEqual(run_mod(render, "render.py", [
-                "--findings", str(findings),
-                "--layer2", str(folder / "receipts.json"),
-                "--out-dir", str(out),
-            ]), 0)
-            page = (out / "grade-artifact.html").read_text()
-            self.assertEqual(prose_claim_total(page), ledger_n)
-            tiles = tile_counts(page)
-            numeric = sum(v or 0 for v in tiles.values())
-            self.assertEqual(numeric, ledger_n)
-            self.assertEqual(tiles["errors"], 1)
-            self.assertEqual(tiles["confirmed"], 0)
-            self.assertEqual(tiles["today-differs"], 1)
-            self.assertGreaterEqual(tiles["not-checkable"], 2)
-            self.assertIn("week ending April 4, 2026", page)
-            self.assertIn("April 4, 2026", page)
-            self.assertNotIn("The claim matches your evidence", page)
-            footer = re.search(r"Run ([^<]+)", page).group(1)
-            self.assertRegex(footer, r"sf-[0-9a-f]{6}")
-            art = json.loads((out / "grade-artifact.json").read_text())
-            self.assertRegex(art["run_id"], r"^sf-[0-9a-f]{6}$")
-
-    def test_unreconciled_findings_exit_2(self) -> None:
-        """accept without --findings, then render with findings, must not write a page."""
-        with tempfile.TemporaryDirectory() as raw:
-            folder = pathlib.Path(raw)
-            report = folder / "weekly-sales-snapshot.html"
-            report.write_text(PLANTED.read_text())
-            evidence = folder / "evidence"
-            evidence.mkdir()
-            for name in ("q3.json", "live-units.json"):
-                (evidence / name).write_text((E2E / "evidence" / name).read_text())
-            (folder / "claims.json").write_text((E2E / "claims-r5.json").read_text())
-            (folder / "checks.json").write_text((E2E / "checks-r5.json").read_text())
-            self.assertEqual(run_mod(accept, "accept.py", [
-                "--report", str(report),
-                "--claims", str(folder / "claims.json"),
-                "--checks", str(folder / "checks.json"),
-                "--evidence-dir", str(evidence),
-                "--out", str(folder / "receipts.json"),
-            ]), 0)
-            receipts = json.loads((folder / "receipts.json").read_text())
-            self.assertFalse(any(
-                row.get("found_by") == "arithmetic" for row in receipts["claims"]))
-            (folder / "findings.json").write_text((E2E / "findings.json").read_text())
-            out = folder / "artifact"
-            code = run_mod(render, "render.py", [
-                "--findings", str(folder / "findings.json"),
-                "--layer2", str(folder / "receipts.json"),
-                "--out-dir", str(out),
-            ])
-            self.assertEqual(code, 2)
-            self.assertFalse((out / "grade-artifact.html").is_file())
-
-    def test_artifact_verdict_is_a_public_value(self) -> None:
-        raw = {
-            "findings": [],
-            "coverage": {
-                "claims_in_ledger": 2,
-                "claims_reached_by_a_check": 0,
-                "extractor_checkable_fraction": 1.0,
-                "engine_checkable_fraction": 1.0,
-                "checks_registered": 0,
-                "checks_with_findings": 0,
-                "checks_found_nothing": 0,
-                "checks_errored": 0,
-            },
-            "source": {"path": "report.md", "format": "md"},
-            "findings_truncated": False,
+            "classification": "material_claim",
+            "outcome": check["verdict"],
+            "check_id": check["id"],
+            "inventory_ids": [f"INV{index}"],
         }
-        self.assertEqual(render.verdict_of(raw), "needs_review")
-        art = render.artifact_from_findings(
-            raw, run_id="v", generated_at="2026-08-24T00:00:00Z")
-        self.assertIn(art["verdict"], {
-            "safe_to_share", "share_with_caveats", "fix_first", "unable_to_grade"})
-        self.assertNotEqual(art["verdict"], "needs_review")
-        schema = json.loads(
-            (ROOT / "skills" / "verify" / "schema.v1.json").read_text())
+        for index, check in enumerate(checks, 1)
+    ]
+    if supporting:
+        claims.append({
+            "id": "S1", "quote": "Source snapshot: CRM export.",
+            "public_label": "CRM export provenance", "importance": "supporting",
+            "classification": "supporting_provenance",
+            "reason": "This line identifies the report source only.",
+            "outcome": None, "check_id": None, "inventory_ids": ["INVS"],
+        })
+    items = [
+        {
+            "id": f"INV{index}", "kind": "raw", "displayed": str(index),
+            "location": f"line{index}", "importance": "material",
+        }
+        for index in range(1, len(checks) + 1)
+    ]
+    if supporting:
+        items.append({
+            "id": "INVS", "kind": "raw", "displayed": "Source snapshot",
+            "location": "lineS", "importance": "supporting",
+        })
+    return {
+        "source": {
+            "path": "report.md", "format": "md", "sha256": "b" * 64,
+            "period_label": None, "report_date": None,
+        },
+        "findings": [],
+        "inventory": {"complete": True, "reader": "md", "items": items, "reason": None},
+        "inventory_missing": [],
+        "coverage": {
+            "claims_in_ledger": len(checks),
+            "claims_reached_by_a_check": len(checks),
+            "extractor_checkable_fraction": 1.0,
+            "engine_checkable_fraction": 1.0,
+            "inventory_material": len(checks),
+            "checks_registered": 0, "checks_with_findings": 0,
+            "checks_found_nothing": 0, "checks_errored": 0,
+        },
+        "verification": {
+            "document": {"status": "complete", "detail": None},
+            "semantic": {"status": "complete", "detail": None},
+            "live_source": {
+                "status": (
+                    "complete" if any(row.get("kind") == "live_tool" for row in source_rows)
+                    else "not_run"
+                ),
+                "detail": None,
+            },
+        },
+        "claims": claims,
+        "sources": source_rows,
+    }
+
+
+def make_artifact(checks: list[dict], *, sources: list[dict] | None = None,
+                  supporting: bool = False) -> dict:
+    raw = raw_for(checks, sources=sources, supporting=supporting)
+    return render.artifact_from_findings(
+        raw, run_id="unit-render", generated_at="2026-08-25T13:10:00Z",
+        layer2=checks,
+    )
+
+
+class PublicLayerTests(unittest.TestCase):
+    def test_public_layer_is_an_exact_whitelist(self) -> None:
+        check = accepted_check(1)
+        expected_receipt = copy.deepcopy(check["public_receipt"])
+        check.update({
+            "formula": "on-time / total semantic heuristic",
+            "comparison": {"label": "row 9", "value": 999},
+            "evidence_json": [{"pointer": "/private", "value": 1}],
+        })
+        first = render._public_layer2([check], sources=[retained_source()])
+        check["formula"] = "changed prose that must have no effect"
+        second = render._public_layer2([check], sources=[retained_source()])
+        self.assertEqual(first, second)
+        self.assertEqual(first[0]["public_receipt"], expected_receipt)
+        self.assertEqual(set(first[0]), set(render.CHECK_PUBLIC_KEYS))
+        self.assertNotIn("formula", json.dumps(first))
+        self.assertNotIn("/private", json.dumps(first))
+
+    def test_renderer_has_no_semantic_fallback_apis(self) -> None:
+        for name in (
+            "evidence_heading", "_verification_public", "location_line",
+            "public_explanation", "_public_claim", "_combined_verdict",
+            "public_verdict", "customer_verdict", "CONFIRM_CARDS",
+            "GROUNDED_OUTCOMES",
+        ):
+            self.assertFalse(hasattr(render, name), name)
+
+    def test_missing_vague_or_private_receipts_fail_closed(self) -> None:
+        source = [retained_source()]
+        for mutation in ("missing", "vague", "private", "explanation"):
+            check = accepted_check(1)
+            if mutation == "missing":
+                check.pop("public_receipt")
+            elif mutation == "vague":
+                check["public_receipt"]["report_operand"]["label"] = "row 2"
+            elif mutation == "private":
+                check["public_receipt"]["report_operand"]["location"] = "/metrics/value"
+            else:
+                check["public_receipt"]["explanation"] = "Confirmed."
+            with self.subTest(mutation=mutation), self.assertRaises(SystemExit):
+                render._public_layer2([check], sources=source)
+
+    def test_not_checkable_requires_its_agent_receipt_and_no_operands(self) -> None:
+        check = accepted_check(1, "not_checkable")
+        public = render._public_layer2([check], sources=[retained_source()])
+        self.assertEqual(public[0]["public_receipt"], check["public_receipt"])
+        check["public_receipt"]["decisive_operands"] = [{
+            "label": "Unverified value", "value": 1, "location": "Unknown source",
+        }]
+        with self.assertRaises(SystemExit):
+            render._public_layer2([check], sources=[retained_source()])
+
+    def test_evidence_not_checkable_requires_its_retained_source_link(self) -> None:
+        check = accepted_check(1, "not_checkable")
+        check["basis"] = "evidence"
+        with self.assertRaises(SystemExit):
+            render._public_layer2([check], sources=[retained_source()])
+        check["public_receipt"]["source_id"] = "status-snapshot"
+        public = render._public_layer2([check], sources=[retained_source()])
+        self.assertEqual(public[0]["public_receipt"], check["public_receipt"])
+
+    def test_changed_receipt_keeps_agent_reconstruction_inside_receipt(self) -> None:
+        check = accepted_check(1, "changed_since_report")
+        public = render._public_layer2([check], sources=[retained_source()])
         self.assertEqual(
-            set(schema["properties"]["verdict"]["enum"]),
-            {"safe_to_share", "share_with_caveats", "fix_first", "unable_to_grade"},
+            public[0]["public_receipt"]["reconstruction_attempt"],
+            check["public_receipt"]["reconstruction_attempt"],
         )
+        check["public_receipt"].pop("reconstruction_attempt")
+        with self.assertRaises(SystemExit):
+            render._public_layer2([check], sources=[retained_source()])
 
 
-class FillerAndAddendTests(unittest.TestCase):
-    def test_render_source_has_no_filler_strings(self) -> None:
-        src = (SCRIPTS / "render.py").read_text()
-        self.assertNotIn("The claim matches your evidence", src)
-        self.assertNotIn("In the report", src)
+class LedgerTests(unittest.TestCase):
+    def test_root_verdict_uses_one_material_ledger(self) -> None:
+        cases = (
+            ([accepted_check(1)], "safe_to_share"),
+            ([accepted_check(1, "not_checkable")], "share_with_caveats"),
+            ([accepted_check(1, "changed_since_report")], "share_with_caveats"),
+            ([accepted_check(1, "contradicted")], "fix_first"),
+        )
+        for checks, expected in cases:
+            with self.subTest(expected=expected):
+                art = make_artifact(checks)
+                self.assertEqual(art["verdict"], expected)
 
-    def test_unlabeled_check_uses_quote_as_title(self) -> None:
-        art = _minimal_art([_check("confirmed")])
-        art["claims"] = [{
-            "id": "L1",
-            "quote": "Visible quote for confirmed.",
-            "importance": "material",
-            "outcome": "confirmed",
-            "check_id": "id-confirmed",
+    def test_two_errors_among_nine_score_twenty_two_point_two(self) -> None:
+        checks = [
+            accepted_check(index, "contradicted" if index in {1, 2} else "confirmed")
+            for index in range(1, 10)
+        ]
+        art = make_artifact(checks)
+        self.assertAlmostEqual(art["score"]["value"], 200.0 / 9, places=12)
+        self.assertEqual(art["evidence_coverage"]["contradicted"], 2)
+        self.assertEqual(art["evidence_coverage"]["confirmed"], 7)
+
+    def test_supporting_provenance_is_outside_material_totals(self) -> None:
+        art = make_artifact([accepted_check(1)], supporting=True)
+        coverage = art["evidence_coverage"]
+        self.assertEqual(coverage["document_claims_total"], 1)
+        self.assertEqual(coverage["supporting_claims_reviewed"], 1)
+        self.assertEqual(coverage["confirmed"], 1)
+
+    def test_arithmetic_use_marker_cannot_be_a_public_outcome(self) -> None:
+        raw = raw_for([accepted_check(1)])
+        raw["claims"][0]["outcome"] = "used_for_internal_arithmetic"
+        self.assertEqual(render.ledger_verdict(raw), "unable_to_grade")
+        with self.assertRaises(SystemExit):
+            render.artifact_from_findings(
+                raw, run_id="bad", generated_at="2026-08-25T13:10:00Z",
+                layer2=[accepted_check(1)],
+            )
+
+    def test_machine_finding_statement_never_enters_artifact(self) -> None:
+        raw = raw_for([accepted_check(1, "contradicted")])
+        raw["findings"] = [{
+            "check_id": "machine", "tier": "D", "statement": "machine copy",
+            "inventory_ids": ["INV1"],
         }]
-        art["evidence_checks"][0]["claim_id"] = "L1"
+        art = render.artifact_from_findings(
+            raw, run_id="machine", generated_at="2026-08-25T13:10:00Z",
+            layer2=[accepted_check(1, "contradicted")],
+        )
+        self.assertEqual(art["findings"], [])
+        self.assertEqual(art["diagnostics"], [])
+        self.assertNotIn("machine copy", json.dumps(art))
+
+    def test_unowned_machine_error_fails_before_serialization(self) -> None:
+        raw = raw_for([accepted_check(1)])
+        raw["findings"] = [{
+            "check_id": "machine", "tier": "D", "statement": "internal",
+            "inventory_ids": ["INV1"],
+        }]
+        self.assertTrue(render.document_errors_unaccounted(raw))
+
+
+class HtmlTests(unittest.TestCase):
+    def test_every_material_outcome_is_one_exact_card_without_truncation(self) -> None:
+        checks = [
+            accepted_check(1, "confirmed"),
+            accepted_check(2, "confirmed"),
+            accepted_check(3, "confirmed"),
+            accepted_check(4, "contradicted"),
+            accepted_check(5, "not_checkable"),
+            accepted_check(6, "changed_since_report"),
+        ]
+        art = make_artifact(checks)
         page = render.html_of(art)
-        self.assertIn("Visible quote for confirmed.", page)
-        self.assertNotIn("The claim matches your evidence", page)
-        self.assertNotIn(">In the report<", page)
-        self.assertNotIn('class="where"', page)
+        tags = re.findall(r'<article class="material-card"[^>]*>', page)
+        self.assertEqual(len(tags), len(checks))
+        for check in checks:
+            self.assertEqual(page.count(f'data-card-id="{check["id"]}"'), 1)
+            tag = next(tag for tag in tags if f'data-card-id="{check["id"]}"' in tag)
+            self.assertEqual(tag.count(f'data-disposition="{check["verdict"]}"'), 1)
+        self.assertEqual(page.count("data-disposition="), len(checks))
+        self.assertEqual(audit._card_identity_problems(art, page), [])
+
+    def test_missing_duplicate_or_mismatched_card_identity_fails(self) -> None:
+        art = make_artifact([accepted_check(1), accepted_check(2)])
+        page = render.html_of(art)
+        mutations = (
+            page.replace(' data-card-id="C1"', "", 1),
+            page.replace('data-card-id="C1"', 'data-card-id="C1" data-card-id="C1"', 1),
+            page.replace('data-card-id="C2"', 'data-card-id="C1"', 1),
+            page.replace(
+                'data-card-id="C1" data-disposition="confirmed"',
+                'data-card-id="C1" data-disposition="contradicted"',
+                1,
+            ),
+        )
+        for mutated in mutations:
+            self.assertTrue(audit._card_identity_problems(art, mutated))
+
+    def test_html_shows_exact_receipt_fields_and_no_public_fallback_sentences(self) -> None:
+        check = accepted_check(1)
+        check["public_receipt"]["calculation"] = {
+            "expression": "94 / 100 * 100", "result": "94%",
+        }
+        check["public_receipt"]["decisive_operands"] = [
+            {
+                "label": "On-time deliveries", "value": 94,
+                "location": "Project status snapshot, delivery totals",
+            },
+            {
+                "label": "Total deliveries", "value": 100,
+                "location": "Project status snapshot, delivery totals",
+            },
+        ]
+        art = make_artifact([check])
+        page = render.html_of(art)
+        for text in (
+            "Reported metric 1", "On-time deliveries", "Total deliveries",
+            "94 / 100 * 100 = 94%", check["public_receipt"]["explanation"],
+            "Project status snapshot", "supplied_file",
+        ):
+            self.assertIn(text, page)
+        for fallback in (
+            "Supplied recorded evidence", "Actual live query", "What ran",
+            "No semantic review status was recorded", "Claim</",
+        ):
+            self.assertNotIn(fallback, page)
+
+    def test_source_kind_is_the_exact_retained_enum_token(self) -> None:
+        static = make_artifact([accepted_check(1)], sources=[retained_source()])
+        static_page = render.html_of(static)
+        self.assertIn("supplied_file", static_page)
+        self.assertNotIn("live_tool", static_page)
+        live_source = retained_source(kind="live_tool")
+        live = make_artifact([accepted_check(1)], sources=[live_source])
+        live_page = render.html_of(live)
+        self.assertIn("live_tool", live_page)
+        self.assertNotIn("Supplied recorded evidence", live_page)
+
+    def test_static_source_cannot_be_retyped_live_without_live_metadata(self) -> None:
+        source = retained_source()
+        source["kind"] = "live_tool"
+        with self.assertRaises(SystemExit):
+            make_artifact([accepted_check(1)], sources=[source])
+
+
+class SchemaAndSerializationTests(unittest.TestCase):
+    def test_full_artifact_contract_and_new_version_are_emitted(self) -> None:
+        art = make_artifact([accepted_check(1)])
+        self.assertEqual(art["schema_version"], render.SCHEMA_VERSION)
+        for field in render.REQUIRED:
+            self.assertIn(field, art)
+        render.validate_artifact(art)
+        legacy = copy.deepcopy(art)
+        legacy["schema_version"] = "grade-artifact/v1"
+        with self.assertRaisesRegex(SystemExit, "bad schema_version"):
+            render.validate_artifact(legacy)
+
+    def test_verification_statuses_are_exact_and_public_detail_is_rejected(self) -> None:
+        raw = raw_for([accepted_check(1)])
+        expected = copy.deepcopy(raw["verification"])
+        art = render.artifact_from_findings(
+            raw, run_id="verification", generated_at="2026-08-25T13:10:00Z",
+            layer2=[accepted_check(1)],
+        )
+        self.assertEqual(art["verification"], expected)
+        raw["verification"] = {
+            "document": {"status": "complete", "detail": "Agent supplied document status."},
+            "semantic": {"status": "complete", "detail": "Agent supplied semantic status."},
+            "live_source": {"status": "not_run", "detail": None},
+        }
+        with self.assertRaises(SystemExit):
+            render.artifact_from_findings(
+                raw, run_id="verification", generated_at="2026-08-25T13:10:00Z",
+                layer2=[accepted_check(1)],
+            )
+
+    def test_report_source_metadata_has_no_digest_or_format_fallback(self) -> None:
+        raw = raw_for([accepted_check(1)])
+        for field in ("sha256", "format"):
+            broken = copy.deepcopy(raw)
+            broken["source"].pop(field)
+            with self.subTest(field=field), self.assertRaises(SystemExit):
+                render.artifact_from_findings(
+                    broken, run_id="source", generated_at="2026-08-25T13:10:00Z",
+                    layer2=[accepted_check(1)],
+                )
+        raw["source"]["path"] = "/private/tmp/report.md"
+        with self.assertRaises(SystemExit):
+            render.artifact_from_findings(
+                raw, run_id="source", generated_at="2026-08-25T13:10:00Z",
+                layer2=[accepted_check(1)],
+            )
+
+    def test_public_json_contains_no_internal_grounding_or_alias_fields(self) -> None:
+        check = accepted_check(1)
+        check.update({
+            "report_quote": "Visible report claim.",
+            "evidence_json": [{"pointer": "/metric", "value": 1}],
+            "date_receipt": {"pointer": "/date", "value": "2026-08-23"},
+        })
+        raw = raw_for([check])
+        raw["claims"][0]["arithmetic_inventory_ids"] = ["INV1"]
+        art = render.artifact_from_findings(
+            raw, run_id="private", generated_at="2026-08-25T13:10:00Z",
+            layer2=[check],
+        )
+        blob = json.dumps(art)
+        for forbidden in (
+            "report_quote", "evidence_json", "date_receipt", "/metric",
+            "arithmetic_inventory_ids", "found_by", "verification_mode",
+        ):
+            self.assertNotIn(forbidden, blob)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Deterministic internal checks on format fixtures. Answer keys are frozen."""
+"""Semantic candidate selectors stay absent across format fixtures."""
 from __future__ import annotations
 
 import json
@@ -55,74 +55,35 @@ class InternalCheckTests(unittest.TestCase):
             if str(item.get("displayed") or "").lower().startswith("source snapshot")]
         self.assertTrue(source)
         self.assertTrue(all(item.get("importance") == "material" for item in source))
-        candidates = internal.check_inventory(inv)
-        self.assert_facts_only(candidates)
-        self.assertEqual(len(candidates), 1)
-        facts = candidates[0]["facts"]
-        self.assertEqual(facts["declaration"]["displayed"], P1)
-        self.assertEqual(
-            [row["displayed"] for row in facts["values"]],
-            ["$520", "$410", "$305", "$190", "$120"],
-        )
-        self.assertFalse(facts["mismatch"])
+        self.assertEqual(internal.check_inventory(inv), [])
 
     def test_pdf_twin_emits_mismatch_without_a_verdict(self) -> None:
         path = FIX / "pdf-top5/twin/top-5-segments-twin.pdf"
-        candidates = internal.check_inventory(extract_inventory(path))
-        self.assert_facts_only(candidates)
-        self.assertEqual(len(candidates), 1)
-        facts = candidates[0]["facts"]
-        self.assertEqual(
-            [row["displayed"] for row in facts["values"]],
-            ["$520", "$305", "$410", "$190", "$120"],
-        )
-        self.assertTrue(facts["mismatch"])
+        self.assertEqual(internal.check_inventory(extract_inventory(path)), [])
 
     def test_xlsx_clean_emits_percentage_point_facts(self) -> None:
         path = FIX / "xlsx-margin/clean/weekly-margin-summary-clean.xlsx"
-        candidates = internal.check_inventory(extract_inventory(path))
-        self.assert_facts_only(candidates)
-        notes = [row for row in candidates if row.get("candidate_id") == "uni_percent_points"]
-        self.assertEqual(len(notes), 1)
-        facts = notes[0]["facts"]
-        self.assertEqual(facts["statement"]["displayed"], X1_CLEAN)
-        self.assertEqual(facts["prior"]["displayed"], "40.0%")
-        self.assertEqual(facts["current"]["displayed"], "43.0%")
-        self.assertEqual(facts["computed_percentage_points"], 3)
-        self.assertFalse(facts["mismatch"])
+        self.assertEqual(internal.check_inventory(extract_inventory(path)), [])
 
     def test_xlsx_twin_emits_unit_mismatch_without_a_verdict(self) -> None:
         path = FIX / "xlsx-margin/twin/weekly-margin-summary-twin.xlsx"
-        candidates = internal.check_inventory(extract_inventory(path))
-        self.assert_facts_only(candidates)
-        hits = [row for row in candidates if row.get("candidate_id") == "uni_percent_points"]
-        self.assertEqual(len(hits), 1)
-        facts = hits[0]["facts"]
-        self.assertEqual(facts["statement"]["displayed"], X1)
-        self.assertEqual(facts["computed_percentage_points"], 3)
-        self.assertEqual(facts["computed_relative_percent"], 7.5)
-        self.assertTrue(facts["mismatch"])
+        self.assertEqual(internal.check_inventory(extract_inventory(path)), [])
 
     def test_pptx_clean_emits_exact_displayed_ratio_only(self) -> None:
         path = FIX / "pptx-kpi/clean/operations-kpi-clean.pptx"
-        candidates = internal.check_inventory(extract_inventory(path))
-        self.assert_facts_only(candidates)
-        self.assertEqual(len(candidates), 1)
-        facts = candidates[0]["facts"]
-        self.assertEqual(facts["numerator"], 94)
-        self.assertEqual(facts["denominator"], 100)
-        self.assertEqual(facts["computed"], 94)
-        self.assertFalse(facts["mismatch"])
+        self.assertEqual(internal.check_inventory(extract_inventory(path)), [])
 
     def test_pptx_twin_does_not_map_ratio_to_headline(self) -> None:
         path = FIX / "pptx-kpi/twin/operations-kpi-twin.pptx"
         inv = extract_inventory(path)
-        headline = next(item for item in inv["items"] if item.get("displayed") == T1)
-        candidates = internal.check_inventory(inv)
-        self.assert_facts_only(candidates)
-        self.assertEqual(len(candidates), 1)
-        self.assertNotIn(headline["id"], candidates[0]["inventory_ids"])
-        self.assertEqual(candidates[0]["facts"]["computed"], 94)
+        self.assertEqual(internal.check_inventory(inv), [])
+
+    def test_semantic_selector_symbols_are_absent(self) -> None:
+        for name in (
+            "RANK_DESC", "RANK_ASC", "POINT_WORD", "PERCENT_WORD", "CALC",
+            "_sel_rank", "_ari_xlsx", "_uni_percent_points", "_kpi_ratio",
+        ):
+            self.assertFalse(hasattr(internal, name), name)
 
 
 class SourceSnapshotInventoryTests(unittest.TestCase):

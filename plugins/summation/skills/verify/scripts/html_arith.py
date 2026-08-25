@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Deterministic HTML table footing. No summation-flow. No network.
+"""Write raw report inventory without assigning HTML table semantics.
 
-Writes a findings.json that render.py can consume. Non-HTML files use the
-same inventory readers as extract.py. Unreadable inputs stay incomplete.
+The host selects explicit operands and totals. ``receipt_math.py`` recomputes
+only the calculation the host authors in a public receipt. No network.
 """
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ import json
 import pathlib
 import re
 import sys
-from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
 
 
@@ -64,119 +63,10 @@ class _Tables(HTMLParser):
         self._cell.append(data)
 
 
-def parse_number(text: str) -> Decimal | None:
-    raw = text.strip().replace(",", "").replace("$", "").replace("%", "")
-    raw = raw.replace("(", "-").replace(")", "")
-    if not raw or not re.fullmatch(r"-?\d+(?:\.\d+)?", raw):
-        return None
-    try:
-        return Decimal(raw)
-    except InvalidOperation:
-        return None
-
-
-def is_total_label(text: str) -> bool:
-    return bool(re.search(r"\btotals?\b", text, flags=re.I))
-
-
 def footing_findings(tables: list[list[list[str]]]) -> tuple[list[dict], int, list[dict]]:
-    findings = []
-    uses = []
-    checked = 0
-    for table_index, table in enumerate(tables, start=1):
-        if len(table) < 3:
-            continue
-        header, *body = table
-        last = body[-1]
-        if not last or not is_total_label(last[0]):
-            continue
-        components = body[:-1]
-        width = max(len(header), max((len(row) for row in body), default=0))
-        for col in range(1, width):
-            values = []
-            shown_cells = []
-            for row in components:
-                if col >= len(row):
-                    values = []
-                    shown_cells = []
-                    break
-                number = parse_number(row[col])
-                if number is None:
-                    values = []
-                    shown_cells = []
-                    break
-                values.append(number)
-                shown_cells.append(str(row[col]))
-            if not values or col >= len(last):
-                continue
-            shown = parse_number(last[col])
-            if shown is None:
-                continue
-            checked += 1
-            computed = sum(values, Decimal("0"))
-            delta = shown - computed
-            sample = values[0]
-            cents = sample.as_tuple().exponent < 0 or shown.as_tuple().exponent < 0
-            allowance = Decimal("0.01") if cents else Decimal("0")
-            matched = abs(delta) <= allowance
-            col_name = (
-                str(header[col]).strip()
-                if col < len(header) and str(header[col]).strip() else None
-            )
-            addends = [
-                {
-                    "label": (
-                        str(components[index][0]).strip()
-                        if components[index] and str(components[index][0]).strip()
-                        else None
-                    ),
-                    "value": float(values[index]),
-                    "displayed": shown_cells[index],
-                    "coordinate": f"table{table_index}/r{index + 2}/c{col + 1}",
-                }
-                for index in range(len(values))
-            ]
-            coordinate = f"table{table_index}/r{len(body) + 1}/c{col + 1}"
-            uses.append({
-                "check_id": "ari_total_footing",
-                "family": "internal_arithmetic",
-                "coordinate": coordinate,
-                "column_label": col_name,
-                "matched": matched,
-                "stated": float(shown),
-                "stated_displayed": str(last[col]),
-                "computed": float(computed),
-                "discrepancy": float(delta),
-                "addends": addends,
-            })
-            if matched:
-                continue
-            findings.append({
-                "check_id": "ari_total_footing",
-                "family": "internal_arithmetic",
-                "severity": "high",
-                "tier": "D",
-                "statement": (
-                    f"Addition mismatch at {coordinate}: stated {last[col]}; "
-                    f"computed {computed}."
-                ),
-                "coordinate": coordinate,
-                "detail": {
-                    "stated": float(shown),
-                    "computed": float(computed),
-                    "discrepancy": float(delta),
-                    "addends": [
-                        {
-                            "label": row["label"],
-                            "value": row["value"],
-                            "displayed": row["displayed"],
-                            "coordinate": row["coordinate"],
-                        }
-                        for row in addends
-                    ],
-                },
-            })
-    return findings, checked, uses
+    """Do not infer totals from labels; expose cells through inventory only."""
+    del tables
+    return [], 0, []
 
 
 def findings_doc(report: pathlib.Path, findings: list[dict], *, html: bool,
@@ -284,17 +174,11 @@ def findings_doc(report: pathlib.Path, findings: list[dict], *, html: bool,
         "verification": {
             "document": {
                 "status": "complete" if complete else "not_available",
-                "detail": (
-                    "Table footing ran on HTML."
-                    if html and complete else
-                    "Deterministic extraction ran on this file."
-                    if complete else
-                    "Deterministic extraction did not complete."
-                ),
+                "detail": None,
             },
             "semantic": {
                 "status": "not_run",
-                "detail": "Semantic review is supplied separately by the host agent.",
+                "detail": None,
             },
             "live_source": {"status": "not_run", "detail": None},
         },

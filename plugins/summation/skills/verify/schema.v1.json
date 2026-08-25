@@ -38,7 +38,7 @@
       "properties": {
         "path": { "type": "string" },
         "format": { "type": "string" },
-        "sha256": { "type": ["string", "null"] },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "period_label": { "type": ["string", "null"] },
         "report_date": { "type": ["string", "null"] }
       }
@@ -108,7 +108,30 @@
           "severity": { "type": ["string", "null"], "enum": ["high", "medium", "low", null] },
           "claim_id": { "type": "string", "minLength": 1 },
           "public_receipt": { "$ref": "#/$defs/publicReceipt" }
-        }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "public_receipt": {
+                "properties": { "decisive_operands": { "minItems": 1 } }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": { "basis": { "const": "evidence" } },
+              "required": ["basis"]
+            },
+            "then": {
+              "properties": { "public_receipt": { "required": ["source_id"] } }
+            },
+            "else": {
+              "properties": {
+                "public_receipt": { "not": { "required": ["source_id"] } }
+              }
+            }
+          }
+        ]
       }
     },
     "evidence_checks": {
@@ -116,7 +139,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "type", "basis", "verdict", "importance", "severity", "claim_id"],
+        "required": ["id", "type", "basis", "verdict", "importance", "severity", "claim_id", "public_receipt"],
         "properties": {
           "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*$" },
           "type": { "type": "string" },
@@ -124,16 +147,8 @@
           "verdict": { "type": "string", "enum": ["confirmed", "contradicted", "not_checkable", "changed_since_report"] },
           "importance": { "type": "string", "enum": ["material", "supporting"] },
           "severity": { "type": ["string", "null"], "enum": ["high", "medium", "low", null] },
-          "report_quote": { "type": "string" },
-          "explanation": { "type": "string" },
           "claim_id": { "type": "string", "minLength": 1 },
-          "public_receipt": { "$ref": "#/$defs/publicReceipt" },
-          "reconstruction_attempt": { "type": ["string", "null"] },
-          "report_value": true,
-          "current_value": true,
-          "current_as_of": { "type": ["string", "null"] },
-          "report_date": { "type": ["string", "null"] },
-          "location": { "type": ["string", "null"] }
+          "public_receipt": { "$ref": "#/$defs/publicReceipt" }
         },
         "allOf": [
           {
@@ -145,14 +160,45 @@
               },
               "required": ["verdict"]
             },
-            "then": { "required": ["public_receipt"] }
+            "then": {
+              "properties": {
+                "public_receipt": {
+                  "properties": {
+                    "decisive_operands": { "minItems": 1 }
+                  }
+                }
+              }
+            }
           },
           {
             "if": {
               "properties": { "verdict": { "const": "not_checkable" } },
               "required": ["verdict"]
             },
-            "then": { "required": ["report_quote", "explanation"] }
+            "then": {
+              "properties": {
+                "public_receipt": {
+                  "properties": {
+                    "decisive_operands": { "maxItems": 0 }
+                  },
+                  "not": { "required": ["calculation"] }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": { "basis": { "const": "evidence" } },
+              "required": ["basis"]
+            },
+            "then": {
+              "properties": { "public_receipt": { "required": ["source_id"] } }
+            },
+            "else": {
+              "properties": {
+                "public_receipt": { "not": { "required": ["source_id"] } }
+              }
+            }
           }
         ]
       }
@@ -160,7 +206,7 @@
     "evidence_coverage": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["document_claims_total", "document_claims_reached", "claim_outcomes_proposed", "material_claims_reviewed", "supporting_claims_reviewed", "confirmed", "contradicted", "not_checkable", "evidence_confirmed", "evidence_contradicted", "evidence_not_checkable", "report_confirmed", "report_contradicted", "report_not_checkable", "validated_outcomes", "receipt_failures", "evidence_files_supplied", "evidence_files_cited", "provenance_groups", "source_independence"],
+      "required": ["document_claims_total", "document_claims_reached", "claim_outcomes_proposed", "material_claims_reviewed", "supporting_claims_reviewed", "confirmed", "contradicted", "not_checkable", "changed_since_report", "evidence_confirmed", "evidence_contradicted", "evidence_not_checkable", "evidence_changed_since_report", "report_confirmed", "report_contradicted", "report_not_checkable", "report_changed_since_report", "validated_outcomes", "receipt_failures", "evidence_files_supplied", "evidence_files_cited", "provenance_groups", "source_independence"],
       "properties": {
         "document_claims_total": { "type": "integer", "minimum": 0 },
         "document_claims_reached": { "type": "integer", "minimum": 0 },
@@ -170,12 +216,15 @@
         "confirmed": { "type": "integer", "minimum": 0 },
         "contradicted": { "type": "integer", "minimum": 0 },
         "not_checkable": { "type": "integer", "minimum": 0 },
+        "changed_since_report": { "type": "integer", "minimum": 0 },
         "evidence_confirmed": { "type": "integer", "minimum": 0 },
         "evidence_contradicted": { "type": "integer", "minimum": 0 },
         "evidence_not_checkable": { "type": "integer", "minimum": 0 },
+        "evidence_changed_since_report": { "type": "integer", "minimum": 0 },
         "report_confirmed": { "type": "integer", "minimum": 0 },
         "report_contradicted": { "type": "integer", "minimum": 0 },
         "report_not_checkable": { "type": "integer", "minimum": 0 },
+        "report_changed_since_report": { "type": "integer", "minimum": 0 },
         "validated_outcomes": { "type": "integer", "minimum": 0 },
         "receipt_failures": { "type": "integer", "minimum": 0 },
         "evidence_files_supplied": { "type": "integer", "minimum": 0 },
@@ -286,24 +335,22 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "quote", "importance"],
+        "required": ["id", "quote", "public_label", "importance", "classification", "outcome", "check_id"],
         "properties": {
           "id": { "type": "string" },
           "quote": { "type": "string" },
+          "public_label": { "type": "string", "minLength": 1 },
           "importance": { "type": "string", "enum": ["material", "supporting"] },
           "classification": {
             "type": "string",
             "enum": ["material_claim", "supporting_provenance"]
           },
           "reason": { "type": ["string", "null"] },
-          "outcome": { "type": ["string", "null"] },
-          "check_id": { "type": ["string", "null"] },
-          "found_by": { "type": ["string", "null"] },
-          "verification_mode": {
+          "outcome": {
             "type": ["string", "null"],
-            "enum": ["internal_arithmetic", "external_evidence", "not_externally_verified", null]
+            "enum": ["confirmed", "contradicted", "not_checkable", "changed_since_report", null]
           },
-          "location": { "type": ["string", "null"] },
+          "check_id": { "type": ["string", "null"] },
           "inventory_ids": { "type": "array", "items": { "type": "string" } }
         }
       }
@@ -342,7 +389,6 @@
         "report_operand": { "$ref": "#/$defs/publicOperand" },
         "decisive_operands": {
           "type": "array",
-          "minItems": 1,
           "items": { "$ref": "#/$defs/publicOperand" }
         },
         "explanation": { "type": "string", "minLength": 1 },
@@ -355,7 +401,8 @@
             "result": { "not": { "type": ["null", "boolean"] } }
           }
         },
-        "source_id": { "type": "string", "minLength": 1 }
+        "source_id": { "type": "string", "minLength": 1 },
+        "reconstruction_attempt": { "type": "string", "minLength": 1 }
       }
     },
     "retainedSource": {
@@ -399,7 +446,7 @@
           "type": "string",
           "enum": ["complete", "partial", "failed", "not_available", "not_requested", "not_run", "skipped"]
         },
-        "detail": { "type": ["string", "null"] }
+        "detail": { "type": "null" }
       }
     }
   }

@@ -1,6 +1,7 @@
 """Verify is the implementation. Validate is an alias. Routes stay distinct."""
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import unittest
@@ -85,6 +86,37 @@ class RoutingTests(unittest.TestCase):
     def test_temporal_receipt_requires_explicit_report_operand(self) -> None:
         text = skill("verify")
         self.assertIn("`report_value` must be the visible report operand", text)
+
+    def test_role_contract_wires_public_label_and_identical_handoffs(self) -> None:
+        verify = skill("verify")
+        roles = (SKILLS / "verify" / "references" / "roles.md").read_text()
+        self.assertIn("native subagents", verify)
+        self.assertIn("primary path", verify)
+        self.assertIn("public_label", verify)
+        self.assertIn("public_label", roles)
+        self.assertIn("same input schema", roles)
+        self.assertIn("same output schema", roles)
+        self.assertIn("sequentially", roles)
+        self.assertIn("not execution proof", roles.lower())
+
+        contract = json.loads(
+            (SKILLS / "verify" / "references" / "role-contracts.json").read_text()
+        )
+        claim_output = contract["claim_taker"]["output"]["claim_required"]
+        verifier_input = contract["evidence_verifier"]["input"]["claim_required"]
+        self.assertEqual(claim_output, verifier_input)
+        self.assertIn("public_label", claim_output)
+        self.assertEqual(
+            contract["claim_taker"]["input"]["inventory_item_required"],
+            ["id", "displayed", "location"],
+        )
+        native = contract["routes"]["native_subagents"]
+        sequential = contract["routes"]["sequential"]
+        self.assertTrue(native["primary"])
+        self.assertFalse(sequential["primary"])
+        self.assertEqual(native["stages"], sequential["stages"])
+        self.assertEqual(native["input_contracts"], sequential["input_contracts"])
+        self.assertEqual(native["output_contracts"], sequential["output_contracts"])
 
     def test_connected_path_is_consent_then_addison_once(self) -> None:
         text = skill("verify")

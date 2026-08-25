@@ -1,4 +1,4 @@
-"""HTML table footing for the verify skill. Planted $9,000 gap must fire."""
+"""HTML inventory stays raw until the host authors explicit arithmetic."""
 from __future__ import annotations
 
 import importlib.util
@@ -25,7 +25,7 @@ html_arith = load()
 
 
 class HtmlArithTests(unittest.TestCase):
-    def test_planted_snapshot_names_the_footing_gap(self) -> None:
+    def test_planted_snapshot_is_raw_inventory_without_total_inference(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             out = pathlib.Path(raw) / "findings.json"
             import sys
@@ -37,12 +37,18 @@ class HtmlArithTests(unittest.TestCase):
                 sys.argv = argv
             self.assertEqual(code, 0)
             doc = json.loads(out.read_text())
-            footing = [f for f in doc["findings"] if f["check_id"] == "ari_total_footing"]
-            self.assertTrue(footing)
-            self.assertAlmostEqual(abs(footing[0]["detail"]["discrepancy"]), 9000.0)
+            self.assertEqual(doc["findings"], [])
+            self.assertEqual(doc["arithmetic_uses"], [])
             self.assertEqual(doc["source"]["path"], PLANTED.name)
             self.assertEqual(doc["coverage"]["claims_in_ledger"], 0)
-            self.assertGreaterEqual(doc["coverage"]["checks_registered"], 1)
+            self.assertEqual(doc["coverage"]["checks_registered"], 0)
+
+    def test_total_label_and_footing_semantics_are_absent(self) -> None:
+        self.assertFalse(hasattr(html_arith, "is_total_label"))
+        findings, checked, uses = html_arith.footing_findings([
+            [["Label", "Value"], ["A", "10"], ["Total", "99"]]
+        ])
+        self.assertEqual((findings, checked, uses), ([], 0, []))
 
     def test_clean_twin_stays_quiet(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
