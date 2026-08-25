@@ -1170,7 +1170,7 @@ def _claims_for_internal(ledger: list, outcome: dict) -> list:
 
 def _internal_check(outcome: dict, claim: dict, check_id: str) -> dict:
     verdict = str(outcome.get("verdict") or "confirmed")
-    importance = str(claim.get("importance") or outcome.get("importance") or "material")
+    importance = str(outcome.get("importance") or claim.get("importance") or "material")
     return {
         "id": check_id,
         "claim_id": claim.get("id"),
@@ -1210,6 +1210,23 @@ def _outcome_inventory_ids(outcome: dict) -> list[str]:
     return out
 
 
+def _deterministic_by_inventory_id(outcomes: list) -> dict[str, dict]:
+    by_iid: dict[str, dict] = {}
+    for outcome in outcomes:
+        if not isinstance(outcome, dict):
+            continue
+        verdict = str(outcome.get("verdict") or "")
+        if verdict not in DETERMINISTIC_VERDICTS:
+            continue
+        for iid in _outcome_inventory_ids(outcome):
+            prev = by_iid.get(iid)
+            if prev is None or (
+                    verdict == "contradicted"
+                    and prev.get("verdict") != "contradicted"):
+                by_iid[iid] = outcome
+    return by_iid
+
+
 def is_deterministic_conflict(row: dict) -> bool:
     if not isinstance(row, dict):
         return False
@@ -1241,17 +1258,7 @@ def attach_internal_outcomes(validated: list, ledger: list,
     discarded: list = []
     if not outcomes:
         return validated, ledger, discarded
-    by_iid: dict[str, dict] = {}
-    for outcome in outcomes:
-        verdict = str(outcome.get("verdict") or "")
-        if verdict not in DETERMINISTIC_VERDICTS:
-            continue
-        for iid in _outcome_inventory_ids(outcome):
-            prev = by_iid.get(iid)
-            if prev is None or (
-                    verdict == "contradicted"
-                    and prev.get("verdict") != "contradicted"):
-                by_iid[iid] = outcome
+    by_iid = _deterministic_by_inventory_id(outcomes)
     claims_by_id = {str(row.get("id") or ""): row for row in ledger}
     kept: list = []
     for row in validated:
@@ -1332,13 +1339,15 @@ def attach_internal_outcomes(validated: list, ledger: list,
 
 
 def apply_host_classifications(ledger: list, discarded_claims: list,
-                               inventory: dict) -> list:
+                               inventory: dict,
+                               outcomes: list | None = None) -> list:
     """Apply host supporting_provenance. Code does not guess meaning from words."""
     by_id = {
         str(item.get("id") or ""): item
         for item in (inventory.get("items") or [])
         if isinstance(item, dict) and item.get("id")
     }
+    proven = _deterministic_by_inventory_id(outcomes or [])
     used: set[str] = set()
     kept = []
     for claim in ledger:
@@ -1363,12 +1372,31 @@ def apply_host_classifications(ledger: list, discarded_claims: list,
                 if iid in used:
                     problems.append(
                         f"inventory id {iid!r} already has supporting_provenance")
+                outcome = proven.get(iid)
+                if outcome is not None:
+                    int_v = str(outcome.get("verdict") or "")
+                    problems.append(
+                        "deterministic-conflict: "
+                        f"supporting_provenance conflicts with internal {int_v} "
+                        f"for inventory id {iid}"
+                    )
                 if not problems:
                     used.add(iid)
                     item["importance"] = "supporting"
                     claim["importance"] = "supporting"
         if problems:
-            discarded_claims.append({**claim, "problems": problems})
+            dropped = {**claim, "problems": problems}
+            if any(str(row).startswith("deterministic-conflict") for row in problems):
+                dropped["reason"] = "deterministic-conflict"
+            discarded_claims.append(dropped)
+            other = [
+                row for row in problems
+                if not str(row).startswith("deterministic-conflict")]
+            if not other:
+                claim["classification"] = "material_claim"
+                claim["importance"] = "material"
+                claim.pop("reason", None)
+                kept.append(claim)
         else:
             kept.append(claim)
     return kept
@@ -1389,6 +1417,8 @@ def apply_inventory_importance(ledger: list, validated: list, inventory: dict) -
             claim["importance"] = "supporting"
     by_claim = {str(row.get("id") or ""): row for row in ledger}
     for check in validated:
+        if check.get("found_by") == "internal":
+            continue
         claim = by_claim.get(str(check.get("claim_id") or ""))
         if claim and claim.get("importance") == "supporting":
             check["importance"] = "supporting"
@@ -1531,10 +1561,11 @@ def main() -> int:
             internal_outcomes = []
     if not isinstance(inventory, dict):
         inventory = inventory_for(args.report)
+    ledger = apply_host_classifications(
+        ledger, discarded_claims, inventory, internal_outcomes)
     validated, ledger, internal_conflicts = attach_internal_outcomes(
         validated, ledger, internal_outcomes)
     discarded.extend(internal_conflicts)
-    ledger = apply_host_classifications(ledger, discarded_claims, inventory)
     apply_inventory_importance(ledger, validated, inventory)
     inventory_cover = cover(inventory, ledger)
     accepted_ids = {

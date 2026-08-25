@@ -1408,6 +1408,129 @@ class AcceptTests(unittest.TestCase):
                 payload["discarded_claims"][0]["problems"])
             self.assertEqual(payload["inventory"]["items"][0]["importance"], "material")
 
+    def _supporting_vs_internal(self, folder: pathlib.Path, *,
+                                internal_verdict: str) -> dict:
+        analytical = "Gross margin is 43.0%"
+        source = "Source snapshot: CRM revenue export, 2026-07-05"
+        (folder / "report.md").write_text(f"{analytical}\n{source}\n")
+        (folder / "findings.json").write_text(json.dumps({
+            "findings": [],
+            "inventory": {
+                "reader": "md",
+                "complete": True,
+                "items": [
+                    {
+                        "id": "INV1",
+                        "kind": "md_line",
+                        "displayed": analytical,
+                        "location": "line1",
+                        "importance": "material",
+                        "quote": analytical,
+                    },
+                    {
+                        "id": "INV2",
+                        "kind": "md_line",
+                        "displayed": source,
+                        "location": "line2",
+                        "importance": "material",
+                        "quote": source,
+                    },
+                ],
+                "reason": None,
+            },
+            "internal_outcomes": [{
+                "check_id": "ari_ratio_consistency",
+                "family": "internal_arithmetic",
+                "type": "arithmetic",
+                "verdict": internal_verdict,
+                "basis": "report",
+                "importance": "material",
+                "severity": "high" if internal_verdict == "contradicted" else None,
+                "inventory_ids": ["INV1"],
+                "report_quote": analytical,
+                "location": "line1",
+                "explanation": "Deterministic arithmetic check.",
+                "found_by": "internal",
+            }],
+        }))
+        (folder / "claims.json").write_text(json.dumps({"claims": [
+            {
+                "id": "L1",
+                "quote": analytical,
+                "importance": "supporting",
+                "classification": "supporting_provenance",
+                "reason": (
+                    "The line names only source identity. "
+                    "It asserts no analytical result."
+                ),
+                "inventory_ids": ["INV1"],
+            },
+            {
+                "id": "L2",
+                "quote": source,
+                "importance": "supporting",
+                "classification": "supporting_provenance",
+                "reason": (
+                    "The line names only the CRM revenue export and the "
+                    "extraction date. It asserts no analytical result."
+                ),
+                "inventory_ids": ["INV2"],
+            },
+        ]}))
+        (folder / "checks.json").write_text(json.dumps({"checks": []}))
+        self.assertEqual(run_accept(
+            "--report", str(folder / "report.md"),
+            "--claims", str(folder / "claims.json"),
+            "--checks", str(folder / "checks.json"),
+            "--findings", str(folder / "findings.json"),
+            "--out", str(folder / "receipts.json"),
+        ), 0)
+        return json.loads((folder / "receipts.json").read_text())
+
+    def _assert_provenance_cannot_demote(
+            self, payload: dict, *, internal_verdict: str) -> None:
+        by_item = {row["id"]: row for row in payload["inventory"]["items"]}
+        self.assertEqual(by_item["INV1"]["importance"], "material")
+        self.assertEqual(by_item["INV2"]["importance"], "supporting")
+        by_claim = {row["id"]: row for row in payload["claims"]}
+        self.assertEqual(by_claim["L1"]["classification"], "material_claim")
+        self.assertEqual(by_claim["L1"]["importance"], "material")
+        self.assertEqual(by_claim["L1"]["outcome"], internal_verdict)
+        self.assertEqual(by_claim["L2"]["classification"], "supporting_provenance")
+        self.assertEqual(by_claim["L2"]["importance"], "supporting")
+        conflicts = [
+            row for row in payload["discarded_claims"]
+            if accept.is_deterministic_conflict(row)]
+        self.assertEqual(len(conflicts), 1)
+        self.assertEqual(conflicts[0]["id"], "L1")
+        self.assertEqual(conflicts[0]["classification"], "supporting_provenance")
+        self.assertTrue(any(
+            str(item).startswith("deterministic-conflict")
+            for item in conflicts[0]["problems"]))
+        internal_checks = [
+            row for row in payload["validated"]
+            if row.get("found_by") == "internal"]
+        self.assertTrue(internal_checks)
+        self.assertTrue(all(
+            row.get("importance") == "material" for row in internal_checks))
+        self.assertTrue(all(
+            row.get("verdict") == internal_verdict for row in internal_checks))
+        self.assertEqual(payload["inventory_missing"], [])
+
+    def test_supporting_provenance_rejected_when_internal_confirmed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            payload = self._supporting_vs_internal(
+                pathlib.Path(raw), internal_verdict="confirmed")
+            self._assert_provenance_cannot_demote(
+                payload, internal_verdict="confirmed")
+
+    def test_supporting_provenance_rejected_when_internal_contradicted(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            payload = self._supporting_vs_internal(
+                pathlib.Path(raw), internal_verdict="contradicted")
+            self._assert_provenance_cannot_demote(
+                payload, internal_verdict="contradicted")
+
 
 if __name__ == "__main__":
     unittest.main()
