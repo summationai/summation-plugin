@@ -85,7 +85,8 @@
           "statement": { "type": "string" },
           "location": { "type": ["string", "null"] },
           "claim_ids": { "type": "array", "items": { "type": "string" } },
-          "evidence": { "type": ["object", "null"] }
+          "evidence": { "type": ["object", "null"] },
+          "arithmetic": { "type": ["object", "null"] }
         }
       }
     },
@@ -94,7 +95,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "type", "basis", "verdict", "importance", "severity", "report_quote", "evidence_receipts", "explanation"],
+        "required": ["id", "type", "basis", "verdict", "importance", "severity", "report_quote", "explanation"],
         "properties": {
           "id": { "type": "string" },
           "type": { "type": "string" },
@@ -138,7 +139,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "type", "basis", "verdict", "importance", "severity", "report_quote", "evidence_receipts", "explanation"],
+        "required": ["id", "type", "basis", "verdict", "importance", "severity", "report_quote", "explanation"],
         "properties": {
           "id": { "type": "string" },
           "type": { "type": "string" },
@@ -180,12 +181,7 @@
           "required": ["verdict"]
         },
         "then": {
-          "required": ["reconstruction_attempt", "current_value", "current_as_of"],
-          "properties": {
-            "reconstruction_attempt": { "type": "string", "minLength": 1 },
-            "current_as_of": { "type": "string", "minLength": 1 },
-            "current_value": { "not": { "type": "null" } }
-          }
+          "required": ["verdict"]
         }
       }
     },

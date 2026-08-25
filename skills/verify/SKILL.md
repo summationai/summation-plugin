@@ -13,7 +13,7 @@ If they name a report that already lives in Summation (no disk file), run the `v
 
 1. Before any grading: `command -v uv` succeeds, or `python3 -c "import jsonschema"` succeeds. If neither, resolve that with the user now. Do not start a long run that dies at render.
 2. Ask which file. If they already attached one, use it.
-3. Read the report. Write `claims.json` now, before you gather evidence. Cover every load-bearing claim, including every table total: `{"report_period": "week ending April 4, 2026", "report_date": "2026-04-04", "claims": [{"id": "L1", "quote": "exact visible text", "importance": "material"}]}`. `importance` is `material` or `supporting`. Quotes are visible text. `report_period` is the display string. `report_date` is ISO `YYYY-MM-DD`. Leave either field out when the report does not name a period.
+3. Read the report. Write `claims.json` now, before you gather evidence. After `html_arith.py` runs, read `inventory` in `findings.json`. Cover every material inventory item plus every other load-bearing claim: `{"report_period": "week ending April 4, 2026", "report_date": "2026-04-04", "claims": [{"id": "L1", "quote": "exact visible text", "importance": "material"}]}`. `importance` is `material` or `supporting`. Quotes are visible text. `report_period` is the display string. `report_date` is ISO `YYYY-MM-DD`. Leave either field out when the report does not name a period.
 4. If a nearby `evidence/` folder exists, ask once whether to use it. Do not scan their whole disk.
 5. If GitHub, Snowflake, Slack, or similar tools are already connected in this session, ask once whether to query them. Save raw tool results as files under the run `evidence/` folder. Do not ask them to sign in to Summation to get evidence.
 6. State duration, then work:
@@ -86,7 +86,7 @@ uv run --with jsonschema python3 "$VERIFY/scripts/render.py" \
 
 If `uv` is missing and `jsonschema` already imports, run `python3` on `render.py`. Do not `pip install` without asking.
 
-`html_arith.py` is best-effort table footing on HTML. Other formats still get a `findings.json` stub. Always run it.
+`html_arith.py` is best-effort table footing on HTML and writes the machine claim inventory. Other formats still get a `findings.json` stub with an incomplete inventory reader. Always run it. If `render.py` exits 2 because claims miss an inventory item, add the missing quote and run `accept.py` then `render.py` again.
 
 ## You write checks.json
 
@@ -149,9 +149,7 @@ Then run `accept.py`. If it discards rows, fix only those quotes once and run `a
 
 If you could not obtain the report text, say that in the conversation and stop. Do not run `render.py`. Do not write an artifact.
 
-Open `artifact/grade-artifact.html`. Read `verdict` and `offer` from `grade-artifact.json`. Say those in plain language. Do not add findings the file does not contain. Do not hand-write HTML. The artifact already contains the one next step. Repeat that offer; do not add a second one.
-
-If they decline, stop. If they accept, hand off to `start` (sign in, then data). This skill is over.
+Open `artifact/grade-artifact.html`. Read `verdict` from `grade-artifact.json`. Say that in plain language. Do not add findings the file does not contain. Do not hand-write HTML. If the page names a next step, repeat that step. Do not offer a schedule, upload, or sign-in.
 
 ## Laws
 

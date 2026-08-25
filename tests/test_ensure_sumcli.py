@@ -128,11 +128,7 @@ class EnsureTests(unittest.TestCase):
             msg = es.ensure()
         boot.assert_not_called()
         upd.assert_not_called()
-        self.assertIsNotNone(msg)
-        assert msg is not None
-        self.assertIn("not installed", msg)
-        self.assertIn("prefers sumcli", msg)
-        self.assertNotIn("SUMCLI_AUTO_INSTALL", msg)
+        self.assertIsNone(msg)
 
     def test_default_nudge_is_once_per_day(self) -> None:
         with (
@@ -141,7 +137,7 @@ class EnsureTests(unittest.TestCase):
         ):
             first = es.ensure()
             second = es.ensure()
-        self.assertIsNotNone(first)
+        self.assertIsNone(first)
         self.assertIsNone(second)
 
     def test_upgrade_when_too_old_requires_opt_in(self) -> None:
@@ -154,10 +150,7 @@ class EnsureTests(unittest.TestCase):
             msg = es.ensure()
         boot.assert_not_called()
         upd.assert_not_called()
-        self.assertIsNotNone(msg)
-        assert msg is not None
-        self.assertIn("0.1.1", msg)
-        self.assertIn("sumcli update", msg)
+        self.assertIsNone(msg)
 
     def test_opt_in_upgrade_when_too_old(self) -> None:
         os.environ["SUMCLI_AUTO_INSTALL"] = "1"

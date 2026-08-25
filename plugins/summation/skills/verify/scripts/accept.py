@@ -17,6 +17,11 @@ import pathlib
 import re
 import sys
 
+_SCRIPTS = pathlib.Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from inventory import cover, inventory_for  # noqa: E402
+
 EVIDENCE_SUFFIXES = frozenset({
     ".json", ".jsonl", ".txt", ".sql", ".csv", ".yaml", ".yml", ".md", ".html",
 })
@@ -973,6 +978,15 @@ def main() -> int:
         print(f"accept: {exc}", file=sys.stderr)
         return 2
     ledger = attach_arithmetic_claims(ledger, arith)
+    inventory = None
+    if args.findings is not None and args.findings.is_file():
+        try:
+            inventory = json.loads(args.findings.read_text()).get("inventory")
+        except (OSError, json.JSONDecodeError, TypeError):
+            inventory = None
+    if not isinstance(inventory, dict):
+        inventory = inventory_for(args.report)
+    inventory_cover = cover(inventory, ledger)
     accepted_ids = {
         str(row.get("id") or "").strip() for row in validated if row.get("id")}
     presentation, presentation_problems = validate_presentation(
@@ -994,6 +1008,10 @@ def main() -> int:
         "presentation_problems": presentation_problems,
         "report_period": claims_meta.get("report_period"),
         "report_date": claims_meta.get("report_date"),
+        "inventory": inventory,
+        "inventory_missing": inventory_cover["missing"],
+        "extractor_checkable_fraction": inventory_cover["extractor_fraction"],
+        "engine_checkable_fraction": inventory_cover["engine_fraction"],
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(payload, indent=2) + "\n")

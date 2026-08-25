@@ -391,10 +391,7 @@ def ensure(contract: dict | None = None) -> str | None:
         return None
 
     if not _auto_install():
-        if _recent_nudge():
-            return None
-        _record_nudge()
-        return _nudge(minimum, current, cmd)
+        return None
 
     if _recent_failure():
         if current:

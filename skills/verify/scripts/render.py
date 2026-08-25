@@ -13,9 +13,11 @@ from pathlib import Path
 
 SCHEMA_VERSION = "grade-artifact/v1"
 MIN_CLAIMS = 1
-# safe_to_share requires every figure the extractor could see to be checkable.
-MIN_EXTRACTOR_FRACTION = 1.0
-MIN_ENGINE_FRACTION = 1.0
+SHAREABLE_CHECK_KEYS = (
+    "id", "type", "basis", "verdict", "importance", "severity",
+    "report_quote", "report_quote_2", "explanation", "claim_id",
+    "location", "metric_label",
+)
 REQUIRED = (
     "schema_version",
     "run_id",
@@ -65,21 +67,32 @@ def claim_count(raw: dict) -> int:
 
 def coverage_ok(raw: dict) -> bool:
     cov = coverage(raw)
-    claims = claim_count(raw)
-    reached = int(cov.get("claims_reached_by_a_check") or 0)
-    ext = cov.get("extractor_checkable_fraction")
-    eng = cov.get("engine_checkable_fraction")
-    if claims < MIN_CLAIMS:
-        return False
-    if reached < claims:
-        return False
-    if not isinstance(ext, (int, float)) or ext < MIN_EXTRACTOR_FRACTION:
-        return False
-    if not isinstance(eng, (int, float)) or eng < MIN_ENGINE_FRACTION:
-        return False
     if int(cov.get("checks_errored") or 0) != 0:
         return False
     if raw.get("findings_truncated"):
+        return False
+    inv = raw.get("inventory") or {}
+    if inv.get("complete"):
+        if raw.get("inventory_missing"):
+            return False
+        n = int(cov.get("inventory_material") or 0)
+        if n == 0:
+            n = sum(
+                1 for item in (inv.get("items") or [])
+                if item.get("importance") == "material")
+        if n == 0:
+            return False
+        ext = cov.get("extractor_checkable_fraction")
+        eng = cov.get("engine_checkable_fraction")
+        return (
+            isinstance(ext, (int, float)) and ext >= 1
+            and isinstance(eng, (int, float)) and eng >= 1
+        )
+    claims = claim_count(raw)
+    reached = int(cov.get("claims_reached_by_a_check") or 0)
+    if claims < MIN_CLAIMS:
+        return False
+    if reached < claims:
         return False
     return True
 
@@ -101,13 +114,18 @@ def verdict_of(raw: dict) -> str:
     tiers = {str(f.get("tier")) for f in findings if not _is_diagnostic_record(f)}
     if "D" in tiers:
         return "fix_first"
+    inv = raw.get("inventory") or {}
+    if inv.get("complete"):
+        if not coverage_ok(raw):
+            return "needs_review"
+        if "C" in tiers:
+            return "share_with_caveats"
+        return "safe_to_share"
     if claim_count(raw) < MIN_CLAIMS:
         return "unable_to_grade"
     if not coverage_ok(raw):
         return "needs_review"
-    if "C" in tiers:
-        return "share_with_caveats"
-    return "safe_to_share"
+    return "share_with_caveats"
 
 
 def limitations_of(raw: dict) -> list[str]:
@@ -145,9 +163,9 @@ def limitations_of(raw: dict) -> list[str]:
     if raw.get("findings_truncated"):
         out.append("Finding list was truncated.")
     frac = cov.get("extractor_checkable_fraction")
-    if isinstance(frac, (int, float)) and frac < MIN_EXTRACTOR_FRACTION:
+    if isinstance(frac, (int, float)) and frac < 1:
         out.append(
-            f"Extractor could check {frac:.0%} of figures (need {MIN_EXTRACTOR_FRACTION:.0%})."
+            f"Extractor could check {frac:.0%} of inventory figures."
         )
     if cov.get("checks_errored"):
         out.append(f"{cov['checks_errored']} check(s) errored.")
@@ -156,8 +174,8 @@ def limitations_of(raw: dict) -> list[str]:
     if claims and reached < claims:
         out.append(f"Checks reached {reached} of {claims} claims.")
     eng = cov.get("engine_checkable_fraction")
-    if isinstance(eng, (int, float)) and eng < MIN_ENGINE_FRACTION:
-        out.append("Engine checkable fraction is below policy.")
+    if isinstance(eng, (int, float)) and eng < 1:
+        out.append("Engine checkable fraction is below the inventory.")
     src = (raw.get("source") or {}).get("format")
     if src and src != "html":
         out.append(f"Source format is {src}. Extraction may be model-written.")
@@ -182,7 +200,7 @@ def _public_layer2(layer2: list[dict] | None) -> list[dict]:
     public = []
     for f in layer2 or []:
         verdict = str(f.get("verdict") or "")
-        public.append({
+        row = {
             "id": str(f.get("id") or "L2"),
             "type": str(f.get("type") or "semantic"),
             "basis": str(f.get("basis") or (
@@ -193,19 +211,12 @@ def _public_layer2(layer2: list[dict] | None) -> list[dict]:
                          if verdict == "contradicted" else None),
             "report_quote": str(f.get("report_quote") or ""),
             "report_quote_2": f.get("report_quote_2"),
-            "evidence_file": f.get("evidence_file"),
-            "evidence_quote": f.get("evidence_quote"),
-            "evidence_json": list(f.get("evidence_json") or []),
-            "evidence_receipts": list(f.get("evidence_receipts") or []),
-            "evidence_receipt_mode": f.get("evidence_receipt_mode"),
             "explanation": str(f.get("explanation") or ""),
-            "reconstruction_attempt": f.get("reconstruction_attempt"),
-            "current_value": f.get("current_value"),
-            "current_as_of": f.get("current_as_of"),
             "claim_id": f.get("claim_id"),
             "location": f.get("location"),
             "metric_label": f.get("metric_label"),
-        })
+        }
+        public.append({key: row[key] for key in SHAREABLE_CHECK_KEYS if key in row})
     return public
 
 
@@ -270,8 +281,8 @@ def _evidence_coverage(raw: dict, checks: list[dict]) -> dict:
             check.get("verdict") == "not_checkable" for check in internal),
         "validated_outcomes": len(checks),
         "receipt_failures": int(review.get("receipt_failures") or 0),
-        "evidence_files_supplied": len(supplied),
-        "evidence_files_cited": cited,
+        "evidence_files_supplied": 0,
+        "evidence_files_cited": [],
         "provenance_groups": provenance_groups,
         "source_independence": (
             "grouped_by_declared_provenance" if provenance_groups else "not_assessed"),
@@ -446,10 +457,7 @@ def _offer(findings: list[dict], layer2: list[dict], source: dict | None,
             f"fix the {spell_count(n_err) if n_err else ''} {noun} above, "
             "then have Summation Verify check the report again."
         ).replace("  ", " ")
-    return (
-        "connect this report to Summation to run these checks on a schedule "
-        "with a live source query."
-    )
+    return ""
 
 
 def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
@@ -472,8 +480,19 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
             "statement": f.get("statement"),
             "location": f.get("location"),
             "claim_ids": list(f.get("claim_ids") or []),
-            "evidence": f.get("detail"),
         }
+        detail = f.get("detail")
+        if isinstance(detail, dict) and "stated" in detail and "computed" in detail:
+            public["arithmetic"] = {
+                "stated": detail.get("stated"),
+                "computed": detail.get("computed"),
+                "discrepancy": detail.get("discrepancy"),
+                "addends": [
+                    {"label": row.get("label"), "value": row.get("value")}
+                    for row in (detail.get("addends") or [])
+                    if isinstance(row, dict)
+                ],
+            }
         if _is_diagnostic_record(f):
             diagnostics.append({
                 "check_id": str(f.get("check_id") or "diagnostic"),
@@ -697,8 +716,10 @@ def public_verdict(verdict: str) -> str:
 
 
 def customer_verdict(verdict: str) -> str:
-    if verdict in {"needs_review", "unable_to_grade"}:
+    if verdict == "needs_review":
         return "share_with_caveats"
+    if verdict == "unable_to_grade":
+        return "unable_to_grade"
     return public_verdict(verdict)
 
 
@@ -822,36 +843,7 @@ def where_from(location) -> str:
 
 
 def evidence_value_line(check: dict) -> str:
-    receipts = list(check.get("evidence_receipts") or [])
-    items = list(check.get("evidence_json") or [])
-    if receipts:
-        bits = []
-        for group in receipts:
-            name = html.escape(str(group.get("evidence_file") or "evidence"))
-            for item in group.get("evidence_json") or []:
-                field = html.escape(pointer_name(item.get("pointer")))
-                val = html.escape(figure(item.get("value")))
-                bits.append(f"<code>{name}</code> field <code>{field}</code>&nbsp;=&nbsp;{val}")
-        if bits:
-            return "; ".join(bits)
-    if items:
-        name = html.escape(str(check.get("evidence_file") or "evidence"))
-        bits = []
-        for item in items:
-            field = html.escape(pointer_name(item.get("pointer")))
-            val = html.escape(figure(item.get("value")))
-            bits.append(f"<code>{name}</code> field <code>{field}</code>&nbsp;=&nbsp;{val}")
-        if bits:
-            return "; ".join(bits)
-    quote = check.get("evidence_quote")
-    name = check.get("evidence_file")
-    if name and quote:
-        return f"<code>{html.escape(str(name))}</code> {html.escape(str(quote))}"
-    if quote:
-        return html.escape(str(quote))
-    if name:
-        return f"<code>{html.escape(str(name))}</code>"
-    return "supplied evidence"
+    return html.escape(str(check.get("explanation") or "checked"))
 
 
 def receipt_block(report_says: str, evidence_html: str, report_label: str = "Report says",
@@ -865,7 +857,7 @@ def receipt_block(report_says: str, evidence_html: str, report_label: str = "Rep
 
 
 def math_table(finding: dict) -> str:
-    detail = finding.get("evidence") or {}
+    detail = finding.get("arithmetic") or finding.get("evidence") or {}
     if not isinstance(detail, dict) or "stated" not in detail or "computed" not in detail:
         return ""
     stated = detail["stated"]
@@ -895,7 +887,7 @@ def arith_title(finding: dict) -> str:
     loc = str(finding.get("location") or "")
     parts = loc.split("/")
     col = parts[2] if len(parts) == 3 else "total"
-    detail = finding.get("evidence") or {}
+    detail = finding.get("arithmetic") or finding.get("evidence") or {}
     delta = abs(Decimal(str(detail.get("discrepancy") or 0))) if isinstance(detail, dict) else Decimal(0)
     return f"The {col} total is {money(delta, cents=True)} too high"
 
@@ -905,7 +897,7 @@ def arith_fix(finding: dict) -> str:
     parts = loc.split("/")
     row = parts[1] if len(parts) == 3 else "Total"
     col = parts[2] if len(parts) == 3 else "value"
-    detail = finding.get("evidence") or {}
+    detail = finding.get("arithmetic") or finding.get("evidence") or {}
     computed = detail.get("computed") if isinstance(detail, dict) else None
     if computed is None:
         return ""
@@ -1058,10 +1050,11 @@ def html_of(art: dict, raw: dict | None = None,
             h1 = "No errors found. The one claim was checked."
         else:
             h1 = f"No errors found. All {spell_count(ledger)} claims were checked."
-        next_text = (
-            "connect this report to Summation to run these checks on a schedule "
-            "with a live source query."
-        )
+        next_text = ""
+    elif page_v == "unable_to_grade":
+        chip, chip_class = "UNABLE TO GRADE", "gray"
+        h1 = "This report could not be graded."
+        next_text = ""
     else:
         chip, chip_class = "SHARE WITH CAVEATS", "warn"
         if n_nc:
@@ -1069,25 +1062,14 @@ def html_of(art: dict, raw: dict | None = None,
                 f"No errors found. {spell_count(n_nc).capitalize()} "
                 f"{'claim' if n_nc == 1 else 'claims'} could not be checked."
             )
-            next_text = (
-                "connect the sources behind the unchecked claims to Summation to "
-                "check every claim automatically on each run."
-            )
         elif n_csr:
             h1 = (
                 "No errors found. Today&rsquo;s value differs for "
                 f"{spell_count(n_csr)} {'claim' if n_csr == 1 else 'claims'}."
             )
-            next_text = (
-                "connect this report to Summation to run these checks on a schedule "
-                "with a live source query."
-            )
         else:
             h1 = "No errors found. Part of the assessment did not complete."
-            next_text = (
-                "connect this report to Summation to run these checks on a schedule "
-                "with a live source query."
-            )
+        next_text = ""
 
     accepted_ids = {str(c.get("id") or "") for c in checks if c.get("id")}
     pres = art.get("presentation") or {}
@@ -1257,12 +1239,8 @@ def html_of(art: dict, raw: dict | None = None,
             quote = str(check.get("report_quote") or "")
             found = _re.search(r"\$?-?\d[\d,]*(?:\.\d+)?%?", quote)
             report_val = figure(found.group(0)) if found else quote
-            live_val = figure(check.get("current_value"))
             report_label = f"Report, {html.escape(report_date)}" if report_date else "Report"
-            live_label = "Live query"
-            if check.get("current_as_of"):
-                live_label = f"Live query, {html.escape(pretty_date(check.get('current_as_of')))}"
-            attempt = str(check.get("reconstruction_attempt") or "").strip()
+            explain = str(check.get("explanation") or "")
             csr_cards.append(
                 '<div class="card chg" data-kind="today-differs">'
                 '<span class="tag">TODAY DIFFERS</span>'
@@ -1271,11 +1249,9 @@ def html_of(art: dict, raw: dict | None = None,
                 '<div class="compare">'
                 f'<div class="box"><div class="bl">{report_label}</div>'
                 f'<div class="bv">{html.escape(report_val)}</div></div>'
-                f'<div class="box"><div class="bl">{live_label}</div>'
-                f'<div class="bv">{html.escape(live_val)}</div></div>'
                 "</div>"
-                + (f"<p>{html.escape(attempt)}</p>" if attempt else "")
-                + '<div class="machine">Checked by a program: the report value was compared with the live query result.</div>'
+                + (f"<p>{html.escape(explain)}</p>" if explain else "")
+                + '<div class="machine">Checked by a program: the report value was compared with a later value.</div>'
                 + f'<div class="q" hidden>{html.escape(check.get("report_quote") or "")}</div>'
                 + f'<div class="q" hidden>{html.escape(check.get("explanation") or "")}</div>'
                 "</div>"
@@ -1326,7 +1302,7 @@ def html_of(art: dict, raw: dict | None = None,
 
     doc = (art.get("verification") or {}).get("document") or {}
     live = (art.get("verification") or {}).get("live_source") or {}
-    cited = list((art.get("evidence_coverage") or {}).get("evidence_files_cited") or [])
+    cited = []
     arith_status = str(doc.get("status") or "not_run")
     if arith_status == "complete":
         arith_text = (
@@ -1341,16 +1317,10 @@ def html_of(art: dict, raw: dict | None = None,
     else:
         arith_text = html.escape(str(doc.get("detail") or arith_status))
     if csr_ran or n_csr:
-        live_text = (
-            "Ran. A report-date reconstruction was attempted before today&rsquo;s value was used."
-        )
+        live_text = "Ran."
     else:
         live_text = "Did not run."
-    if cited:
-        files = ", ".join(f"<code style=\"font-size:12px\">{html.escape(name)}</code>" for name in cited)
-        ev_text = f"{files}. The files do not record a retrieval date, so their age is unknown."
-    else:
-        ev_text = "No evidence files were cited."
+    ev_text = "Private receipts stay in receipts.json."
     checked_n = n_err + n_ok + n_csr
     claims_text = (
         f"Every headline figure, table total, and named metric counts as a claim; "
@@ -1365,13 +1335,14 @@ def html_of(art: dict, raw: dict | None = None,
         '<div class="scope">'
         f"<div><b>Claims</b>{claims_text}</div>"
         f"<div><b>Document arithmetic</b>{arith_text}</div>"
-        f"<div><b>Live source query</b>{live_text}</div>"
+        f"<div><b>Later value</b>{live_text}</div>"
         f"<div><b>Evidence used</b>{ev_text}</div>"
         "</div></section>"
     )
 
     next_html = (
         f'<div class="next"><b>Next:</b> {next_text}</div>'
+        if next_text else ""
     )
 
     tech_bits = []
@@ -1382,7 +1353,7 @@ def html_of(art: dict, raw: dict | None = None,
         )
         tech_bits.append(f"<li>{line}</li>")
     for finding in findings:
-        detail = finding.get("evidence") or {}
+        detail = finding.get("arithmetic") or finding.get("evidence") or {}
         if isinstance(detail, dict) and "computed" in detail:
             tech_bits.append(
                 "<li>"
@@ -1398,9 +1369,8 @@ def html_of(art: dict, raw: dict | None = None,
     )
     technical = (
         "<details><summary>Technical detail</summary>"
-        "<p>Every result above carries a receipt: an exact quote, field, or recomputed sum "
-        "that a program re-read from the report, an evidence file, or the live query result. "
-        "A claim with no evidence to check against is reported under "
+        "<p>Every result above carries a receipt in the private run record. "
+        "A claim with no accepted check is reported under "
         "&ldquo;What we could not check, and why.&rdquo;</p>"
         f"{tech_list}"
         "<p>Full check-by-check receipts: <code>receipts.json</code> in the run folder next to the report.</p>"
@@ -1462,6 +1432,17 @@ def attach_receipts_ledger(raw: dict, receipts: dict) -> None:
     review["receipt_failures"] = len(receipts.get("discarded") or [])
     if claims:
         raw["claims"] = claims
+    if isinstance(receipts.get("inventory"), dict):
+        raw["inventory"] = receipts["inventory"]
+    raw["inventory_missing"] = list(receipts.get("inventory_missing") or [])
+    if receipts.get("extractor_checkable_fraction") is not None:
+        cov["extractor_checkable_fraction"] = receipts["extractor_checkable_fraction"]
+    if receipts.get("engine_checkable_fraction") is not None:
+        cov["engine_checkable_fraction"] = receipts["engine_checkable_fraction"]
+    material_n = sum(
+        1 for item in (raw.get("inventory") or {}).get("items") or []
+        if item.get("importance") == "material")
+    cov["inventory_material"] = material_n
     status = receipts.get("semantic_status")
     if status:
         verification = raw.setdefault("verification", {})
@@ -1523,6 +1504,17 @@ def main() -> int:
                 "limits": l2raw.get("limits") or [],
             }
             attach_receipts_ledger(raw, l2raw)
+            missing = list(l2raw.get("inventory_missing") or [])
+            inv = l2raw.get("inventory") or {}
+            if inv.get("complete") and missing:
+                shown = ", ".join(
+                    str(row.get("displayed") or row.get("id")) for row in missing[:8])
+                print(
+                    "render: claims.json does not account for every material "
+                    f"inventory item ({shown}).",
+                    file=sys.stderr,
+                )
+                return 2
             if document_errors_unaccounted(raw):
                 print(
                     "render: findings contain errors the claims ledger does not "
@@ -1571,6 +1563,12 @@ def main() -> int:
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     art = artifact_from_findings(raw, run_id=run_id, generated_at=generated_at,
                                  layer2=layer2, source=source, guidance=guidance)
+    if art.get("verdict") == "unable_to_grade":
+        print(
+            "render: report could not be graded. No shareable artifact written.",
+            file=sys.stderr,
+        )
+        return 2
     args.out_dir.mkdir(parents=True, exist_ok=True)
     (args.out_dir / "grade-artifact.json").write_text(json.dumps(art, indent=2) + "\n")
     (args.out_dir / "grade-artifact.html").write_text(html_of(art, raw, ledger_raw))

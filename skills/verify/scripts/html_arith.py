@@ -146,19 +146,29 @@ def footing_findings(tables: list[list[list[str]]]) -> tuple[list[dict], int]:
 
 def findings_doc(report: pathlib.Path, findings: list[dict], *, html: bool,
                  arithmetic_checks: int = 0) -> dict:
+    scripts = pathlib.Path(__file__).resolve().parent
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    from inventory import inventory_for
     digest = hashlib.sha256(report.read_bytes()).hexdigest()
     d_count = sum(1 for item in findings if item.get("tier") == "D")
+    inventory = inventory_for(report)
+    material_n = sum(
+        1 for item in inventory.get("items") or []
+        if item.get("importance") == "material")
     return {
         "source": {
             "path": str(report.name),
             "format": report.suffix.lower().lstrip(".") or "unknown",
             "sha256": digest,
         },
+        "inventory": inventory,
         "coverage": {
             "claims_in_ledger": 0,
             "claims_reached_by_a_check": 0,
-            "extractor_checkable_fraction": 1.0 if html else 0.0,
-            "engine_checkable_fraction": 1.0 if html else 0.0,
+            "extractor_checkable_fraction": 0.0,
+            "engine_checkable_fraction": 0.0,
+            "inventory_material": material_n,
             "checks_registered": arithmetic_checks if html else 0,
             "checks_with_findings": len(findings),
             "checks_found_nothing": max(arithmetic_checks - len(findings), 0) if html else 0,
