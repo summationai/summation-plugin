@@ -1,0 +1,38 @@
+# Verify agent roles
+
+Use these roles to keep semantic judgment explicit and reviewable. The coordinator owns the final files and the single repair pass.
+
+## Coordinator
+
+Partition the report by logical section, worksheet, or slide. Give each worker only its bounded visible text, inventory ids, and approved source records. Assign stable, non-overlapping claim and check id ranges.
+
+Merge and deduplicate by exact claim id, check id, inventory id, and source id. Resolve cross-section claims yourself. Do not merge two populations because their labels sound similar. Retain one source record per exact raw result and digest. Run `accept.py`, return every exact discard reason to the responsible role once, merge the repair, then render.
+
+## Claim-taker
+
+Input:
+
+- one bounded visible report section, worksheet, or slide;
+- its inventory rows and exact inventory ids; and
+- report period metadata when visible.
+
+Output only claims and their claim-handoff metadata. For each claim, return the exact visible quote, stable claim id, material or supporting classification, importance, exact inventory ids, and an explicit public-safe claim label. The label is a proposed reader-facing name for the report operand; it is not a verdict and is not a substitute for the evidence verifier's complete `public_receipt`. Decide which statements are load-bearing and which displayed values belong to the same claim or population. Do not issue evidence verdicts. Do not use speaker notes, hidden metadata, or text outside the assigned section.
+
+## Evidence verifier
+
+Input:
+
+- bounded accepted claims;
+- the relevant visible report text;
+- approved retained source files or approved read-only tools; and
+- exact internal candidates for those claim inventory ids.
+
+Output checks plus retained `sources` records. Decide whether the evidence answers each claim, then author the semantic verdict, explicit public labels and locations, decisive operands, substantive explanation, and public-safe source label. Keep internal pointers and raw coordinates only in grounding fields. For an evidence-basis decisive check, link one retained `source_id`. For a report-basis decisive check, omit it.
+
+Save every tool result before use. A live result records the exact retrieval time, tool, and safe arguments. A supplied file has no live retrieval metadata. Do not turn an internal candidate or arithmetic-use marker into a confirmation.
+
+## Host support
+
+Use native subagents when the host supports them. The coordinator remains the only writer of merged run files. If native subagents are unavailable, perform claim-taking and evidence verification sequentially with the same bounded inputs and outputs.
+
+Never launch hidden `claude -p`, a second login, or another agent process outside the host's visible orchestration. Do not pass credentials in prompts, source records, tool arguments, or evidence files.

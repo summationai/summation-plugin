@@ -281,13 +281,26 @@ def schema_claim_verdicts() -> list:
 
 def _minimal_art(evidence_checks: list) -> dict:
     contradicted = [row for row in evidence_checks if row.get("verdict") == "contradicted"]
+    source_ids = sorted({
+        str((row.get("public_receipt") or {}).get("source_id") or "")
+        for row in evidence_checks
+        if row.get("basis") == "evidence" and row.get("public_receipt")
+    } - {""})
+    sources = [{
+        "id": source_id,
+        "kind": "supplied_file",
+        "label": f"Recorded {source_id.replace('-', ' ')} snapshot",
+        "evidence_file": f"{source_id}.json",
+        "result_sha256": "a" * 64,
+    } for source_id in source_ids]
+    cited = [row["label"] for row in sources]
     return {
-        "schema_version": "grade-artifact/v1",
+        "schema_version": "grade-artifact/public-receipt-v1",
         "run_id": "parity",
         "generated_at": "2026-08-23T00:00:00Z",
         "source": {"path": "report.md", "format": "md"},
         "source_result": None,
-        "verdict": "needs_review",
+        "verdict": "share_with_caveats",
         "score": None,
         "findings": [],
         "evidence_checks": evidence_checks,
@@ -309,10 +322,15 @@ def _minimal_art(evidence_checks: list) -> dict:
             "report_not_checkable": 0,
             "validated_outcomes": len(evidence_checks),
             "receipt_failures": 0,
-            "evidence_files_supplied": 0,
-            "evidence_files_cited": [],
-            "provenance_groups": [],
-            "source_independence": "not_assessed",
+            "evidence_files_supplied": len(sources),
+            "evidence_files_cited": cited,
+            "provenance_groups": [
+                {"source_id": row["id"], "kind": row["kind"], "label": row["label"]}
+                for row in sources
+            ],
+            "source_independence": (
+                "grouped_by_declared_provenance" if sources else "not_assessed"
+            ),
         },
         "decision": None,
         "actions": [],
@@ -333,6 +351,7 @@ def _minimal_art(evidence_checks: list) -> dict:
         "limitations": [],
         "offer": {"text": "Next: stop.", "accepted": None},
         "claims": [],
+        "sources": sources,
     }
 
 
@@ -421,33 +440,75 @@ def assert_page_structure(test, page: str, *, expect_errors: bool, expect_csr: b
     if "listed under technical detail" in page:
         test.assertIn("<details>", page)
         test.assertIn("<li>", page)
-    for match in re.finditer(r'<div class="card [^"]+" data-kind="[^"]+">', page):
+    for match in re.finditer(r'<div class="card [^"]+" data-kind="[^"]+"[^>]*>', page):
         chunk = page[match.start(): match.start() + 1600]
         test.assertIn('class="tag"', chunk)
         test.assertIn("<h3>", chunk)
         test.assertIn("Checked by a program:", chunk)
+        opening = match.group(0)
+        test.assertEqual(opening.count("data-card-id="), 1)
+        test.assertEqual(opening.count("data-disposition="), 1)
 
 
 def _check(verdict: str, **extra) -> dict:
+    report_quote = str(extra.pop("report_quote", f"Visible quote for {verdict}."))
+    basis = str(extra.pop("basis", "evidence"))
+    report_value = extra.get("report_value")
+    current_value = extra.get("current_value")
+    report_operand_value = report_value if report_value not in (None, "") else report_quote
+    decisive_value = current_value
+    if decisive_value in (None, ""):
+        observed = extra.pop("observed", None) or []
+        decisive_value = (
+            observed[0].get("value")
+            if observed and isinstance(observed[0], dict)
+            else extra.pop("evidence_quote", None)
+        )
+    if decisive_value in (None, ""):
+        decisive_value = extra.pop("report_quote_2", None) or report_operand_value
+    else:
+        extra.pop("evidence_quote", None)
+        extra.pop("report_quote_2", None)
+    explanation = str(extra.pop(
+        "explanation",
+        f"The explicit operands support the agent-authored {verdict} outcome.",
+    ))
+    extra.pop("evidence_file", None)
+    extra.pop("evidence_json", None)
+    extra.pop("evidence_receipts", None)
+    extra.pop("evidence_receipt_mode", None)
+    extra.pop("comparison", None)
+    extra.pop("current_source_kind", None)
     row = {
         "id": f"id-{verdict}",
+        "claim_id": f"claim-{verdict}",
         "type": "semantic",
-        "basis": "evidence",
+        "basis": basis,
         "verdict": verdict,
         "importance": "material",
         "severity": "high" if verdict == "contradicted" else None,
-        "report_quote": f"Visible quote for {verdict}.",
-        "report_quote_2": None,
-        "evidence_file": "live.json",
-        "evidence_quote": f"evidence for {verdict}",
-        "evidence_json": [],
-        "evidence_receipts": [],
-        "evidence_receipt_mode": "verbatim",
-        "explanation": f"Explanation for {verdict}.",
-        "reconstruction_attempt": None,
-        "current_value": None,
-        "current_as_of": None,
     }
+    if verdict in {"confirmed", "contradicted", "changed_since_report"}:
+        receipt = {
+            "report_operand": {
+                "label": "Reported metric",
+                "value": report_operand_value,
+                "location": "Report summary",
+            },
+            "decisive_operands": [{
+                "label": "Recorded metric",
+                "value": decisive_value,
+                "location": "Recorded status snapshot",
+            }],
+            "explanation": explanation,
+        }
+        if basis == "evidence":
+            receipt["source_id"] = "recorded-source"
+        row["public_receipt"] = receipt
+    elif verdict == "not_checkable":
+        row.update({"report_quote": report_quote, "explanation": explanation})
+    else:
+        row.update({"report_quote": report_quote, "explanation": explanation})
     row.update(extra)
     return row
 
@@ -469,26 +530,26 @@ class HtmlParityTests(unittest.TestCase):
         page = render.html_of(_minimal_art(rows))
         for row in rows:
             with self.subTest(verdict=row["verdict"]):
+                receipt = row.get("public_receipt") or {}
+                expected = (
+                    (receipt.get("report_operand") or {}).get("value")
+                    if receipt else row.get("report_quote")
+                )
                 self.assertIn(
-                    row["report_quote"], page,
-                    f"{row['verdict']} quote missing from HTML",
+                    str(expected), page,
+                    f"{row['verdict']} report operand missing from HTML",
                 )
                 self.assertNotIn(
                     "The report claim", page,
                     f"{row['verdict']} generic verdict stamp in HTML",
                 )
-                self.assertNotIn(
-                    f"Explanation for {row['verdict']}.", page,
-                    f"{row['verdict']} host explanation leaked into HTML",
-                )
+                explanation = receipt.get("explanation") or row.get("explanation")
+                self.assertIn(str(explanation), page)
 
-    def test_unhandled_verdict_still_renders_a_card(self) -> None:
+    def test_unhandled_verdict_fails_closed_before_render(self) -> None:
         row = _check("unmodeled_verdict")
-        page = render.html_of(_minimal_art([row]))
-        self.assertIn(row["report_quote"], page)
-        self.assertNotIn("The report claim", page)
-        self.assertNotIn(row["explanation"], page)
-        self.assertIn("unmodeled_verdict", page)
+        with self.assertRaisesRegex(SystemExit, "unknown accepted verdict"):
+            render._public_layer2([row], sources=[])
 
     def test_html_has_exactly_one_next_block(self) -> None:
         art = _minimal_art([_check("contradicted")])
@@ -601,7 +662,7 @@ class RenderArtifactTests(unittest.TestCase):
         art = render.artifact_from_findings(
             raw, run_id="t", generated_at="2026-08-20T00:00:00Z", layer2=layer2)
         self.assertEqual(art["verdict"], "fix_first")
-        page = render.html_of(art, raw)
+        page = render.html_of(art)
         self.assertIn("FIX FIRST", page)
         self.assertIn("The kickoff is Thursday.", page)
 

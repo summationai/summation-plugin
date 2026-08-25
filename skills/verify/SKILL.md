@@ -106,34 +106,63 @@ uv run --with jsonschema python3 "$VERIFY/scripts/render.py" \
 
 If `uv` is missing and `jsonschema` already imports, run `python3` on `render.py`. Do not `pip install` without asking.
 
-`extract.py` writes visible text, the machine inventory, and deterministic internal outcomes (rank order, arithmetic/ratio, percent versus points, direction, period display). `accept.py` merges those outcomes into the ledger. A deterministic confirmed or contradicted result is authoritative only for the same inventory ids. Quote overlap does not move that result onto a different id. The host cannot downgrade or reverse it. `accept.py` rejects a conflicting host outcome with reason `deterministic-conflict`. `accept.py` also rejects `supporting_provenance` on an id that already has a confirmed or contradicted internal result. The reason is `deterministic-conflict`. The item stays material. The host only grades semantic or external claims that code cannot prove. A claim without inventory ids stays host-owned.
+`extract.py` writes visible text, the machine inventory, exact arithmetic findings, and internal candidates. Candidates contain inventory ids, raw displayed values, coordinates, computed results, and mismatch flags. They are not claims or verdicts. Values used in arithmetic are marked `used_for_internal_arithmetic`; that marker is not a confirmation.
+
+The host agent owns claim importance, same-population decisions, semantic verdicts, public operand labels and locations, explanations, whether evidence answers a claim, and public-safe source labels. `accept.py` owns file and digest checks, pointer resolution, exact values and dates, restricted arithmetic recomputation, source-link validation, and ledger reconciliation. It never turns a candidate or arithmetic input into a semantic outcome. `render.py` copies accepted public fields; it does not infer labels, explanations, source mode, or verdicts.
 
 If `render.py` exits 2 because a material inventory item is missing or a claim is `not_reached`, repair that claim and run `accept.py` then `render.py` again.
 
-Read every `Source snapshot:` inventory line in full. If the line names only source identity or an extraction date, write `classification: supporting_provenance` with the exact inventory id, the exact quote, `importance: supporting`, and a reason. If the line states a status, quality, completeness, KPI, count, comparison, or other analytical result, write `classification: material_claim` and grade it as a material claim. Code does not classify these lines from word lists. A missing classification stays material. If extract already confirmed or contradicted that inventory id, write `material_claim`. `accept.py` rejects `supporting_provenance` on a proven id with reason `deterministic-conflict`. `supporting_provenance` accounts for that inventory id. It does not count as a confirmed analytical result. For a clean PDF, classify `Source snapshot: CRM revenue export, 2026-07-05.` as supporting provenance when it names only that export and date.
+Read every `Source snapshot:` inventory line in full. If the line names only source identity or an extraction date, write `classification: supporting_provenance` with the exact inventory id, exact quote, `importance: supporting`, and a reason. If it states a status, quality, completeness, KPI, count, comparison, or other analytical result, write `classification: material_claim` and grade it as material. Code does not classify these lines from word lists. A missing classification stays material. `supporting_provenance` accounts for its inventory id but never enters material totals, the unverified list, or confirmed analytical results.
+
+## Agent roles
+
+On hosts with native subagents, use the coordinator, claim-taker, and evidence-verifier roles as the primary path. Partition work by logical report section, worksheet, or slide. Claim-takers return explicit public-safe claim labels with their bounded claims; evidence verifiers author the complete receipts and verdicts. On hosts without native subagents, perform the same claim-taker and evidence-verifier roles sequentially. Never start a hidden `claude -p`, a second login, or another unaudited agent process. See [references/roles.md](references/roles.md) for the bounded inputs, outputs, and merge rules.
 
 ## You write checks.json
 
 After evidence, write one outcome per claim you actually checked. Each row names `claim_id`:
 
 ```json
-{"checks": [{
-  "id": "C1",
-  "claim_id": "L1",
-  "type": "semantic",
-  "basis": "evidence",
-  "verdict": "confirmed",
-  "importance": "material",
-  "severity": null,
-  "report_quote": "exact visible text from the report",
-  "metric_label": "Units",
-  "location": "Headline tile, Units",
-  "evidence_file": "relative/name.json",
-  "evidence_quote": "exact text from that evidence file",
-  "evidence_json": [{"pointer": "/path", "value": "exact value"}],
-  "report_quote_2": null,
-  "explanation": "One complete sentence."
+{"sources": [{
+  "id": "status-snapshot",
+  "kind": "supplied_file",
+  "label": "Project status snapshot",
+  "evidence_file": "status.json",
+  "result_sha256": "64-lowercase-hex-characters"
 }],
+ "checks": [{
+   "id": "C1",
+   "claim_id": "L1",
+   "type": "semantic",
+   "basis": "evidence",
+   "verdict": "confirmed",
+   "importance": "material",
+   "severity": null,
+   "report_quote": "On-time delivery was 94%.",
+   "evidence_json": [
+     {"pointer": "/on_time", "value": 94},
+     {"pointer": "/total", "value": 100}
+   ],
+   "public_receipt": {
+     "report_operand": {
+       "label": "Reported on-time delivery rate",
+       "value": "94%",
+       "location": "KPI summary, on-time delivery line"
+     },
+     "decisive_operands": [{
+       "label": "On-time deliveries",
+       "value": 94,
+       "location": "Project status snapshot, delivery totals"
+     }, {
+       "label": "Total deliveries",
+       "value": 100,
+       "location": "Project status snapshot, delivery totals"
+     }],
+     "calculation": {"expression": "94 / 100 * 100", "result": "94%"},
+     "explanation": "The recorded delivery totals calculate to the same 94% rate shown in the report.",
+     "source_id": "status-snapshot"
+   }
+ }],
   "presentation": {
     "summary": "One paragraph the reader can use.",
     "check_ids": ["C1"],
@@ -150,18 +179,21 @@ After evidence, write one outcome per claim you actually checked. Each row names
 
 `presentation` is optional. Put it on the checks file next to the `checks` array. Every summary, action, and limit names the accepted check ids that support it. `accept.py` keeps a statement when every `report_quote` is visible text and every named id is a grounded check.
 
-- `verdict`: `confirmed` | `contradicted` | `not_checkable`. `changed_since_report` is a last resort (see live source below). Never omit verdict.
+- `verdict`: `confirmed` | `contradicted` | `not_checkable`. `changed_since_report` is a last resort (see live source below). Never omit it.
 - `type`: `semantic` | `staleness` | `internal` | `logic` | `arithmetic` | `units` | `selection`.
-- `basis`: `evidence` or `report`. Report-only contradictions need `report_quote` and `report_quote_2`.
+- `basis`: `evidence` or `report`. The agent decides whether operands answer the same claim and population.
 - Quotes are visible text, after whitespace normalize. Never quote HTML tags.
-- `metric_label` names the figure (for example `Units`). `location` names the spot on the page (for example `Headline tile, Orders`). Leave either field out when you do not have it.
-- Prefer `evidence_json` pointers for JSON files.
+- Every `confirmed`, `contradicted`, and `changed_since_report` check needs `public_receipt`. Its report operand and every decisive operand each need an explicit public-safe `label`, exact `value`, and public location. Generic labels such as `row 2`, `operand 1`, `item 4`, or `value 3` are rejected. A hidden pointer or a repeated claim is not a public receipt.
+- `public_receipt.explanation` is a substantive agent-written sentence. For `basis: evidence`, `source_id` must name a retained source. For `basis: report`, omit `source_id`.
+- Optional `calculation.expression` is numeric restricted arithmetic using `+`, `-`, `*`, `/`, parentheses, and the declared decisive values. `accept.py` recomputes it and checks `result`. Put units such as `%` or `percentage points` in the result, not the expression.
+- Prefer exact `evidence_json` pointers for internal grounding of JSON files. Pointers never become public labels or locations.
+- A `live_tool` source also needs `retrieval` with `retrieved_at`, the exact tool name, and safe arguments. Save the raw result as `evidence_file`, then hash that exact file. A `supplied_file` source must not contain retrieval metadata.
 - `not_checkable` needs a specific reason. Do not attach a fake receipt.
-- Subagents per section are optional. Hosts without subagents do the same writes in sequence.
+- The renderer puts the accepted check `id` and `verdict` on each material card as exact `data-card-id` and `data-disposition` attributes. Do not author aliases for these fields.
 
 ### Data-currency dates
 
-A report claim that names a data-currency or as-of date must be compared with a supplied evidence date field. Accept generic field names such as `latest_complete_date`, `as_of`, and `date`. Parse ISO days and month-name days. If the report date and the grounded evidence date differ, write `verdict: contradicted` with `type: staleness`, a JSON pointer receipt, and `basis: evidence`. Do not write `not_checkable` for that claim. `accept.py` applies this rule when the host omits it.
+The evidence verifier decides what a data-currency field means and whether it answers the claim. Code does not search field names or author a staleness verdict. Supply exact pointers or an exact quote, explicit public operands, and the agent-authored verdict. `accept.py` only resolves the values, validates the dates, and verifies that a later date is on the same retained record as the later value.
 
 ### Live source (closed period first)
 
@@ -169,7 +201,7 @@ A report claim that names a data-currency or as-of date must be compared with a 
 
 1. If the claim names a closed period, re-query with that period filter. Verdict is `confirmed` or `contradicted` for that period. If today's warehouse shows a different value for that same closed period, that is a restatement or a report error: `contradicted`, with both values and both dates in the explanation.
 2. If the claim is point-in-time ("inventory on hand is 4,200"), reconstruct the as-of value (time travel, snapshot, history table, or a date column). If reconstruction works, verdict is `confirmed` or `contradicted` as of the report date.
-3. Only when reconstruction is impossible: `changed_since_report`. The row must include `reconstruction_attempt` (what you tried and why it failed), `report_value`, `current_value`, `current_as_of`, and an evidence receipt for the current value. `report_value` must be the visible report operand; `report_date` comes from the row or the claims metadata.
+3. Only when reconstruction is impossible: `changed_since_report`. The row must include `reconstruction_attempt` (what you tried and why it failed), `report_value`, `current_value`, `current_as_of`, `public_receipt`, and an exact evidence receipt for the later value. `report_value` must be the visible report operand and must equal the public report operand. The later value must appear among the decisive public operands. `report_date` comes from the row or claims metadata. The linked retained source states whether the later value came from a supplied recorded file or an actual live tool call; never state that mode in prose or an ad hoc flag.
 
 Then run `accept.py`. If it discards rows, fix only those quotes once and run `accept.py` again. Stop after two passes. Discarded rows stay discarded. Do not invent a quote so a row will pass.
 
@@ -181,7 +213,7 @@ Open `artifact/grade-artifact.html`. Read `verdict` from `grade-artifact.json`. 
 
 ## Laws
 
-- A finding ships only when `accept.py` kept it. Code is the scorecard.
+- A finding ships only when `accept.py` kept the agent-authored outcome and its explicit public receipt. Code validates mechanics; it does not approve the semantic judgment.
 - `not_checkable` means the check ran and lacked evidence. `not_run` means you never reached it. Never present the second as the first.
 - No letter grade. No “Layer 1” / “Layer 2”. No internal bug ids.
 - Accept the file they have. If you cannot obtain the report text, say so in the conversation and stop. Do not render a page. Do not refuse PDF, xlsx, or pptx because of the format.

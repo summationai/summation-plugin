@@ -13,6 +13,8 @@ from html import unescape
 import json
 import re
 
+from receipt_math import calculation_problem
+
 PRIVATE_SIDECARS = (
     "findings.json", "receipts.json", "checks.json", "claims.json",
     "grade-artifact.json", "report-visible.txt", "ledger.json",
@@ -35,24 +37,27 @@ CREDENTIAL = re.compile(
 )
 BEARER = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.I)
 JSON_POINTER_VISIBLE = re.compile(r"(?:^|\s)(?:/[A-Za-z0-9_~.-]+)+(?=\s|$)")
-COMPARATIVE_CLAIM = re.compile(
-    r"\b(?:unchanged|increas\w*|decreas\w*|grew|rose|fell|prior|previous|"
-    r"week[- ]over[- ]week|month[- ]over[- ]month|versus|vs\.?)\b",
-    re.I,
-)
 GENERIC_VERDICT = re.compile(
     r"The report claim\s+[\"“].*?[\"”]\s+is (?:confirmed|contradicted)",
     re.I | re.S,
 )
 ERROR_OUTCOMES = frozenset({"contradicted", "error"})
 CSR_OUTCOMES = frozenset({"changed_since_report"})
-OK_OUTCOMES = frozenset({"confirmed", "used_for_internal_arithmetic"})
-NC_OUTCOMES = frozenset({"not_checkable", "not_reached", None})
+OK_OUTCOMES = frozenset({"confirmed"})
+NC_OUTCOMES = frozenset({
+    "not_checkable", "not_reached", "used_for_internal_arithmetic", None,
+})
 MATERIAL_OUTCOMES = ERROR_OUTCOMES | CSR_OUTCOMES | OK_OUTCOMES | {"not_checkable"}
-RECEIPT_KEYS = (
-    "report_quote", "evidence_quote", "evidence_file", "location",
-    "evidence_location", "report_value", "current_value", "current_as_of", "report_date",
+TEMPORAL_KEYS = (
+    "report_value", "current_value", "current_as_of", "report_date",
     "reconstruction_attempt",
+)
+VAGUE_OPERAND = re.compile(r"^(?:row|operand|item|value)(?:\s+\d+)?$", re.I)
+VAGUE_SOURCE = re.compile(
+    r"^(?:source|evidence|supplied evidence|recorded evidence|live data)$", re.I)
+SOURCE_ID = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
+ISO_TIME = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
 )
 
 
@@ -191,10 +196,46 @@ def tile_counts(page: str) -> dict[str, int]:
 
 def _card_chunks(page: str) -> list[str]:
     return re.findall(
-        r'<div class="card [^"]+" data-kind="[^"]+">(.*?)</div>\s*(?=<div class="card|</section>|$)',
+        r'<div class="card [^"]+"[^>]*>(.*?)</div>\s*(?=<div class="card|</section>|$)',
         page or "",
         re.S,
     )
+
+
+def _card_identity_problems(art: dict, page: str) -> list[str]:
+    problems = []
+    checks = {
+        str(row.get("id") or ""): row
+        for row in (art.get("evidence_checks") or [])
+        if isinstance(row, dict)
+    }
+    seen = set()
+    openings = re.findall(r'<div class="card [^"]+"(?P<attrs>[^>]*)>', page or "")
+    for index, attrs in enumerate(openings, 1):
+        ids = re.findall(r'\bdata-card-id="([^"]*)"', attrs)
+        dispositions = re.findall(r'\bdata-disposition="([^"]*)"', attrs)
+        if len(ids) != 1:
+            problems.append(f"material card {index} must have exactly one data-card-id")
+            continue
+        if len(dispositions) != 1:
+            problems.append(
+                f"material card {index} must have exactly one data-disposition")
+            continue
+        check_id = unescape(ids[0])
+        disposition = unescape(dispositions[0])
+        if check_id in seen:
+            problems.append(f"material card id {check_id!r} is duplicated")
+        seen.add(check_id)
+        check = checks.get(check_id)
+        if check is None:
+            problems.append(f"material card id {check_id!r} has no accepted check")
+            continue
+        if check.get("importance") != "material":
+            problems.append(f"material card id {check_id!r} is not a material check")
+        if disposition != str(check.get("verdict") or ""):
+            problems.append(
+                f"material card {check_id!r} disposition does not match accepted verdict")
+    return problems
 
 
 def ledger_counts(art: dict) -> dict[str, int]:
@@ -211,61 +252,28 @@ def ledger_counts(art: dict) -> dict[str, int]:
     }
 
 
-def _comparison_proves_contradiction(check: dict) -> bool:
-    comparison = check.get("comparison") if isinstance(check.get("comparison"), dict) else {}
-    if not comparison:
-        return False
-    stated = parse_number(comparison.get("stated"))
-    result = parse_number(comparison.get("result"))
-    if stated is not None and result is not None and stated != result:
-        return True
-    if comparison.get("kind") == "ordered_list":
-        values = []
-        for item in comparison.get("operands") or []:
-            number = parse_number(item.get("value") if isinstance(item, dict) else item)
-            if number is not None:
-                values.append(number)
-        formula = str(comparison.get("formula") or "")
-        if len(values) >= 2:
-            desc = "highest" in formula
-            ordered = values == sorted(values, reverse=desc)
-            return not ordered
-    if comparison.get("kind") == "percentage_points":
-        stated_text = str(comparison.get("stated") or "")
-        result_text = str(comparison.get("result") or "")
-        if "percentage point" in result_text and "%" in stated_text and "point" not in stated_text:
-            return True
-    prior = parse_number(comparison.get("prior"))
-    current = parse_number(comparison.get("current"))
-    stated_text = str(comparison.get("stated") or "")
-    if (
-        prior is not None
-        and current is not None
-        and stated is not None
-        and "%" in stated_text
-        and "point" not in stated_text.lower()
-    ):
-        rel = None if prior == 0 else abs((current - prior) / prior) * Decimal(100)
-        points = abs(current - prior)
-        if rel is not None and abs(stated - points) <= Decimal("0.06") and abs(stated - rel) > Decimal("0.06"):
-            return True
-    return False
+def _operand_contract_problem(value, prefix: str) -> str | None:
+    if not isinstance(value, dict):
+        return f"{prefix} is not an object"
+    if set(value) != {"label", "value", "location"}:
+        return f"{prefix} does not have exactly label, value, and location"
+    label = str(value.get("label") or "").strip()
+    location = str(value.get("location") or "").strip()
+    if not label or VAGUE_OPERAND.fullmatch(label):
+        return f"{prefix}.label is missing or vague"
+    if not location:
+        return f"{prefix}.location is missing"
+    if value.get("value") in (None, "") or isinstance(value.get("value"), bool):
+        return f"{prefix}.value is missing"
+    return None
 
 
-def _operands_match_report(check: dict) -> bool:
-    report_nums = numbers_in(check.get("report_quote"))
-    shown = numbers_in(check.get("observed")) | numbers_in(check.get("comparison"))
-    shown |= numbers_in(check.get("evidence_quote"))
-    comparison = check.get("comparison") if isinstance(check.get("comparison"), dict) else {}
-    has_receipt = bool(
-        check.get("observed")
-        or check.get("evidence_quote")
-        or comparison.get("operands")
-        or comparison.get("result") is not None
+def _substantive(value) -> bool:
+    text = str(value or "").strip()
+    return bool(
+        len(re.findall(r"[A-Za-z0-9%$]+", text)) >= 6
+        and re.search(r"[.!?]$", text)
     )
-    if not report_nums or not shown:
-        return has_receipt
-    return bool(report_nums & shown)
 
 
 def audit_json(art: dict) -> list[str]:
@@ -297,6 +305,62 @@ def audit_json(art: dict) -> list[str]:
     check_ids = [row.get("id") for row in checks]
     if len(check_ids) != len(set(check_ids)):
         problems.append("public evidence check ids are not unique")
+    if any(not SOURCE_ID.fullmatch(str(check_id or "")) for check_id in check_ids):
+        problems.append("public evidence check id is not stable or public-safe")
+    contradicted_checks = [
+        row for row in checks if isinstance(row, dict)
+        and row.get("verdict") == "contradicted"
+    ]
+    if (art.get("evidence_findings") or []) != contradicted_checks:
+        problems.append("evidence_findings do not match contradicted public checks")
+    sources = list(art.get("sources") or [])
+    source_ids = [str(row.get("id") or "") for row in sources if isinstance(row, dict)]
+    if len(source_ids) != len(set(source_ids)):
+        problems.append("retained source ids are not unique")
+    source_map = {
+        str(row.get("id") or ""): row for row in sources if isinstance(row, dict)
+    }
+    for source in sources:
+        if not isinstance(source, dict):
+            problems.append("retained source is not an object")
+            continue
+        source_id = str(source.get("id") or "")
+        kind = source.get("kind")
+        allowed = {"id", "kind", "label", "evidence_file", "result_sha256", "retrieval"}
+        if set(source) - allowed:
+            problems.append(f"{source_id}: retained source has an unknown field")
+        if not SOURCE_ID.fullmatch(source_id):
+            problems.append(f"{source_id}: retained source id is invalid")
+        if kind not in {"supplied_file", "live_tool"}:
+            problems.append(f"{source_id}: retained source kind is invalid")
+        label = str(source.get("label") or "").strip()
+        filename = str(source.get("evidence_file") or "").strip()
+        if not label or VAGUE_SOURCE.fullmatch(label):
+            problems.append(f"{source_id}: retained source label is missing or vague")
+        if (
+            not filename
+            or "/" in filename
+            or "\\" in filename
+            or filename in PRIVATE_SIDECARS
+        ):
+            problems.append(f"{source_id}: retained evidence filename is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", str(source.get("result_sha256") or "")):
+            problems.append(f"{source_id}: retained source digest is invalid")
+        if kind == "supplied_file" and source.get("retrieval") is not None:
+            problems.append(f"{source_id}: static source carries live metadata")
+        if kind == "live_tool":
+            retrieval = source.get("retrieval")
+            if not isinstance(retrieval, dict):
+                problems.append(f"{source_id}: live source lacks retrieval metadata")
+            elif set(retrieval) != {"retrieved_at", "tool", "arguments"}:
+                problems.append(f"{source_id}: live retrieval metadata is incomplete")
+            else:
+                if not ISO_TIME.fullmatch(str(retrieval.get("retrieved_at") or "")):
+                    problems.append(f"{source_id}: live retrieval time is invalid")
+                if not str(retrieval.get("tool") or "").strip():
+                    problems.append(f"{source_id}: live retrieval tool is missing")
+                if not isinstance(retrieval.get("arguments"), dict):
+                    problems.append(f"{source_id}: live retrieval arguments are invalid")
     finding_fingerprints = [
         (
             row.get("check_id"), row.get("location"), row.get("statement"),
@@ -351,6 +415,14 @@ def audit_json(art: dict) -> list[str]:
         problems.append("supporting provenance entered material not_checkable totals")
     supplied = int(coverage.get("evidence_files_supplied") or 0)
     cited = coverage.get("evidence_files_cited") or []
+    if supplied != len(sources):
+        problems.append("evidence_files_supplied does not match retained sources")
+    expected_groups = [
+        {"source_id": row.get("id"), "kind": row.get("kind"), "label": row.get("label")}
+        for row in sources if isinstance(row, dict)
+    ]
+    if (coverage.get("provenance_groups") or []) != expected_groups:
+        problems.append("provenance_groups do not match retained sources")
     has_evidence_outcome = any(
         row.get("basis") == "evidence"
         and row.get("verdict") in {"confirmed", "contradicted", "changed_since_report"}
@@ -362,6 +434,32 @@ def audit_json(art: dict) -> list[str]:
         problems.append("evidence cited but supplied count is 0")
     if supplied and len(cited) > supplied:
         problems.append("cited evidence files exceed supplied count")
+    cited_source_ids = {
+        str((row.get("public_receipt") or {}).get("source_id") or "")
+        for row in checks
+        if row.get("basis") == "evidence"
+        and row.get("verdict") in {"confirmed", "contradicted", "changed_since_report"}
+    }
+    expected_cited = [
+        str(source_map[source_id].get("label") or source_id)
+        for source_id in sorted(cited_source_ids)
+        if source_id in source_map
+    ]
+    if cited != expected_cited:
+        problems.append("evidence_files_cited do not match receipt source links")
+    evidence_checks = [row for row in checks if row.get("basis") == "evidence"]
+    report_checks = [row for row in checks if row.get("basis") == "report"]
+    expected_basis_counts = {
+        "evidence_confirmed": sum(row.get("verdict") == "confirmed" for row in evidence_checks),
+        "evidence_contradicted": sum(row.get("verdict") == "contradicted" for row in evidence_checks),
+        "evidence_not_checkable": sum(row.get("verdict") == "not_checkable" for row in evidence_checks),
+        "report_confirmed": sum(row.get("verdict") == "confirmed" for row in report_checks),
+        "report_contradicted": sum(row.get("verdict") == "contradicted" for row in report_checks),
+        "report_not_checkable": sum(row.get("verdict") == "not_checkable" for row in report_checks),
+    }
+    for key, expected in expected_basis_counts.items():
+        if int(coverage.get(key) or 0) != expected:
+            problems.append(f"coverage {key} does not match public checks")
     chosen_ids = {
         str(row.get("check_id") or "") for row in material
         if row.get("outcome") in {"confirmed", "contradicted", "changed_since_report", "not_checkable"}
@@ -378,78 +476,115 @@ def audit_json(art: dict) -> list[str]:
             check = by_check.get(cid)
             if check is None or check.get("verdict") != outcome:
                 problems.append(f"{claim.get('id')}: claim outcome has no matching public check")
-            elif claim.get("location") and check.get("location") != claim.get("location"):
-                problems.append(
-                    f"{claim.get('id')}: public check location {check.get('location')!r} "
-                    f"does not match claim location {claim.get('location')!r}")
         elif outcome == "error" and cid not in finding_ids:
-            problems.append(f"{claim.get('id')}: error outcome has no matching public finding")
+            problems.append(f"{claim.get('id')}: machine error has no agent-authored public check")
     for check in checks:
-        if check.get("importance") == "supporting":
-            continue
         verdict = check.get("verdict")
-        if verdict in {"confirmed", "contradicted"}:
-            comparison = check.get("comparison") if isinstance(check.get("comparison"), dict) else {}
-            has_receipt = bool(
-                check.get("observed")
-                or check.get("evidence_quote")
-                or comparison.get("operands")
-                or comparison.get("result") is not None
-            )
-            if not has_receipt:
-                problems.append(f"{check.get('id')}: confirmed/contradicted lacks shareable operands")
-            if not check.get("report_quote"):
-                problems.append(f"{check.get('id')}: confirmed/contradicted lacks report operand")
-            if check.get("basis") == "report" and not comparison.get("operands"):
-                problems.append(f"{check.get('id')}: report-only outcome lacks calculation operands")
-            if check.get("basis") == "evidence" and not check.get("evidence_file"):
-                problems.append(f"{check.get('id')}: evidence outcome lacks sanitized source label")
-            if (COMPARATIVE_CLAIM.search(str(check.get("report_quote") or ""))
-                    and len(check.get("observed") or []) < 2
-                    and len(comparison.get("operands") or []) < 2
-                    and not (
-                        comparison.get("prior") is not None
-                        and comparison.get("current") is not None
-                    )):
-                problems.append(f"{check.get('id')}: comparative claim lacks both decisive operands")
-            if verdict == "confirmed" and not _operands_match_report(check) and not comparison.get("operands"):
-                problems.append(f"{check.get('id')}: confirmed observed values do not match the report")
-            if verdict == "confirmed" and _comparison_proves_contradiction(check):
-                problems.append(f"{check.get('id')}: confirmed calculation proves a contradiction")
-            if verdict == "contradicted":
-                report_nums = numbers_in(check.get("report_quote"))
-                shown = numbers_in(check.get("observed")) | numbers_in(check.get("evidence_quote"))
-                differs = bool(shown) and bool(report_nums) and not (report_nums <= shown and shown <= report_nums)
-                if shown and report_nums and report_nums == shown and not _comparison_proves_contradiction(check):
-                    problems.append(f"{check.get('id')}: contradicted values are equal with no proving calculation")
-                if not differs and not _comparison_proves_contradiction(check) and not shown:
-                    if not comparison.get("operands"):
-                        problems.append(f"{check.get('id')}: contradicted check has no differing operand or calculation")
+        forbidden = {
+            "comparison", "observed", "evidence_quote", "evidence_file",
+            "evidence_json", "evidence_receipts", "current_source_kind",
+        }
+        leaked = sorted(forbidden & set(check))
+        if leaked:
+            problems.append(f"{check.get('id')}: raw receipt field {leaked[0]} is public")
+        if verdict in {"confirmed", "contradicted", "changed_since_report"}:
+            receipt = check.get("public_receipt")
+            if not isinstance(receipt, dict):
+                problems.append(f"{check.get('id')}: public_receipt is missing")
+                continue
+            allowed_receipt = {
+                "report_operand", "decisive_operands", "explanation",
+                "calculation", "source_id",
+            }
+            if set(receipt) - allowed_receipt:
+                problems.append(f"{check.get('id')}: public_receipt has an unknown field")
+            report_problem = _operand_contract_problem(
+                receipt.get("report_operand"), "public_receipt.report_operand")
+            if report_problem:
+                problems.append(f"{check.get('id')}: {report_problem}")
+            operands = receipt.get("decisive_operands")
+            if not isinstance(operands, list) or not operands:
+                problems.append(f"{check.get('id')}: decisive public operands are missing")
+            else:
+                for index, operand in enumerate(operands):
+                    problem = _operand_contract_problem(
+                        operand, f"public_receipt.decisive_operands[{index}]")
+                    if problem:
+                        problems.append(f"{check.get('id')}: {problem}")
+            explanation = str(receipt.get("explanation") or "").strip()
+            if not _substantive(explanation):
+                problems.append(f"{check.get('id')}: public explanation is not substantive")
+            calculation = receipt.get("calculation")
+            if calculation is not None:
+                if not isinstance(calculation, dict) or set(calculation) != {"expression", "result"}:
+                    problems.append(f"{check.get('id')}: public calculation shape is invalid")
+                else:
+                    math_problem = calculation_problem(
+                        calculation.get("expression"),
+                        calculation.get("result"),
+                        operands if isinstance(operands, list) else [],
+                    )
+                    if math_problem:
+                        problems.append(f"{check.get('id')}: {math_problem}")
+            if (
+                check.get("basis") == "report"
+                and calculation is None
+                and isinstance(receipt.get("report_operand"), dict)
+                and isinstance(operands, list)
+                and operands
+                and all(
+                    parse_number(row.get("value")) == parse_number(
+                        receipt["report_operand"].get("value")
+                    )
+                    if (
+                        parse_number(row.get("value")) is not None
+                        and parse_number(receipt["report_operand"].get("value")) is not None
+                    )
+                    else str(row.get("value")) == str(
+                        receipt["report_operand"].get("value")
+                    )
+                    for row in operands if isinstance(row, dict)
+                )
+            ):
+                problems.append(
+                    f"{check.get('id')}: report receipt only repeats the report operand")
+            source_id = str(receipt.get("source_id") or "")
+            if check.get("basis") == "evidence" and source_id not in source_map:
+                problems.append(f"{check.get('id')}: public source link is missing or unknown")
+            if check.get("basis") == "report" and source_id:
+                problems.append(f"{check.get('id')}: report receipt has an evidence source link")
         if verdict == "changed_since_report":
             report_n = parse_number(check.get("report_value"))
             current_n = parse_number(check.get("current_value"))
-            if current_n is None and isinstance(check.get("comparison"), dict):
-                current_n = parse_number(check["comparison"].get("current"))
             if report_n is None or current_n is None:
                 problems.append(f"{check.get('id')}: changed_since_report missing report or current value")
             elif report_n == current_n:
                 problems.append(f"{check.get('id')}: changed_since_report values are equal")
-            if check.get("report_value") not in (None, "") and not (
-                numbers_in(check.get("report_value"))
-                & numbers_in(check.get("report_quote"))
-            ):
-                problems.append(f"{check.get('id')}: report value is not in the report quote")
             if not check.get("current_as_of"):
                 problems.append(f"{check.get('id')}: changed_since_report missing current date")
             if not check.get("report_date") and not (art.get("source") or {}).get("report_date"):
                 problems.append(f"{check.get('id')}: changed_since_report missing report date")
             if not check.get("reconstruction_attempt"):
                 problems.append(f"{check.get('id')}: changed_since_report missing reconstruction attempt")
-            if not check.get("evidence_file"):
-                problems.append(f"{check.get('id')}: changed_since_report missing source label")
-            if check.get("current_source_kind") not in {
-                    "supplied_recorded_evidence", "live_query"}:
-                problems.append(f"{check.get('id')}: changed_since_report missing source kind")
+            receipt = check.get("public_receipt") or {}
+            report_operand = receipt.get("report_operand") or {}
+            decisive_values = [
+                row.get("value") for row in receipt.get("decisive_operands") or []
+                if isinstance(row, dict)
+            ]
+            if parse_number(report_operand.get("value")) != report_n:
+                problems.append(
+                    f"{check.get('id')}: temporal report value does not match report operand")
+            if not any(parse_number(value) == current_n for value in decisive_values):
+                problems.append(
+                    f"{check.get('id')}: temporal current value is not a decisive operand")
+        elif verdict == "not_checkable":
+            if check.get("public_receipt") is not None:
+                problems.append(f"{check.get('id')}: not_checkable has a public_receipt")
+            if not str(check.get("report_quote") or "").strip():
+                problems.append(f"{check.get('id')}: not_checkable report quote is missing")
+            if not _substantive(check.get("explanation")):
+                problems.append(f"{check.get('id')}: not_checkable explanation is not substantive")
     return problems
 
 
@@ -457,6 +592,7 @@ def audit_html(art: dict, page: str) -> list[str]:
     problems = []
     if not page:
         return ["missing HTML"]
+    problems.extend(_card_identity_problems(art, page))
     visible = visible_text(page)
     if ABS_PATH.search(page) or ABS_PATH.search(visible):
         problems.append("absolute path in public HTML")
@@ -495,58 +631,43 @@ def audit_html(art: dict, page: str) -> list[str]:
         if numeric != counts["material"]:
             problems.append("stat tiles do not reconcile with the material ledger")
     cov = art.get("evidence_coverage") or {}
-    supplied = int(cov.get("evidence_files_supplied") or 0)
-    if supplied == 0 and re.search(r"Checked against the evidence supplied", page):
-        problems.append("HTML claims supplied evidence while counts are zero")
-    if supplied and re.search(r"Checked against the evidence supplied", page) is None:
-        if "supplied evidence" not in visible.lower() and supplied > 0:
-            if "Computed from the report" not in page and "supplied evidence" not in page:
-                problems.append("HTML evidence copy does not match retained evidence metadata")
+    source_map = {
+        str(row.get("id") or ""): row
+        for row in (art.get("sources") or []) if isinstance(row, dict)
+    }
     for check in art.get("evidence_checks") or []:
-        if check.get("importance") == "supporting":
-            continue
-        for key in RECEIPT_KEYS:
-            value = check.get(key)
-            if value in (None, "", [], {}):
-                continue
-            if key == "reconstruction_attempt" and check.get("verdict") != "changed_since_report":
-                continue
-            if not mentions(page, value):
-                problems.append(f"{check.get('id')} public field {key} does not render in HTML")
-        if check.get("verdict") in {"confirmed", "contradicted"}:
-            if not mentions(visible, check.get("report_quote")):
-                problems.append(f"{check.get('id')} report operand is not visible in HTML")
+        receipt = check.get("public_receipt")
+        if isinstance(receipt, dict):
+            operands = [receipt.get("report_operand"), *(receipt.get("decisive_operands") or [])]
+            for index, operand in enumerate(operands):
+                if not isinstance(operand, dict):
+                    continue
+                for field in ("label", "value", "location"):
+                    if not mentions(page, operand.get(field)):
+                        problems.append(
+                            f"{check.get('id')} public operand {index}.{field} does not render in HTML")
+            if not mentions(page, receipt.get("explanation")):
+                problems.append(f"{check.get('id')} public explanation does not render in HTML")
+            calculation = receipt.get("calculation")
+            if isinstance(calculation, dict):
+                for field in ("expression", "result"):
+                    if not mentions(page, calculation.get(field)):
+                        problems.append(
+                            f"{check.get('id')} calculation.{field} does not render in HTML")
+            source_id = str(receipt.get("source_id") or "")
+            retained = source_map.get(source_id)
+            if retained is not None:
+                if not mentions(page, retained.get("label")):
+                    problems.append(f"{check.get('id')} retained source label does not render")
+                if retained.get("kind") == "supplied_file":
+                    if "Supplied recorded evidence" not in visible:
+                        problems.append(f"{check.get('id')} supplied evidence origin is not visible")
+                elif retained.get("kind") == "live_tool" and "Actual live query" not in visible:
+                    problems.append(f"{check.get('id')} live source origin is not visible")
         if check.get("verdict") == "changed_since_report":
-            report_number = parse_number(check.get("report_value"))
-            current_number = parse_number(check.get("current_value"))
-            if report_number is not None and not mentions(visible, report_number):
-                problems.append(f"{check.get('id')} report-date value is not visible in HTML")
-            if current_number is not None and not mentions(visible, current_number):
-                problems.append(f"{check.get('id')} later value is not visible in HTML")
-            card_candidates = [
-                chunk for chunk in _card_chunks(page)
-                if mentions(chunk, check.get("report_value"))
-                and mentions(chunk, check.get("current_value"))
-            ]
-            card_visible = visible_text(card_candidates[0]) if card_candidates else visible
-            kind = check.get("current_source_kind")
-            if kind == "supplied_recorded_evidence":
-                if "Supplied recorded evidence" not in card_visible:
-                    problems.append(f"{check.get('id')} supplied evidence origin is not visible")
-                if "actual live-query result" in card_visible:
-                    problems.append(f"{check.get('id')} static evidence is described as a live query")
-            elif kind == "live_query" and "Live query" not in card_visible:
-                problems.append(f"{check.get('id')} live-query origin is not visible")
-        comparison = check.get("comparison") if isinstance(check.get("comparison"), dict) else {}
-        for item in comparison.get("operands") or []:
-            if isinstance(item, dict) and not mentions(page, item.get("value")):
-                problems.append(f"{check.get('id')} comparison operand does not render in HTML")
-        for field in ("prior", "current", "stated", "result"):
-            if comparison.get(field) not in (None, "", []) and not mentions(page, comparison.get(field)):
-                problems.append(f"{check.get('id')} comparison.{field} does not render in HTML")
-        for item in check.get("observed") or []:
-            if isinstance(item, dict) and not mentions(page, item.get("value")):
-                problems.append(f"{check.get('id')} observed value does not render in HTML")
+            for key in TEMPORAL_KEYS:
+                if not mentions(page, check.get(key)):
+                    problems.append(f"{check.get('id')} temporal field {key} does not render in HTML")
     for card in _card_chunks(page):
         why = re.findall(r"<p>(.*?)</p>", card, re.S)
         if len(why) > 1 and "today-differs" not in card:
@@ -563,6 +684,12 @@ def audit_html(art: dict, page: str) -> list[str]:
             expl = re.sub(r"<[^>]+>", " ", why[0])
             if right.strip() and expl.strip() and right.strip() == expl.strip() == left.strip():
                 problems.append("receipt echoes the claim as the calculation and the explanation")
+    if not any(row.get("kind") == "live_tool" for row in source_map.values()):
+        if "Actual live query" in visible:
+            problems.append("static evidence is described as an actual live query")
+    if not any(row.get("kind") == "supplied_file" for row in source_map.values()):
+        if "Supplied recorded evidence" in visible:
+            problems.append("live-only evidence is described as supplied recorded evidence")
     return problems
 
 
@@ -573,15 +700,9 @@ def audit_public_artifact(art: dict, page: str) -> list[str]:
 def mutate_remove_operands(art: dict) -> dict:
     clone = deepcopy(art)
     for check in clone.get("evidence_checks") or []:
-        if check.get("verdict") in {"confirmed", "contradicted"}:
-            check.pop("observed", None)
-            check.pop("evidence_quote", None)
-            comparison = check.get("comparison")
-            if isinstance(comparison, dict):
-                comparison.pop("operands", None)
-                comparison.pop("result", None)
-                comparison.pop("prior", None)
-                comparison.pop("current", None)
+        receipt = check.get("public_receipt")
+        if isinstance(receipt, dict):
+            receipt.pop("decisive_operands", None)
             break
     return clone
 
@@ -589,33 +710,64 @@ def mutate_remove_operands(art: dict) -> dict:
 def mutate_swap_operands(art: dict) -> dict:
     clone = deepcopy(art)
     for check in clone.get("evidence_checks") or []:
-        if check.get("verdict") == "confirmed":
-            observed = check.get("observed") or []
-            if observed and isinstance(observed[0], dict):
-                observed[0]["value"] = "999999"
-                break
-            comparison = check.get("comparison")
-            if isinstance(comparison, dict) and comparison.get("operands"):
-                comparison["operands"][0]["value"] = "999999"
-                comparison["result"] = "999999"
-                break
+        receipt = check.get("public_receipt") or {}
+        operands = receipt.get("decisive_operands") or []
+        if operands and isinstance(operands[0], dict):
+            operands[0]["value"] = "999999"
+            calculation = receipt.get("calculation")
+            if isinstance(calculation, dict):
+                calculation["result"] = "999999"
+            break
+    return clone
+
+
+def mutate_vague_operand_label(art: dict) -> dict:
+    clone = deepcopy(art)
+    for check in clone.get("evidence_checks") or []:
+        receipt = check.get("public_receipt") or {}
+        operands = receipt.get("decisive_operands") or []
+        if operands and isinstance(operands[0], dict):
+            operands[0]["label"] = "row 1"
+            break
+    return clone
+
+
+def mutate_remove_explanation(art: dict) -> dict:
+    clone = deepcopy(art)
+    for check in clone.get("evidence_checks") or []:
+        receipt = check.get("public_receipt")
+        if isinstance(receipt, dict):
+            receipt.pop("explanation", None)
+            break
+    return clone
+
+
+def mutate_remove_source_link(art: dict) -> dict:
+    clone = deepcopy(art)
+    for check in clone.get("evidence_checks") or []:
+        if check.get("basis") != "evidence":
+            continue
+        receipt = check.get("public_receipt")
+        if isinstance(receipt, dict):
+            receipt.pop("source_id", None)
+            break
     return clone
 
 
 def mutate_confirmed_calculation_to_contradiction(art: dict) -> dict:
     clone = deepcopy(art)
     for check in clone.get("evidence_checks") or []:
-        if check.get("verdict") == "confirmed":
-            check["comparison"] = {
-                "kind": "identity",
-                "stated": 12,
-                "result": 13,
-                "operands": [
-                    {"label": "report", "value": 12},
-                    {"label": "calculated", "value": 13},
-                ],
-            }
-            break
+        if check.get("verdict") != "confirmed":
+            continue
+        receipt = check.get("public_receipt") or {}
+        operands = receipt.get("decisive_operands") or []
+        if len(operands) == 1:
+            operands.append(deepcopy(operands[0]))
+        if len(operands) >= 2:
+            operands[0]["value"] = 12
+            operands[1]["value"] = 1
+            receipt["calculation"] = {"expression": "12 + 1", "result": 12}
+        break
     return clone
 
 
@@ -625,9 +777,6 @@ def mutate_equalize_csr(art: dict) -> dict:
         if check.get("verdict") == "changed_since_report":
             number = parse_number(check.get("report_value"))
             check["current_value"] = number if number is not None else check.get("report_value")
-            comparison = check.get("comparison")
-            if isinstance(comparison, dict):
-                comparison["current"] = check["current_value"]
             break
     return clone
 
@@ -637,9 +786,6 @@ def mutate_remove_csr_report_value(art: dict) -> dict:
     for check in clone.get("evidence_checks") or []:
         if check.get("verdict") == "changed_since_report":
             check.pop("report_value", None)
-            comparison = check.get("comparison")
-            if isinstance(comparison, dict):
-                comparison.pop("stated", None)
             break
     return clone
 
@@ -647,23 +793,15 @@ def mutate_remove_csr_report_value(art: dict) -> dict:
 def mutate_hide_report_quote_2(art: dict) -> dict:
     clone = deepcopy(art)
     for check in clone.get("evidence_checks") or []:
-        if check.get("report_quote_2"):
-            check.pop("report_quote_2", None)
-            comparison = check.get("comparison")
-            if isinstance(comparison, dict):
-                comparison.pop("operands", None)
-                comparison.pop("result", None)
-            check.pop("observed", None)
-            check.pop("evidence_quote", None)
+        receipt = check.get("public_receipt")
+        if isinstance(receipt, dict):
+            receipt.pop("report_operand", None)
             break
     return clone
 
 
 def mutate_duplicate_findings(art: dict) -> dict:
     clone = deepcopy(art)
-    findings = list(clone.get("findings") or [])
-    if findings:
-        clone["findings"] = findings + findings
     checks = list(clone.get("evidence_checks") or [])
     extra = [row for row in checks if row.get("verdict") == "contradicted"]
     if extra:
@@ -704,19 +842,10 @@ def mutate_falsify_evidence_counts(art: dict) -> dict:
 def mutate_demote_evidence(art: dict) -> dict:
     clone = deepcopy(art)
     for check in clone.get("evidence_checks") or []:
-        if check.get("verdict") == "changed_since_report":
-            check.pop("current_value", None)
-            check.pop("reconstruction_attempt", None)
-            check.pop("evidence_file", None)
-            check.pop("current_as_of", None)
-            comparison = check.get("comparison")
-            if isinstance(comparison, dict):
-                comparison.pop("current", None)
-            break
-        if check.get("verdict") in {"confirmed", "contradicted"}:
-            check.pop("observed", None)
-            check.pop("comparison", None)
-            check.pop("evidence_quote", None)
+        if check.get("verdict") in {
+            "confirmed", "contradicted", "changed_since_report"
+        }:
+            check.pop("public_receipt", None)
             break
     return clone
 
@@ -726,11 +855,10 @@ def mutate_inject_paths(art: dict) -> dict:
     checks = list(clone.get("evidence_checks") or [])
     if checks:
         checks[0] = dict(checks[0])
-        checks[0]["explanation"] = "See /Users/eric/secret/findings.json for details."
+        receipt = dict(checks[0].get("public_receipt") or {})
+        receipt["explanation"] = "See /Users/eric/secret/findings.json for exact details."
+        checks[0]["public_receipt"] = receipt
         clone["evidence_checks"] = checks
-    skipped = dict(clone.get("checks") or {})
-    skipped["skipped_note"] = "Outcome counts come from coverage in findings.json."
-    clone["checks"] = skipped
     return clone
 
 
@@ -739,7 +867,11 @@ def mutate_inject_json_pointer(art: dict) -> dict:
     checks = list(clone.get("evidence_checks") or [])
     if checks:
         checks[0] = dict(checks[0])
-        checks[0]["evidence_location"] = "/secret/raw_pointer"
+        receipt = dict(checks[0].get("public_receipt") or {})
+        operand = dict(receipt.get("report_operand") or {})
+        operand["location"] = "/secret/raw_pointer"
+        receipt["report_operand"] = operand
+        checks[0]["public_receipt"] = receipt
         clone["evidence_checks"] = checks
     return clone
 
@@ -770,8 +902,8 @@ def mutate_inject_credential(art: dict) -> dict:
 
 def mutate_static_evidence_to_live(art: dict) -> dict:
     clone = deepcopy(art)
-    for check in clone.get("evidence_checks") or []:
-        if check.get("verdict") == "changed_since_report":
-            check["current_source_kind"] = "live_query"
+    for source in clone.get("sources") or []:
+        if source.get("kind") == "supplied_file":
+            source["kind"] = "live_tool"
             break
     return clone

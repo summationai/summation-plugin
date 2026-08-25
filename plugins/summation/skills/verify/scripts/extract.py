@@ -68,7 +68,7 @@ def main() -> int:
         args.report, findings, html=html, arithmetic_checks=arithmetic_checks,
         arithmetic_uses=arithmetic_uses)
     inv = doc.get("inventory") or inventory_for(args.report)
-    doc["internal_outcomes"] = check_inventory(inv, visible)
+    doc["internal_candidates"] = check_inventory(inv, visible)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(doc, indent=2) + "\n")
     print(f"extract: {len(doc.get('inventory', {}).get('items') or [])} inventory item(s) → {args.out}")

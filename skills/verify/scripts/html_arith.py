@@ -119,26 +119,29 @@ def footing_findings(tables: list[list[list[str]]]) -> tuple[list[dict], int, li
             cents = sample.as_tuple().exponent < 0 or shown.as_tuple().exponent < 0
             allowance = Decimal("0.01") if cents else Decimal("0")
             matched = abs(delta) <= allowance
-            col_name = header[col] if col < len(header) and header[col] else f"column {col + 1}"
+            col_name = (
+                str(header[col]).strip()
+                if col < len(header) and str(header[col]).strip() else None
+            )
             addends = [
                 {
-                    "label": str(components[index][0] if components[index] else f"row {index + 1}"),
+                    "label": (
+                        str(components[index][0]).strip()
+                        if components[index] and str(components[index][0]).strip()
+                        else None
+                    ),
                     "value": float(values[index]),
                     "displayed": shown_cells[index],
-                    "location": (
-                        f"table{table_index}/"
-                        f"{components[index][0] if components[index] else f'row {index + 1}'}/"
-                        f"{col_name}"
-                    ),
+                    "coordinate": f"table{table_index}/r{index + 2}/c{col + 1}",
                 }
                 for index in range(len(values))
             ]
-            location = f"table{table_index}/{last[0]}/{col_name}"
+            coordinate = f"table{table_index}/r{len(body) + 1}/c{col + 1}"
             uses.append({
                 "check_id": "ari_total_footing",
                 "family": "internal_arithmetic",
-                "location": location,
-                "column": col_name,
+                "coordinate": coordinate,
+                "column_label": col_name,
                 "matched": matched,
                 "stated": float(shown),
                 "stated_displayed": str(last[col]),
@@ -154,17 +157,21 @@ def footing_findings(tables: list[list[list[str]]]) -> tuple[list[dict], int, li
                 "severity": "high",
                 "tier": "D",
                 "statement": (
-                    f"The “{last[0]}” row in {col_name} shows {last[col]}, "
-                    f"but the rows above sum to {computed}."
+                    f"Addition mismatch at {coordinate}: stated {last[col]}; "
+                    f"computed {computed}."
                 ),
-                "location": location,
-                "claim_ids": [f"t{table_index}c{col}"],
+                "coordinate": coordinate,
                 "detail": {
                     "stated": float(shown),
                     "computed": float(computed),
                     "discrepancy": float(delta),
                     "addends": [
-                        {"label": row["label"], "value": row["value"]}
+                        {
+                            "label": row["label"],
+                            "value": row["value"],
+                            "displayed": row["displayed"],
+                            "coordinate": row["coordinate"],
+                        }
                         for row in addends
                     ],
                 },
@@ -183,6 +190,53 @@ def findings_doc(report: pathlib.Path, findings: list[dict], *, html: bool,
     digest = hashlib.sha256(report.read_bytes()).hexdigest()
     d_count = sum(1 for item in findings if item.get("tier") == "D")
     inventory = inventory_for(report)
+    by_cell = {
+        (str(item.get("location") or ""), str(item.get("displayed") or "")): item
+        for item in (inventory.get("items") or [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    uses = list(arithmetic_uses or [])
+    uses_by_coordinate = {}
+    for use in uses:
+        if not isinstance(use, dict):
+            continue
+        inventory_ids = []
+        for addend in use.get("addends") or []:
+            if not isinstance(addend, dict):
+                continue
+            item = by_cell.get((
+                str(addend.get("coordinate") or ""),
+                str(addend.get("displayed") or ""),
+            ))
+            addend["inventory_id"] = item.get("id") if item else None
+            if item:
+                inventory_ids.append(item["id"])
+        stated_item = by_cell.get((
+            str(use.get("coordinate") or ""),
+            str(use.get("stated_displayed") or ""),
+        ))
+        use["stated_inventory_id"] = stated_item.get("id") if stated_item else None
+        if stated_item:
+            inventory_ids.append(stated_item["id"])
+        use["inventory_ids"] = list(dict.fromkeys(inventory_ids))
+        uses_by_coordinate[str(use.get("coordinate") or "")] = use
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        use = uses_by_coordinate.get(str(finding.get("coordinate") or ""))
+        if use is None:
+            continue
+        finding["inventory_ids"] = list(use.get("inventory_ids") or [])
+        finding["detail"]["addends"] = [
+            {
+                "inventory_id": row.get("inventory_id"),
+                "displayed": row.get("displayed"),
+                "value": row.get("value"),
+                "coordinate": row.get("coordinate"),
+            }
+            for row in use.get("addends") or []
+            if isinstance(row, dict)
+        ]
     complete = bool(inventory.get("complete")) and not intake_error
     if intake_error:
         inventory = {
@@ -221,7 +275,7 @@ def findings_doc(report: pathlib.Path, findings: list[dict], *, html: bool,
             ),
         },
         "findings": findings,
-        "arithmetic_uses": list(arithmetic_uses or []),
+        "arithmetic_uses": uses,
         "findings_truncated": False,
         "agentic_only": not complete,
         "agentic_scan_completed": complete,

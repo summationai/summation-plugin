@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Render grade-artifact/v1 from coldverify findings.json. Fail closed."""
+"""Render grade-artifact/public-receipt-v1 from coldverify findings.json. Fail closed."""
 from __future__ import annotations
 
 import argparse
-from decimal import Decimal, InvalidOperation
 import hashlib
 import html
 import json
@@ -17,15 +16,13 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 from severity import normalize_severity  # noqa: E402
 
-SCHEMA_VERSION = "grade-artifact/v1"
+SCHEMA_VERSION = "grade-artifact/public-receipt-v1"
 MIN_CLAIMS = 1
 SHAREABLE_CHECK_KEYS = (
     "id", "type", "basis", "verdict", "importance", "severity",
-    "report_quote", "report_quote_2", "explanation", "claim_id",
-    "location", "metric_label",
-    "evidence_file", "evidence_quote", "evidence_location", "evidence_as_of",
-    "observed", "comparison", "report_value", "current_as_of", "current_value",
-    "reconstruction_attempt", "report_date", "current_source_kind",
+    "claim_id", "public_receipt", "report_quote", "explanation", "location",
+    "report_value", "current_as_of", "current_value",
+    "reconstruction_attempt", "report_date",
 )
 
 CLAIM_PUBLIC_KEYS = (
@@ -59,14 +56,12 @@ REQUIRED = (
     "limitations",
     "offer",
     "claims",
+    "sources",
 )
 VERDICTS = frozenset(
     {"safe_to_share", "share_with_caveats", "fix_first", "unable_to_grade"}
 )
 PUBLIC_VERDICTS = VERDICTS
-MATERIAL_REPORT_ONLY_TYPES = frozenset(
-    {"internal", "logic", "arithmetic", "units", "selection"}
-)
 CUSTOMER_CHECK_IDS = frozenset({
     "ari_total_footing",
     "ari_total_footing_precision",
@@ -212,454 +207,296 @@ def limitations_of(raw: dict) -> list[str]:
 def source_public(raw: dict) -> dict:
     src = raw.get("source") or {}
     raw_path = str(src.get("path") or "")
+    name = Path(raw_path).name if raw_path else ""
+    source_format = str(src.get("format") or "unknown")
+    period_label = src.get("period_label")
+    report_date = src.get("report_date")
+    if not _publishable_text(name) or not _publishable_text(source_format):
+        raise SystemExit("render: report source metadata is not publishable")
+    for value in (period_label, report_date):
+        if value not in (None, "") and not _publishable_text(value):
+            raise SystemExit("render: report source metadata is not publishable")
     return {
-        "path": Path(raw_path).name if raw_path else "",
-        "format": src.get("format") or "unknown",
+        "path": name,
+        "format": source_format,
         "sha256": src.get("sha256"),
-        "period_label": src.get("period_label"),
-        "report_date": src.get("report_date"),
+        "period_label": period_label,
+        "report_date": report_date,
     }
 
 
-GENERIC_VERDICT = re.compile(
-    r'^The report claim(?:\s+".*?")? is (?:confirmed|contradicted)\.?$',
-    re.I | re.S,
-)
 ABS_PATH = re.compile(
     r'(?:^|[\s"\'])((?:/Users|/home|/var|/tmp|/private)/[^\s"\']+)',
     re.I,
 )
-JSON_POINTER = re.compile(r'(?:^|[\s"\'])(/[A-Za-z0-9_~.-]+)+')
+TENANT_IDENTIFIER = re.compile(
+    r"\b(?:tenant|organization|org)[ _-]?id\b\s*[:=]\s*[\"']?[A-Za-z0-9_-]+",
+    re.I,
+)
+CREDENTIAL = re.compile(
+    r"\b(?:api[ _-]?key|access[ _-]?token|refresh[ _-]?token|client[ _-]?secret|"
+    r"password|credential)\b\s*[:=]\s*[^\s,;}]+",
+    re.I,
+)
+BEARER = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.I)
 PRIVATE_NAMES = frozenset({
     "receipts.json", "findings.json", "checks.json", "claims.json",
     "grade-artifact.json", "report-visible.txt", "ledger.json",
     "source-findings.json", "provenance.json",
 })
 
-
-def _looks_internal_token(text: str) -> bool:
-    compact = str(text).strip().replace(" ", "_")
-    return bool(re.fullmatch(r"[A-Z0-9_]{8,}", compact))
-
-
-def _safe_text(value) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    if ABS_PATH.search(text) or JSON_POINTER.search(" " + text):
-        return None
-    if Path(text).name in PRIVATE_NAMES:
-        return None
-    if "/" in text and text.startswith("/"):
-        return None
-    if _looks_internal_token(text):
-        return None
-    return text
-
-
-def _safe_basename(path) -> str | None:
-    if not path:
-        return None
-    name = Path(str(path)).name
-    if not name or name in PRIVATE_NAMES:
-        return None
-    if _looks_internal_token(Path(name).stem):
-        return None
-    return name
-
-
-def sanitize_public_text(value) -> str | None:
-    if value is None:
-        return None
-    text = str(value)
-    if not text.strip():
-        return None
-    text = ABS_PATH.sub(" ", text)
-    text = re.sub(r"`?evidence/([^`/\s]+)`?", r"\1", text)
-    for name in PRIVATE_NAMES:
-        text = re.sub(rf"\b{re.escape(name)}\b", "", text)
-    text = JSON_POINTER.sub(" ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    if not text or _looks_internal_token(text):
-        return None
-    return text
-
-
-def _observed_values(check: dict) -> list[dict]:
-    if str(check.get("verdict") or "") == "changed_since_report":
-        return []
-    out = []
-    seen = set()
-    for item in check.get("evidence_json") or []:
-        if not isinstance(item, dict):
-            continue
-        value = item.get("value")
-        if value is None:
-            continue
-        if _safe_text(value) is None and str(value).startswith("/"):
-            continue
-        pointer = str(item.get("pointer") or "")
-        label = pointer.rstrip("/").split("/")[-1] if pointer else "value"
-        label = label.replace("~1", "/").replace("~0", "~").replace("_", " ")
-        if ABS_PATH.search(label) or not label or _looks_internal_token(label):
-            continue
-        if _safe_text(value) is None and not isinstance(value, (int, float, Decimal)):
-            continue
-        key = (label, str(value))
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append({"label": label, "value": value})
-    for receipt in check.get("evidence_receipts") or []:
-        if not isinstance(receipt, dict):
-            continue
-        for item in _observed_values({"evidence_json": receipt.get("evidence_json")}):
-            key = (item["label"], str(item["value"]))
-            if key in seen:
-                continue
-            seen.add(key)
-            out.append(item)
-    return out
-
-
-def _public_comparison(raw) -> dict | None:
-    if not isinstance(raw, dict):
-        return None
-    operands = []
-    for item in raw.get("operands") or []:
-        if not isinstance(item, dict):
-            continue
-        label = _safe_text(item.get("label"))
-        if not label:
-            continue
-        operands.append({
-            "label": label,
-            "value": item.get("value"),
-            "location": where_from(item.get("location")) or None,
-        })
-    out = {
-        "kind": str(raw.get("kind") or ""),
-        "prior": raw.get("prior"),
-        "current": raw.get("current"),
-        "stated": raw.get("stated"),
-        "result": raw.get("result"),
-        "direction": raw.get("direction"),
-        "formula": raw.get("formula"),
-        "operands": operands,
-    }
-    if not out["kind"] and not operands and out["result"] is None:
-        return None
-    return {key: value for key, value in out.items() if value not in (None, "", [])}
-
-
-def _is_generic_verdict(text: str) -> bool:
-    return bool(GENERIC_VERDICT.match((text or "").strip()))
-
-
-def sanitize_explanation(text: str) -> str:
-    cleaned = str(text or "")
-    cleaned = ABS_PATH.sub(" ", cleaned)
-    cleaned = JSON_POINTER.sub(" ", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    if _is_generic_verdict(cleaned):
-        return ""
-    if re.match(r"^Explanation for \w+\.?$", cleaned, re.I):
-        return ""
-    if _looks_internal_token(cleaned):
-        return ""
-    if any(name in cleaned for name in PRIVATE_NAMES):
-        return ""
-    if re.search(r"\b[\w.-]+\.json\b", cleaned):
-        return ""
-    if re.search(r"\b[A-Z0-9_]{8,}\b", cleaned):
-        return ""
-    return cleaned
-
-
 def public_explanation(check: dict) -> str:
-    """Shareable why: grounded receipt text or structured operands, never a verdict stamp."""
-    if check.get("verdict") == "not_checkable":
-        return "No accepted check reached this claim."
-    if check.get("verdict") == "changed_since_report":
-        quote = str(check.get("report_quote") or "").strip()
-        prefix = (
-            "The live-query value" if check.get("current_source_kind") == "live_query"
-            else "The later value in the supplied recorded evidence"
-        )
-        if quote:
-            return f"{prefix} differs from the report claim \"{quote}\"."
-        return f"{prefix} differs from the report claim."
-    comparison = check.get("comparison") if isinstance(check.get("comparison"), dict) else {}
-    grounded = sanitize_explanation(str(check.get("explanation") or ""))
-    if grounded:
-        return grounded
-    if comparison.get("kind") == "percentage_points":
-        result = str(comparison.get("result") or "")
-        number = (
-            result.replace("percentage points", "")
-            .replace("percentage-point", "")
-            .strip()
-            or result
-        )
-        direction = comparison.get("direction") or "increase"
-        stated = comparison.get("stated") or "the stated percent"
-        return (
-            f"This is a {number} percentage-point {direction}, "
-            f"not a {stated} relative {direction}."
-        )
-    quote = str(check.get("report_quote") or "").strip()
-    observed = check.get("observed") or []
-    if observed:
-        first = observed[0]
-        shown = figure(first.get("value")) or str(first.get("value") or "")
-        if check.get("verdict") == "confirmed":
-            return f"The observed value is {shown}."
-        return f"The observed value is {shown}, which does not match the report."
-    ev_quote = _safe_text(check.get("evidence_quote"))
-    if ev_quote:
-        return ev_quote
-    if comparison.get("formula") and comparison.get("result") is not None:
-        return (
-            f"{str(comparison['formula']).capitalize()} equals "
-            f"{figure(comparison.get('result')) or comparison.get('result')}."
-        )
-    if check.get("verdict") == "not_checkable":
-        return "No accepted check reached this claim."
-    if check.get("verdict") == "changed_since_report":
-        prefix = (
-            "The live-query value" if check.get("current_source_kind") == "live_query"
-            else "The later value in the supplied recorded evidence"
-        )
-        if quote:
-            return f"{prefix} differs from the report claim \"{quote}\"."
-        return f"{prefix} differs from the report claim."
-    if check.get("basis") == "report" and quote:
-        return f"The report value {quote} was recomputed from the document."
-    return "The check completed without a shareable evidence line."
+    """Return only the explicit agent-authored explanation."""
+    receipt = check.get("public_receipt")
+    if isinstance(receipt, dict):
+        return str(receipt.get("explanation") or "").strip()
+    return str(check.get("explanation") or "").strip()
 
 
-def _parse_public_number(value):
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float, Decimal)):
-        try:
-            return Decimal(str(value))
-        except (InvalidOperation, ValueError):
-            return None
-    text = str(value).strip()
+VAGUE_OPERAND = re.compile(r"^(?:row|operand|item|value)(?:\s+\d+)?$", re.I)
+VAGUE_SOURCE = re.compile(
+    r"^(?:source|evidence|supplied evidence|recorded evidence|live data)$", re.I)
+SOURCE_ID = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
+ISO_TIME = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
+RAW_OFFICE_TOKEN = re.compile(r"\b(?:slide|shape)\d+\b", re.I)
+
+
+def _publishable_text(value, *, operand_label: bool = False) -> bool:
+    text = str(value or "").strip()
     if not text:
-        return None
-    match = re.search(r"-?\$?-?\d[\d,]*(?:\.\d+)?", text.replace("%", ""))
-    if not match:
-        return None
-    try:
-        return Decimal(match.group(0).replace("$", "").replace(",", ""))
-    except (InvalidOperation, ValueError):
-        return None
-
-
-def _json_public_number(value: Decimal):
-    return int(value) if value == value.to_integral() else float(value)
-
-
-def _has_shareable_receipt(check: dict) -> bool:
-    verdict = str(check.get("verdict") or "")
-    if verdict not in {"confirmed", "contradicted"}:
-        return True
-    if not sanitize_public_text(check.get("report_quote")):
         return False
-    comparison = check.get("comparison") if isinstance(check.get("comparison"), dict) else {}
-    # A repeated claim, explanation, second quote, or hidden field is not a
-    # calculation. Report-only outcomes need the operands the program used.
-    if check.get("basis") == "report":
-        return bool(comparison.get("operands"))
-    if check.get("basis") == "evidence" and not _safe_basename(
-            check.get("evidence_file")):
+    if (
+        ABS_PATH.search(text)
+        or re.fullmatch(r"(?:/[A-Za-z0-9_~.-]+)+", text)
+        or RAW_OFFICE_TOKEN.search(text)
+        or TENANT_IDENTIFIER.search(text)
+        or CREDENTIAL.search(text)
+        or BEARER.search(text)
+        or any(name.lower() in text.lower() for name in PRIVATE_NAMES)
+    ):
         return False
-    if comparison.get("operands"):
-        return True
-    if check.get("observed"):
-        return True
-    evidence_quote = _safe_text(check.get("evidence_quote"))
-    if not evidence_quote or not _safe_basename(check.get("evidence_file")):
-        return False
-    report_quote = re.sub(r"\s+", " ", str(check.get("report_quote") or "")).strip()
-    return evidence_quote != report_quote
-
-
-def _has_csr_receipt(check: dict, report_date=None) -> bool:
-    if str(check.get("verdict") or "") != "changed_since_report":
-        return True
-    report_value = _parse_public_number(check.get("report_value"))
-    current_value = check.get("current_value")
-    if current_value is None and isinstance(check.get("comparison"), dict):
-        current_value = check["comparison"].get("current")
-    current_number = _parse_public_number(current_value)
-    as_of = str(check.get("current_as_of") or check.get("evidence_as_of") or "").strip()
-    recon = sanitize_public_text(check.get("reconstruction_attempt"))
-    source = _safe_basename(check.get("evidence_file"))
-    date = str(check.get("report_date") or report_date or "").strip()
-    if report_value is None or current_number is None:
-        return False
-    if report_value == current_number:
-        return False
-    if not as_of or not recon or not source or not date:
+    if operand_label and VAGUE_OPERAND.fullmatch(text):
         return False
     return True
 
 
-def _source_check_is_live(source: dict | None, check: dict) -> bool:
-    if not isinstance(source, dict) or source.get("status") not in {"complete", "partial"}:
+def _publishable_metadata(value) -> bool:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if re.search(
+                r"(?:password|secret|credential|api[_-]?key|access[_-]?token|"
+                r"refresh[_-]?token)", str(key), re.I
+            ):
+                return False
+            if not _publishable_metadata(child):
+                return False
+        return True
+    if isinstance(value, list):
+        return all(_publishable_metadata(child) for child in value)
+    if value is None or isinstance(value, (bool, int, float)):
+        return True
+    return _publishable_text(value)
+
+
+def _publishable_operand(value) -> bool:
+    if not isinstance(value, dict) or set(value) != {"label", "value", "location"}:
         return False
-    for row in source.get("checks") or []:
-        if not isinstance(row, dict) or row.get("verdict") != "changed_since_report":
-            continue
-        if check.get("id") and row.get("id") == check.get("id"):
-            return True
-        if check.get("claim_id") and row.get("claim_id") == check.get("claim_id"):
-            return True
-        if (check.get("report_quote") and
-                row.get("report_quote") == check.get("report_quote")):
-            return True
-    return False
+    if not _publishable_text(value.get("label"), operand_label=True):
+        return False
+    if not _publishable_text(value.get("location")):
+        return False
+    shown = value.get("value")
+    if shown in (None, "") or isinstance(shown, bool):
+        return False
+    return not isinstance(shown, str) or _publishable_text(shown)
 
 
-def _public_evidence_location(value) -> str | None:
+def _substantive_public(value) -> bool:
     text = str(value or "").strip()
-    if not text:
-        return None
-    if re.fullmatch(r"(?:/[A-Za-z0-9_~.-]+)+", text):
-        label = pointer_name(text).replace("_", " ").strip()
-        return f"{label} field" if label else None
-    return where_from(text) or None
+    return bool(
+        _publishable_text(text)
+        and len(re.findall(r"[A-Za-z0-9%$]+", text)) >= 6
+        and re.search(r"[.!?]$", text)
+    )
 
 
-def _public_layer2(layer2: list[dict] | None, claims: list[dict] | None = None,
-                   report_date: str | None = None,
-                   source: dict | None = None) -> list[dict]:
-    public = []
-    claim_loc = {
-        str(row.get("id") or ""): row.get("location")
-        for row in (claims or [])
-        if isinstance(row, dict) and row.get("id") and row.get("location")
+def _publishable_receipt(receipt, *, basis: str,
+                         source_ids: set[str]) -> bool:
+    if not isinstance(receipt, dict):
+        return False
+    allowed = {
+        "report_operand", "decisive_operands", "explanation",
+        "calculation", "source_id",
     }
-    for f in layer2 or []:
-        verdict = str(f.get("verdict") or "")
-        observed = _observed_values(f)
-        evidence_quote = _safe_text(f.get("evidence_quote"))
-        observed_vals = {str(item.get("value")) for item in observed}
-        if evidence_quote and observed_vals and evidence_quote not in observed_vals:
-            if evidence_quote != str(f.get("report_quote") or ""):
-                evidence_quote = None
-        if evidence_quote is None and observed:
-            first = observed[0]
-            evidence_quote = str(first.get("value") or "")
-        comparison = _public_comparison(f.get("comparison"))
-        if verdict == "changed_since_report":
-            comparison = dict(comparison or {})
-            comparison.setdefault("kind", "current_vs_report")
-            if f.get("current_value") is not None:
-                comparison["current"] = f.get("current_value")
-            quoted = _parse_public_number(f.get("report_value"))
-            if quoted is not None:
-                comparison.setdefault("stated", _json_public_number(quoted))
-            if not comparison:
-                comparison = None
-        loc = f.get("location") or claim_loc.get(str(f.get("claim_id") or ""))
-        quote = sanitize_public_text(f.get("report_quote")) or str(f.get("report_quote") or "")
-        friendly = where_from(loc, quote=quote) or None
-        basis = str(f.get("basis") or (
-            "report" if f.get("type") in MATERIAL_REPORT_ONLY_TYPES else "evidence"))
-        raw_evidence_file = str(f.get("evidence_file") or "").strip()
-        evidence_file = _safe_basename(raw_evidence_file)
+    if set(receipt) - allowed:
+        return False
+    if not _publishable_operand(receipt.get("report_operand")):
+        return False
+    operands = receipt.get("decisive_operands")
+    if not isinstance(operands, list) or not operands:
+        return False
+    if not all(_publishable_operand(row) for row in operands):
+        return False
+    explanation = str(receipt.get("explanation") or "").strip()
+    if not _substantive_public(explanation):
+        return False
+    calculation = receipt.get("calculation")
+    if calculation is not None:
+        if not isinstance(calculation, dict) or set(calculation) != {"expression", "result"}:
+            return False
+        if not _publishable_text(calculation.get("expression")):
+            return False
+        result = calculation.get("result")
+        if result in (None, "") or isinstance(result, bool):
+            return False
+        if isinstance(result, str) and not _publishable_text(result):
+            return False
+    source_id = str(receipt.get("source_id") or "").strip()
+    if basis == "evidence":
+        return bool(source_id and source_id in source_ids)
+    return not source_id
+
+
+def _public_sources(sources: list[dict] | None) -> list[dict]:
+    public = []
+    seen = set()
+    for source in sources or []:
+        if not isinstance(source, dict):
+            raise SystemExit("render: retained source metadata is not publishable")
+        source_id = str(source.get("id") or "").strip()
+        kind = str(source.get("kind") or "").strip()
+        label = str(source.get("label") or "").strip()
+        filename = str(source.get("evidence_file") or "").strip()
+        digest = str(source.get("result_sha256") or "").strip()
+        allowed = {"id", "kind", "label", "evidence_file", "result_sha256", "retrieval"}
         if (
-            raw_evidence_file
-            and not evidence_file
-            and basis == "evidence"
-            and verdict in {"confirmed", "contradicted", "changed_since_report"}
+            set(source) - allowed
+            or not source_id
+            or not SOURCE_ID.fullmatch(source_id)
+            or source_id in seen
+            or kind not in {"supplied_file", "live_tool"}
+            or not _publishable_text(label)
+            or VAGUE_SOURCE.fullmatch(label)
+            or not filename
+            or Path(filename).name != filename
+            or filename in PRIVATE_NAMES
+            or not re.fullmatch(r"[0-9a-f]{64}", digest)
         ):
-            evidence_file = "supplied evidence"
+            raise SystemExit("render: retained source metadata is not publishable")
+        retrieval = source.get("retrieval")
+        if kind == "supplied_file" and retrieval is not None:
+            raise SystemExit("render: supplied_file cannot carry live retrieval metadata")
+        if kind == "live_tool" and not isinstance(retrieval, dict):
+            raise SystemExit("render: live_tool retrieval metadata is missing")
         row = {
-            "id": str(f.get("id") or "L2"),
-            "type": str(f.get("type") or "semantic"),
-            "basis": basis,
-            "verdict": verdict,
-            "importance": str(f.get("importance") or "material"),
-            "severity": (
-                normalize_severity(
-                    f.get("severity"), contradicted=True,
-                    importance=str(f.get("importance") or "material"))
-                if verdict == "contradicted" else None),
-            "report_quote": quote,
-            "report_quote_2": sanitize_public_text(f.get("report_quote_2")),
-            "claim_id": f.get("claim_id"),
-            "location": friendly,
-            "metric_label": sanitize_public_text(f.get("metric_label")),
-            "evidence_file": evidence_file,
-            "evidence_quote": evidence_quote,
-            "evidence_location": _public_evidence_location(f.get("evidence_location")),
-            "evidence_as_of": _safe_text(f.get("current_as_of") or f.get("evidence_as_of")),
-            "observed": observed,
-            "comparison": comparison,
-            "report_value": (
-                f.get("report_value") if verdict == "changed_since_report" else None),
-            "current_as_of": _safe_text(f.get("current_as_of")),
-            "current_value": (
-                f.get("current_value") if verdict == "changed_since_report" else None),
-            "reconstruction_attempt": (
-                sanitize_public_text(f.get("reconstruction_attempt"))
-                if verdict == "changed_since_report" else None),
-            "report_date": (
-                _safe_text(f.get("report_date") or report_date)
-                if verdict == "changed_since_report" else None),
-            "current_source_kind": (
-                "live_query" if _source_check_is_live(source, f)
-                else "supplied_recorded_evidence"
-            ) if basis == "evidence" and verdict in {
-                "confirmed", "contradicted", "changed_since_report"
-            } else None,
+            "id": source_id,
+            "kind": kind,
+            "label": label,
+            "evidence_file": filename,
+            "result_sha256": digest,
         }
-        merged = dict(f)
-        merged.update({key: value for key, value in row.items() if value not in (None, [], {})})
-        row["explanation"] = public_explanation(merged)
-        if not _has_shareable_receipt(row):
-            raise SystemExit(
-                "render: confirmed/contradicted finding has no shareable evidence receipt"
-            )
-        if not _has_csr_receipt(row, report_date):
-            raise SystemExit(
-                "render: changed_since_report requires distinct report and current "
-                "values, both dates, a reconstruction attempt, and a source label"
-            )
-        required = {
-            "id", "type", "basis", "verdict", "importance", "severity",
-            "report_quote", "explanation",
-        }
-        public.append({
-            key: row[key]
-            for key in SHAREABLE_CHECK_KEYS
-            if key in row and (key in required or row[key] not in (None, [], {}))
-        })
+        if kind == "live_tool":
+            if set(retrieval) != {"retrieved_at", "tool", "arguments"}:
+                raise SystemExit("render: live_tool retrieval metadata is not publishable")
+            row["retrieval"] = {
+                "retrieved_at": retrieval.get("retrieved_at"),
+                "tool": retrieval.get("tool"),
+                "arguments": retrieval.get("arguments"),
+            }
+            if not ISO_TIME.fullmatch(str(row["retrieval"]["retrieved_at"] or "")):
+                raise SystemExit("render: live_tool retrieval metadata is not publishable")
+            if not _publishable_text(row["retrieval"]["tool"]):
+                raise SystemExit("render: live_tool retrieval metadata is not publishable")
+            if not isinstance(row["retrieval"]["arguments"], dict) or not _publishable_metadata(
+                row["retrieval"]["arguments"]
+            ):
+                raise SystemExit("render: live_tool retrieval arguments are not publishable")
+        seen.add(source_id)
+        public.append(row)
     return public
 
 
-def _has_claim_evidence_receipt(check: dict) -> bool:
-    """Recognize the two validated receipt shapes exposed by the artifact."""
-    if (check.get("basis") != "evidence"
-            or check.get("verdict") not in {
-                "confirmed", "contradicted", "changed_since_report"}):
-        return False
-    single_file = bool(
-        check.get("evidence_file")
-        and (check.get("evidence_quote") or check.get("evidence_json")))
-    multi_file = any(
-        receipt.get("evidence_file") and receipt.get("evidence_json")
-        for receipt in check.get("evidence_receipts") or []
-        if isinstance(receipt, dict)
-    )
-    return single_file or multi_file
+def _public_layer2(layer2: list[dict] | None, *,
+                   sources: list[dict] | None = None) -> list[dict]:
+    """Serialize accepted checks without deriving any public semantics."""
+    public_sources = _public_sources(sources)
+    source_ids = {str(row["id"]) for row in public_sources}
+    public = []
+    decisive = {"confirmed", "contradicted", "changed_since_report"}
+    for raw in layer2 or []:
+        if not isinstance(raw, dict):
+            raise SystemExit("render: accepted check is not an object")
+        row = {
+            "id": raw.get("id"),
+            "type": raw.get("type"),
+            "basis": raw.get("basis"),
+            "verdict": raw.get("verdict"),
+            "importance": raw.get("importance"),
+            "severity": raw.get("severity"),
+            "claim_id": raw.get("claim_id"),
+        }
+        verdict = str(row.get("verdict") or "").strip()
+        if verdict and verdict not in {
+            "confirmed", "contradicted", "not_checkable",
+            "changed_since_report",
+        }:
+            raise SystemExit(f"render: unknown accepted verdict {verdict!r}")
+        if (
+            not all(str(row.get(key) or "").strip() for key in (
+                "id", "type", "basis", "verdict", "importance", "claim_id"
+            ))
+            or not all(_publishable_text(row.get(key)) for key in (
+                "id", "type", "claim_id"
+            ))
+            or not SOURCE_ID.fullmatch(str(row["id"]))
+            or row["basis"] not in {"report", "evidence"}
+            or row["importance"] not in {"material", "supporting"}
+            or row["severity"] not in {None, "high", "medium", "low"}
+        ):
+            raise SystemExit("render: accepted check metadata is incomplete")
+        if verdict in decisive:
+            receipt = raw.get("public_receipt")
+            if not _publishable_receipt(
+                receipt, basis=str(row["basis"]), source_ids=source_ids
+            ):
+                raise SystemExit("render: public_receipt is not publishable")
+            row["public_receipt"] = receipt
+            if verdict == "changed_since_report":
+                for key in (
+                    "report_value", "current_value", "current_as_of",
+                    "report_date", "reconstruction_attempt",
+                ):
+                    value = raw.get(key)
+                    if value in (None, ""):
+                        raise SystemExit(
+                            "render: changed_since_report metadata is incomplete")
+                    if isinstance(value, str) and not _publishable_text(value):
+                        raise SystemExit(
+                            "render: changed_since_report metadata is not publishable")
+                    row[key] = value
+        elif verdict == "not_checkable":
+            quote = str(raw.get("report_quote") or "").strip()
+            explanation = str(raw.get("explanation") or "").strip()
+            location = str(raw.get("location") or "").strip()
+            if not _publishable_text(quote) or not _substantive_public(explanation):
+                raise SystemExit("render: not_checkable copy is not publishable")
+            row.update({"report_quote": quote, "explanation": explanation})
+            if location:
+                if not _publishable_text(location):
+                    raise SystemExit("render: not_checkable location is not publishable")
+                row["location"] = location
+        else:
+            raise SystemExit(f"render: unknown accepted verdict {verdict!r}")
+        public.append({
+            key: row[key]
+            for key in SHAREABLE_CHECK_KEYS
+            if key in row and (
+                key == "severity" or row[key] not in (None, [], {})
+            )
+        })
+    return public
 
 
 def _material_claims(raw: dict) -> list[dict]:
@@ -701,22 +538,20 @@ def _public_score(raw: dict, checks: list[dict], headline: dict) -> dict | None:
     return None
 
 
-def _evidence_coverage(raw: dict, checks: list[dict]) -> dict:
-    supplied = [str(path) for path in raw.get("evidence_files") or []]
-    cited_names = set()
+def _evidence_coverage(raw: dict, checks: list[dict],
+                       sources: list[dict]) -> dict:
+    by_id = {str(row.get("id") or ""): row for row in sources}
+    cited_ids = set()
     for check in checks:
         if check.get("basis") != "evidence":
             continue
         if check.get("verdict") not in {
                 "confirmed", "contradicted", "changed_since_report"}:
             continue
-        if check.get("evidence_file"):
-            cited_names.add(str(check["evidence_file"]))
-        cited_names.update(
-            str(receipt.get("evidence_file"))
-            for receipt in check.get("evidence_receipts") or []
-            if isinstance(receipt, dict) and receipt.get("evidence_file"))
-    cited = sorted(cited_names)
+        receipt = check.get("public_receipt") or {}
+        source_id = str(receipt.get("source_id") or "")
+        if source_id:
+            cited_ids.add(source_id)
     material_checks = [
         check for check in checks if check.get("importance") == "material"]
     external = [check for check in material_checks if check.get("basis") == "evidence"]
@@ -729,14 +564,12 @@ def _evidence_coverage(raw: dict, checks: list[dict]) -> dict:
         reached = sum(
             row.get("outcome") not in (None, "not_reached", "supporting")
             for row in material_claims)
-        confirmed_n = sum(
-            row.get("outcome") in {"confirmed", "used_for_internal_arithmetic"}
-            for row in material_claims
-        )
+        confirmed_n = sum(row.get("outcome") == "confirmed" for row in material_claims)
         contradicted_n = sum(
             row.get("outcome") in ERROR_CLAIM_OUTCOMES for row in material_claims)
         not_checkable_n = sum(
-            row.get("outcome") in {None, "not_reached", "not_checkable"}
+            row.get("outcome") in {
+                None, "not_reached", "not_checkable", "used_for_internal_arithmetic"}
             for row in material_claims)
     else:
         total = claim_count(raw) or len(material_checks)
@@ -746,18 +579,11 @@ def _evidence_coverage(raw: dict, checks: list[dict]) -> dict:
             check.get("verdict") in ERROR_CLAIM_OUTCOMES for check in material_checks)
         not_checkable_n = sum(
             check.get("verdict") == "not_checkable" for check in material_checks)
-    supplied_names = []
-    for path in supplied:
-        name = _safe_basename(path)
-        if name and name not in supplied_names:
-            supplied_names.append(name)
-    cited_safe = []
-    for name in cited:
-        safe = _safe_basename(name)
-        if safe and safe not in cited_safe:
-            cited_safe.append(safe)
-    if not supplied_names:
-        supplied_names = list(cited_safe)
+    cited_safe = [
+        str(by_id[source_id].get("label") or source_id)
+        for source_id in sorted(cited_ids)
+        if source_id in by_id
+    ]
     return {
         "document_claims_total": total,
         "document_claims_reached": reached,
@@ -781,10 +607,13 @@ def _evidence_coverage(raw: dict, checks: list[dict]) -> dict:
             check.get("verdict") == "not_checkable" for check in internal),
         "validated_outcomes": reached,
         "receipt_failures": int(review.get("receipt_failures") or 0),
-        "evidence_files_supplied": len(supplied_names),
+        "evidence_files_supplied": len(sources),
         "evidence_files_cited": cited_safe,
-        "provenance_groups": [],
-        "source_independence": "not_assessed",
+        "provenance_groups": [
+            {"source_id": row["id"], "kind": row["kind"], "label": row["label"]}
+            for row in sources
+        ],
+        "source_independence": "grouped_by_declared_provenance" if sources else "not_assessed",
     }
 
 
@@ -819,11 +648,6 @@ def _public_guidance(guidance: dict | None) -> tuple[dict | None, list[dict], li
     return decision, items("actions"), items("limits")
 
 
-def _public_source_result(source: dict | None) -> dict | None:
-    """Shareable JSON never copies a live-source payload."""
-    return None
-
-
 def _public_claim(row: dict) -> dict:
     out = {}
     for key in CLAIM_PUBLIC_KEYS:
@@ -831,20 +655,15 @@ def _public_claim(row: dict) -> dict:
             continue
         value = row[key]
         if key in {"quote", "location"}:
-            if key == "location":
-                value = where_from(value, quote=row.get("quote")) or sanitize_public_text(value)
-            else:
-                value = sanitize_public_text(value)
+            if value not in (None, "") and not _publishable_text(value):
+                raise SystemExit(f"render: claim {key} is not publishable")
+            value = str(value).strip() if value not in (None, "") else None
         if value not in (None, "", [], {}):
             out[key] = value
-    if out.get("outcome") == "used_for_internal_arithmetic":
-        out["outcome"] = "confirmed"
     mode = row.get("verification_mode")
     if not mode:
         if row.get("found_by") == "arithmetic" or row.get("outcome") == "used_for_internal_arithmetic":
             mode = "internal_arithmetic"
-        elif row.get("outcome") in {"confirmed", "contradicted", "changed_since_report"}:
-            mode = "external_evidence" if row.get("found_by") != "internal" else "internal_arithmetic"
         elif row.get("classification") == "supporting_provenance":
             mode = None
         else:
@@ -854,8 +673,7 @@ def _public_claim(row: dict) -> dict:
     return out
 
 
-def _verification_public(raw: dict, source: dict | None,
-                         layer2: list[dict] | None = None) -> dict:
+def _verification_public(raw: dict, sources: list[dict]) -> dict:
     supplied = raw.get("verification") or {}
     document = supplied.get("document") or {
         "status": "not_available" if raw.get("agentic_only") else "complete",
@@ -865,74 +683,28 @@ def _verification_public(raw: dict, source: dict | None,
         "status": "not_run",
         "detail": "No semantic review status was recorded.",
     }
-    changed = [
-        check for check in (source or {}).get("checks", [])
-        if check.get("verdict") == "changed_since_report"
-    ]
-    current_matches = [
-        check for check in (source or {}).get("checks", [])
-        if check.get("verdict") == "matches_current_source"
-    ]
-    changed_detail = (
-        f" {len(changed)} current-source difference"
-        f"{'s were' if len(changed) != 1 else ' was'} measured after the report's "
-        "snapshot date; those differences do not prove the historical claims were wrong."
-        if changed else ""
-    )
-    current_match_detail = (
-        f" {len(current_matches)} current value"
-        f"{'s still match' if len(current_matches) != 1 else ' still matches'} the dated "
-        "report, but a current-only query is not independent historical proof."
-        if current_matches else ""
-    )
-    source_status = str((source or {}).get("status") or "not_run")
-    if source and source_status == "partial":
-        live = {
-            "status": "partial",
-            "detail": str(source.get("error") or "The live source check was incomplete.")
-                      + changed_detail + current_match_detail,
-        }
-    elif source and source_status == "not_applicable":
-        live = {
-            "status": "not_available",
-            "detail": source.get("error"),
-        }
-    elif source and source_status == "failed":
-        live = {
-            "status": "failed",
-            "detail": (str(source.get("error") or "") + changed_detail
-                       + current_match_detail).strip() or None,
-        }
-    elif source and source_status == "complete":
+    live_sources = [row for row in sources if row.get("kind") == "live_tool"]
+    supplied_sources = [row for row in sources if row.get("kind") == "supplied_file"]
+    if live_sources:
         live = {
             "status": "complete",
-            "detail": (str(source.get("error") or "") + changed_detail
-                       + current_match_detail).strip() or None,
+            "detail": (
+                f"{len(live_sources)} retained source result"
+                f"{'s came' if len(live_sources) != 1 else ' came'} from actual live tool calls."
+            ),
         }
-    else:
-        evidence_files = list(raw.get("evidence_files") or [])
-        has_evidence_receipt = any(
-            _has_claim_evidence_receipt(finding) for finding in (layer2 or []))
-        if has_evidence_receipt:
-            detail = (
-                "No direct live query ran. Supplied evidence was used for the "
-                "receipted outcomes shown in this assessment."
-            )
-        elif evidence_files:
-            count = len(evidence_files)
-            detail = (
-                f"No direct live query ran. The semantic review received {count} "
-                f"supplied evidence file{'s' if count != 1 else ''}, but no "
-                "claim-level evidence receipt was produced. Treat this as a fallback assessment."
-            )
-        else:
-            detail = (
-                "No direct live query or current evidence check ran. "
-                "Treat this as a fallback assessment."
-            )
+    elif supplied_sources:
         live = {
             "status": "not_run",
-            "detail": detail,
+            "detail": (
+                "The retained evidence came from supplied recorded files. "
+                "No live tool call is claimed."
+            ),
+        }
+    else:
+        live = {
+            "status": "not_run",
+            "detail": "No retained evidence source was used.",
         }
     return {"document": document, "semantic": semantic, "live_source": live}
 
@@ -957,7 +729,7 @@ def _internally_complete(raw: dict | None, layer2: list[dict]) -> bool:
     return True
 
 
-def _combined_verdict(base: str, layer2: list[dict], source: dict | None,
+def _combined_verdict(base: str, layer2: list[dict],
                       raw: dict | None = None) -> str:
     contradicted = [
         check for check in layer2
@@ -968,8 +740,6 @@ def _combined_verdict(base: str, layer2: list[dict], source: dict | None,
         check["severity"] = normalize_severity(
             check.get("severity"), contradicted=True,
             importance=str(check.get("importance") or "material"))
-    if source and source.get("status") != "failed" and int(source.get("contradicted") or 0):
-        return "fix_first"
     if any(
         check.get("importance") == "material" for check in contradicted
     ) or any(
@@ -990,22 +760,12 @@ def _combined_verdict(base: str, layer2: list[dict], source: dict | None,
             and check.get("importance") != "supporting"
             for check in layer2
         )
-        or (
-            source and any(
-                check.get("verdict") == "changed_since_report"
-                for check in source.get("checks") or []
-            )
-        )
     ) and base in {"safe_to_share", "share_with_caveats"}:
         return "needs_review"
-    if source and source.get("status") in {"failed", "partial", "not_applicable"}:
-        if base in {"safe_to_share", "share_with_caveats"}:
-            if not _internally_complete(raw, layer2):
-                return "needs_review"
     return base
 
 
-def _offer(findings: list[dict], layer2: list[dict], source: dict | None,
+def _offer(findings: list[dict], layer2: list[dict],
            verdict: str, raw: dict) -> str:
     display = customer_verdict(verdict)
     n_err = sum(1 for item in findings or [] if item.get("tier") == "D")
@@ -1021,7 +781,6 @@ def _offer(findings: list[dict], layer2: list[dict], source: dict | None,
 
 def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
                            layer2: list[dict] | None = None,
-                           source: dict | None = None,
                            guidance: dict | None = None) -> dict:
     if not isinstance(raw, dict):
         raise SystemExit("render: input is not JSON object")
@@ -1031,53 +790,26 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
     findings = []
     diagnostics = []
     material_rows = _material_claims(raw)
-    material_error_check_ids = {
-        str(row.get("check_id") or "") for row in material_rows
-        if row.get("outcome") == "error" and row.get("check_id")
-    }
     for f in findings_in:
-        linked_claim_ids = [
-            str(row.get("id")) for row in (raw.get("claims") or [])
-            if isinstance(row, dict)
-            and row.get("outcome") == "error"
-            and row.get("check_id") == f.get("check_id")
-            and row.get("id")
-        ]
-        public = {
-            "check_id": f.get("check_id"),
-            "family": f.get("family"),
-            "tier": f.get("tier"),
-            "severity": f.get("severity"),
-            "statement": sanitize_public_text(f.get("statement")) or "Document error",
-            "location": where_from(f.get("location")) or None,
-            "claim_ids": linked_claim_ids,
-        }
-        detail = f.get("detail")
-        if isinstance(detail, dict) and "stated" in detail and "computed" in detail:
-            public["arithmetic"] = {
-                "stated": detail.get("stated"),
-                "computed": detail.get("computed"),
-                "discrepancy": detail.get("discrepancy"),
-                "addends": [
-                    {
-                        "label": sanitize_public_text(row.get("label")) or "row",
-                        "value": row.get("value"),
-                    }
-                    for row in (detail.get("addends") or [])
-                    if isinstance(row, dict)
-                ],
-            }
         if _is_diagnostic_record(f):
+            statement = str(f.get("statement") or "").strip()
+            diagnostic_location = str(
+                f.get("coordinate") or f.get("location") or ""
+            ).strip()
+            if not _publishable_text(statement):
+                raise SystemExit("render: diagnostic statement is not publishable")
+            if diagnostic_location and not _publishable_text(diagnostic_location):
+                raise SystemExit("render: diagnostic location is not publishable")
             diagnostics.append({
                 "check_id": str(f.get("check_id") or "diagnostic"),
-                "statement": sanitize_public_text(f.get("statement")) or "",
-                "location": where_from(f.get("location")) or None,
+                "statement": statement,
+                "location": (
+                    diagnostic_location if diagnostic_location else None
+                ),
                 "severity": f.get("severity"),
             })
-        else:
-            if not material_rows or str(f.get("check_id") or "") in material_error_check_ids:
-                findings.append(public)
     src_public = source_public(raw)
+    retained_sources = _public_sources(raw.get("sources"))
     chosen_ids = {
         str(row.get("check_id") or "") for row in material_rows
         if row.get("check_id")
@@ -1090,15 +822,15 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
         if material_rows else list(layer2 or [])
     )
     evidence_checks = _public_layer2(
-        selected_layer2, raw.get("claims"), src_public.get("report_date"), source)
+        selected_layer2, sources=retained_sources)
     evidence_findings = [
         check for check in evidence_checks
         if check.get("verdict") == "contradicted"
     ]
-    evidence_coverage = _evidence_coverage(raw, evidence_checks)
+    evidence_coverage = _evidence_coverage(raw, evidence_checks, retained_sources)
     score = _public_score(raw, evidence_checks, headline)
     layer2_list = list(selected_layer2)
-    verdict = _combined_verdict(verdict_of(raw), layer2_list, source, raw)
+    verdict = _combined_verdict(verdict_of(raw), layer2_list, raw)
     semantic_status = (((raw.get("verification") or {}).get("semantic") or {})
                        .get("status"))
     if semantic_status in {"failed", "not_run", "skipped"} and verdict in {
@@ -1113,6 +845,7 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
         "generated_at": generated_at,
         "source": src_public,
         "source_result": None,
+        "sources": retained_sources,
         "verdict": verdict,
         "score": score,
         "findings": findings,
@@ -1133,9 +866,9 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
                 "Individual check rows are not copied."
             ),
         },
-        "verification": _verification_public(raw, source, list(layer2 or [])),
+        "verification": _verification_public(raw, retained_sources),
         "limitations": limitations_of(raw),
-        "offer": {"text": _offer(findings, evidence_checks, source, verdict, raw),
+        "offer": {"text": _offer(findings, evidence_checks, verdict, raw),
                   "accepted": None},
         "claims": [_public_claim(row) for row in (raw.get("claims") or [])
                    if isinstance(row, dict)],
@@ -1320,16 +1053,6 @@ def customer_verdict(verdict: str) -> str:
     return public_verdict(verdict)
 
 
-def _finding_quantity(finding: dict):
-    detail = finding.get("detail") or finding.get("evidence") or {}
-    if isinstance(detail, dict) and "stated" in detail:
-        try:
-            return Decimal(str(detail["stated"]))
-        except (InvalidOperation, ValueError):
-            return None
-    return None
-
-
 def ungraded_reason(raw: dict, layer2_named: bool, receipts: dict | list | None
                     ) -> str | None:
     """Refuse a shareable page when the host review did not finish."""
@@ -1352,6 +1075,10 @@ def ungraded_reason(raw: dict, layer2_named: bool, receipts: dict | list | None
     if layer2_named:
         if semantic in UNFINISHED_SEMANTIC:
             return "semantic review did not complete"
+        if payload.get("discarded") or payload.get("discarded_sources"):
+            return "receipt failures remain"
+        if payload.get("discarded_claims"):
+            return "claims were discarded"
         if "claims" in payload and not grounded and not provenance:
             return "no grounded material claims"
         checks = payload.get("checks") or payload.get("validated") or []
@@ -1366,27 +1093,6 @@ def ungraded_reason(raw: dict, layer2_named: bool, receipts: dict | list | None
             ]
             if unfinished:
                 return "material claims are not complete"
-            discarded_claims = [
-                row for row in (payload.get("discarded_claims") or [])
-                if row.get("importance") == "material"
-            ]
-            if discarded_claims:
-                return "material claims were discarded"
-            receipt_failures = [
-                row for row in (payload.get("discarded") or [])
-                if not (
-                    isinstance(row, dict)
-                    and (
-                        row.get("reason") == "deterministic-conflict"
-                        or any(
-                            str(item).startswith("deterministic-conflict")
-                            for item in (row.get("problems") or [])
-                        )
-                    )
-                )
-            ]
-            if receipt_failures:
-                return "receipt failures remain"
     if (raw.get("agentic_only") and not raw.get("agentic_scan_completed")
             and not inv.get("complete")):
         if semantic not in {"complete", "partial"}:
@@ -1395,7 +1101,7 @@ def ungraded_reason(raw: dict, layer2_named: bool, receipts: dict | list | None
 
 
 def document_errors_unaccounted(raw: dict) -> bool:
-    """True when D findings exist that the receipts ledger does not cover."""
+    """Require an exact inventory-id link to an agent-authored contradiction."""
     claims = list(raw.get("claims") or [])
     if not claims:
         return False
@@ -1406,26 +1112,23 @@ def document_errors_unaccounted(raw: dict) -> bool:
     if not d_findings:
         return False
     for finding in d_findings:
-        stated = _finding_quantity(finding)
-        cid = str(finding.get("check_id") or "")
-        accounted = False
-        for claim in claims:
-            if claim.get("found_by") == "arithmetic":
-                if not cid or str(claim.get("check_id") or "") in {cid, ""}:
-                    accounted = True
-                    break
-            if str(claim.get("check_id") or "") == cid and cid:
-                accounted = True
-                break
-            if stated is not None:
-                quote = str(claim.get("quote") or "")
-                try:
-                    q = Decimal(_re.sub(r"[^\d.\-]+", "", quote) or "nan")
-                except (InvalidOperation, ValueError):
-                    q = None
-                if q == stated:
-                    accounted = True
-                    break
+        finding_ids = {
+            str(value or "").strip() for value in finding.get("inventory_ids") or []
+            if str(value or "").strip()
+        }
+        if not finding_ids:
+            return True
+        accounted = any(
+            claim.get("outcome") == "contradicted"
+            and claim.get("check_id")
+            and finding_ids & {
+                str(value or "").strip()
+                for value in claim.get("inventory_ids") or []
+                if str(value or "").strip()
+            }
+            for claim in claims
+            if isinstance(claim, dict)
+        )
         if not accounted:
             return True
     return False
@@ -1449,191 +1152,65 @@ def pretty_date(value) -> str:
     return text
 
 
-def money(value, cents: bool = False) -> str:
-    try:
-        number = Decimal(str(value).replace(",", "").replace("$", "").strip())
-    except (InvalidOperation, ValueError, AttributeError):
-        return str(value)
-    if cents or number.as_tuple().exponent < 0:
-        return f"${number:,.2f}"
-    if number == number.to_integral():
-        return f"${number:,.0f}"
-    return f"${number:,.2f}"
-
-
-def figure(value) -> str:
-    if isinstance(value, bool) or value is None:
-        return "" if value is None else str(value)
-    text = str(value).strip()
-    if text.endswith("%"):
-        body = figure(text[:-1].strip())
-        return f"{body}%" if body else text
-    if text.startswith("$") or (text[:1].isdigit() is False and "$" in text):
-        try:
-            Decimal(text.replace(",", "").replace("$", ""))
-            return money(text)
-        except (InvalidOperation, ValueError):
-            return text
-    try:
-        number = Decimal(text.replace(",", ""))
-    except (InvalidOperation, ValueError):
-        return text
-    if number == number.to_integral():
-        return f"{number:,.0f}"
-    return f"{number:,.4f}".rstrip("0").rstrip(".")
-
-
 def curly(text: str) -> str:
     return f"&ldquo;{html.escape(text)}&rdquo;"
 
 
-def pointer_name(pointer: str) -> str:
-    token = str(pointer or "").rstrip("/").split("/")[-1]
-    return token.replace("~1", "/").replace("~0", "~")
+def _source_for_check(check: dict, sources: list[dict]) -> dict | None:
+    receipt = check.get("public_receipt") or {}
+    source_id = str(receipt.get("source_id") or "")
+    return next(
+        (row for row in sources if str(row.get("id") or "") == source_id), None)
 
 
-def where_from(location, quote=None) -> str:
-    text = str(location or "").strip()
-    if not text:
-        return ""
-    if ABS_PATH.search(text):
-        return ""
-    if re.fullmatch(r"visible-text@\d+", text, re.I):
-        return "report text"
-    if re.fullmatch(r"title slide|appendix slide|slide \d+|line \d+|page \d+", text, re.I):
-        return text
-    parts = text.split("/")
-    if len(parts) == 3 and parts[0].lower().startswith("table"):
-        digits = re.sub(r"\D+", "", parts[0]) or "1"
-        return f"Table {int(digits)}, {parts[1]} row, {parts[2]} column"
-    xlsx = re.match(r"^(.+)/([A-Z]+)(\d+)$", text)
-    if xlsx:
-        sheet, col, row = xlsx.group(1), xlsx.group(2), xlsx.group(3)
-        if col == "A":
-            return f"{sheet} sheet, note (cell A{row})"
-        return f"{sheet} sheet, cell {col}{row}"
-    page = re.match(r"^page(\d+)(?:/line(\d+))?$", text, re.I)
-    if page:
-        return f"page {int(page.group(1))}"
-    line = re.match(r"^line(\d+)$", text, re.I)
-    if line:
-        return f"line {int(line.group(1))}"
-    slide = re.match(r"^slide(\d+)(?:/shape\d+)?$", text, re.I)
-    if slide:
-        n = int(slide.group(1))
-        q = str(quote or "")
-        if "appendix" in q.lower():
-            return "appendix slide"
-        if n == 1:
-            return "title slide"
-        return f"slide {n}"
-    return text
+def evidence_heading(check: dict, sources: list[dict] | None = None) -> str:
+    if check.get("basis") == "report":
+        return "Report calculation"
+    source = _source_for_check(check, list(sources or []))
+    if source is None:
+        raise SystemExit("render: evidence check has no retained source")
+    prefix = "Actual live query" if source.get("kind") == "live_tool" else "Supplied recorded evidence"
+    return f"{prefix}: {source['label']}"
 
 
-def evidence_heading(check: dict) -> str:
-    comparison = check.get("comparison") if isinstance(check.get("comparison"), dict) else {}
-    if check.get("basis") == "report" or comparison.get("kind") in {
-            "percentage_points", "identity", "ordered_list", "ratio"}:
-        return "Calculation"
-    if is_as_of_confirmed(check):
-        heading = "Source says"
-    else:
-        heading = "Evidence says"
-    evidence_location = str(check.get("evidence_location") or "").strip()
-    return f"{heading} ({evidence_location})" if evidence_location else heading
+def _operand_html(operand: dict) -> str:
+    return (
+        f"<strong>{html.escape(str(operand['label']))}</strong>: "
+        f"{html.escape(str(operand['value']))} "
+        f'<span class="where">({html.escape(str(operand["location"]))})</span>'
+    )
+
+
+def report_operand_line(check: dict) -> str:
+    return _operand_html(check["public_receipt"]["report_operand"])
 
 
 def evidence_value_line(check: dict) -> str:
-    comparison = check.get("comparison") if isinstance(check.get("comparison"), dict) else {}
-    if comparison.get("kind") == "percentage_points":
-        prior = html.escape(str(comparison.get("prior") or ""))
-        current = html.escape(str(comparison.get("current") or ""))
-        result = html.escape(str(comparison.get("result") or ""))
-        return (
-            f"prior margin {prior}; current margin {current}"
-            + (f"; {result}" if result else "")
+    receipt = check.get("public_receipt") or {}
+    lines = [_operand_html(row) for row in receipt.get("decisive_operands") or []]
+    calculation = receipt.get("calculation")
+    if isinstance(calculation, dict):
+        lines.append(
+            f"<strong>Calculation</strong>: "
+            f"{html.escape(str(calculation['expression']))} = "
+            f"{html.escape(str(calculation['result']))}"
         )
-    if comparison.get("kind") == "identity" and comparison.get("operands"):
-        parts = []
-        for item in comparison["operands"]:
-            label = html.escape(str(item.get("label") or "value"))
-            shown = html.escape(figure(item.get("value")) or str(item.get("value") or ""))
-            parts.append(f"{label} {shown}")
-        return "; ".join(parts)
-    observed = check.get("observed") or []
-    if observed:
-        bits = []
-        source = check.get("evidence_file")
-        prefix = f"<code>{html.escape(str(source))}</code> " if source else ""
-        for item in observed[:3]:
-            label = html.escape(str(item.get("label") or "value"))
-            shown = html.escape(figure(item.get("value")) or str(item.get("value") or ""))
-            bits.append(f"<code>{label}</code>&nbsp;=&nbsp;{shown}")
-        return prefix + "; ".join(bits)
-    if comparison.get("kind") in {"ordered_list", "ratio"} or comparison.get("operands"):
-        if comparison.get("kind") == "ratio":
-            ops = comparison.get("operands") or []
-            left = next((item for item in ops if "on-time" in str(item.get("label") or "").lower()), None)
-            right = next((item for item in ops if "total" in str(item.get("label") or "").lower()), None)
-            result = str(comparison.get("result") or "")
-            if left and right:
-                lv = html.escape(str(left.get("value") or ""))
-                rv = html.escape(str(right.get("value") or ""))
-                shown = html.escape(result) if result else f"{lv} / {rv}"
-                return f"{lv} on-time / {rv} total = {shown}" if "=" not in result else html.escape(result)
-            if result:
-                return html.escape(result)
-        if comparison.get("kind") == "ordered_list" or comparison.get("operands"):
-            parts = []
-            for item in comparison.get("operands") or []:
-                label = str(item.get("label") or "").strip()
-                value = figure(item.get("value")) or str(item.get("value") or "")
-                if label and value and label.lower() not in {"item", "value"} and label != value:
-                    parts.append(f"{html.escape(label)} {html.escape(value)}")
-                elif value:
-                    parts.append(html.escape(value))
-            if parts:
-                return "; ".join(parts)
-        if comparison.get("result") is not None:
-            return html.escape(str(comparison.get("result")))
-    ev_quote = _safe_text(check.get("evidence_quote"))
-    if ev_quote:
-        source = check.get("evidence_file")
-        body = html.escape(ev_quote)
-        if source:
-            return f"<code>{html.escape(str(source))}</code> {body}"
-        return body
-    return html.escape(public_explanation(check))
+    return "<br>".join(lines)
 
 
-def comparison_table(check: dict) -> str:
-    comparison = check.get("comparison") if isinstance(check.get("comparison"), dict) else {}
-    if comparison.get("kind") != "percentage_points":
-        return math_table(check)
-    rows = []
-    if comparison.get("prior") is not None:
-        rows.append(
-            "<tr><td>Prior margin</td>"
-            f'<td class="v">{html.escape(str(comparison["prior"]))}</td></tr>'
-        )
-    if comparison.get("current") is not None:
-        rows.append(
-            "<tr><td>Current margin</td>"
-            f'<td class="v">{html.escape(str(comparison["current"]))}</td></tr>'
-        )
-    if comparison.get("result") is not None:
-        rows.append(
-            '<tr class="sum"><td>Change</td>'
-            f'<td class="v">{html.escape(str(comparison["result"]))}</td></tr>'
-        )
-    if comparison.get("stated") is not None:
-        rows.append(
-            '<tr class="bad"><td>The report says</td>'
-            f'<td class="v">{html.escape(str(comparison["stated"]))}</td></tr>'
-        )
-    if not rows:
-        return ""
-    return '<table class="math num">' + "".join(rows) + "</table>"
+def material_card_attributes(check: dict) -> str:
+    """Copy the accepted check identity onto a material card without aliases."""
+    check_id = str(check.get("id") or "").strip()
+    disposition = str(check.get("verdict") or "").strip()
+    if (
+        not SOURCE_ID.fullmatch(check_id)
+        or not _publishable_text(disposition)
+    ):
+        raise SystemExit("render: material card identity is not publishable")
+    return (
+        f'data-card-id="{html.escape(check_id, quote=True)}" '
+        f'data-disposition="{html.escape(disposition, quote=True)}"'
+    )
 
 
 def receipt_block(report_says: str, evidence_html: str, report_label: str = "Report says",
@@ -1644,71 +1221,6 @@ def receipt_block(report_says: str, evidence_html: str, report_label: str = "Rep
         f'<div class="k">{evidence_label}</div><div class="q">{evidence_html}</div>'
         "</div>"
     )
-
-
-def math_table(finding: dict) -> str:
-    detail = finding.get("arithmetic") or finding.get("evidence") or {}
-    if not isinstance(detail, dict) or "stated" not in detail or "computed" not in detail:
-        return ""
-    stated = detail["stated"]
-    computed = detail["computed"]
-    delta = detail.get("discrepancy", (Decimal(str(stated)) - Decimal(str(computed))))
-    rows = []
-    for addend in detail.get("addends") or []:
-        if not isinstance(addend, dict):
-            continue
-        label = html.escape(str(addend.get("label") or "row"))
-        rows.append(
-            f'<tr><td>{label}</td><td class="v">{html.escape(money(addend.get("value"), cents=True))}</td></tr>'
-        )
-    rows.append(
-        f'<tr class="sum"><td>Sum of the rows</td><td class="v">{html.escape(money(computed, cents=True))}</td></tr>'
-    )
-    rows.append(
-        f'<tr class="bad"><td>The report shows</td><td class="v">{html.escape(money(stated, cents=True))}</td></tr>'
-    )
-    rows.append(
-        f'<tr class="sum"><td>Difference</td><td class="v">{html.escape(money(abs(Decimal(str(delta))), cents=True))}</td></tr>'
-    )
-    return '<table class="math num">' + "".join(rows) + "</table>"
-
-
-def arith_title(finding: dict) -> str:
-    loc = str(finding.get("location") or "")
-    parts = loc.split("/")
-    friendly = re.search(r",\s*([^,]+?)\s+column$", loc, re.I)
-    col = parts[2] if len(parts) == 3 else (
-        friendly.group(1) if friendly else "total")
-    detail = finding.get("arithmetic") or finding.get("evidence") or {}
-    delta = abs(Decimal(str(detail.get("discrepancy") or 0))) if isinstance(detail, dict) else Decimal(0)
-    return f"The {col} total is {money(delta, cents=True)} too high"
-
-
-def arith_fix(finding: dict) -> str:
-    loc = str(finding.get("location") or "")
-    parts = loc.split("/")
-    friendly = re.search(r",\s*([^,]+?)\s+row,\s*([^,]+?)\s+column$", loc, re.I)
-    row = parts[1] if len(parts) == 3 else (
-        friendly.group(1) if friendly else "Total")
-    col = parts[2] if len(parts) == 3 else (
-        friendly.group(2) if friendly else "value")
-    detail = finding.get("arithmetic") or finding.get("evidence") or {}
-    computed = detail.get("computed") if isinstance(detail, dict) else None
-    if computed is None:
-        return ""
-    return f"Change the {row} row, {col} column to {money(computed, cents=True)}."
-
-
-def is_as_of_confirmed(check: dict) -> bool:
-    if check.get("verdict") != "confirmed":
-        return False
-    if check.get("basis") != "evidence":
-        return False
-    if check.get("current_as_of") and check.get("type") == "staleness":
-        return True
-    return False
-
-
 ERROR_OUTCOMES = frozenset({"error", "contradicted"})
 CSR_OUTCOMES = frozenset({"changed_since_report"})
 OK_OUTCOMES = frozenset({"confirmed"})
@@ -1725,50 +1237,32 @@ def claim_bucket(outcome) -> str:
 
 
 def card_title(check: dict, kind: str) -> str:
-    label = str(check.get("metric_label") or "").strip()
-    quote = str(check.get("report_quote") or "").strip()
-    if kind == "confirmed":
-        if label and is_as_of_confirmed(check):
-            return f"The {html.escape(label.lower())} figure matches the source, as of the report&rsquo;s own period"
-        if label:
-            return f"The {html.escape(label.lower())} figure matches your evidence"
-        return html.escape(quote or "Confirmed")
-    if kind == "error":
-        if label:
-            return f"The {html.escape(label.lower())} figure does not match your evidence"
-        return html.escape(quote or "The figure does not match your evidence")
-    if kind == "csr":
-        if label:
-            return f"{html.escape(label)}: a later value differs from the report&rsquo;s"
-        return html.escape(quote) if quote else "A later value differs from the report&rsquo;s"
-    return html.escape(quote or kind)
+    del kind
+    receipt = check.get("public_receipt") or {}
+    operand = receipt.get("report_operand") or {}
+    return html.escape(str(operand.get("label") or ""))
 
 
 def location_line(check_or_finding: dict) -> str:
-    where = where_from(
-        check_or_finding.get("location"),
-        quote=check_or_finding.get("report_quote") or check_or_finding.get("quote"),
-    )
+    receipt = check_or_finding.get("public_receipt") or {}
+    operand = receipt.get("report_operand") or {}
+    where = str(operand.get("location") or check_or_finding.get("location") or "").strip()
     if not where:
         return ""
     return f'<div class="where">{html.escape(where)}</div>'
 
 
 def live_source_ran(art: dict) -> bool:
-    live = ((art.get("verification") or {}).get("live_source") or {})
-    status = str(live.get("status") or "not_run")
-    if status in {"complete", "partial"}:
-        return True
-    source = art.get("source_result") or {}
-    if source and source.get("status") not in {None, "not_run", "not_applicable"}:
-        return True
-    return False
+    return any(
+        isinstance(source, dict) and source.get("kind") == "live_tool"
+        for source in (art.get("sources") or [])
+    )
 
 
-def html_of(art: dict, raw: dict | None = None,
-            ledger_raw: dict | None = None, source: dict | None = None) -> str:
-    findings = [f for f in (art.get("findings") or []) if f.get("tier") == "D"]
+def html_of(art: dict) -> str:
+    findings = []
     checks = list(art.get("evidence_checks") or [])
+    sources = list(art.get("sources") or [])
     claims = list(art.get("claims") or [])
     supporting_claims = [
         row for row in claims
@@ -1806,7 +1300,7 @@ def html_of(art: dict, raw: dict | None = None,
             if c.get("verdict") == "not_checkable" and c.get("id") in chosen_check_ids]
         unreached = [
             row for row in counted
-            if row.get("outcome") in (None, "not_reached")]
+            if row.get("outcome") in (None, "not_reached", "used_for_internal_arithmetic")]
         other = []
     else:
         contradicted = [c for c in checks if c.get("verdict") == "contradicted"]
@@ -1838,8 +1332,6 @@ def html_of(art: dict, raw: dict | None = None,
     filename = src.get("path") or "report"
     period = src.get("period_label") or ""
     iso_date = src.get("report_date") or ""
-    if not iso_date and raw:
-        iso_date = str((raw.get("source") or {}).get("report_date") or "")
     verified = pretty_date(art.get("generated_at"))
     report_date = pretty_date(iso_date) if iso_date else ""
     if not report_date and period and _re.search(r"\d{4}-\d{2}-\d{2}", str(period)):
@@ -1961,51 +1453,24 @@ def html_of(art: dict, raw: dict | None = None,
     sections = []
 
     error_cards = []
-    for finding in findings:
-        body = math_table(finding)
-        fix = arith_fix(finding)
-        error_cards.append(
-            '<div class="card err" data-kind="error">'
-            '<span class="tag">ERROR</span>'
-            f"<h3>{html.escape(arith_title(finding))}</h3>"
-            f"{location_line(finding)}"
-            f"{body}"
-            + (f"<p>{html.escape(fix)}</p>" if fix else "")
-            + '<div class="machine">Checked by a program: the total was recomputed from the report itself.</div>'
-            "</div>"
-        )
     for check in contradicted:
         expl = public_explanation(check)
-        table = comparison_table(check)
-        receipt = "" if table else receipt_block(
-            curly(check.get("report_quote") or ""),
+        receipt = receipt_block(
+            report_operand_line(check),
             evidence_value_line(check),
-            evidence_label=evidence_heading(check),
+            report_label="Report operand",
+            evidence_label=evidence_heading(check, sources),
         )
         error_cards.append(
-            '<div class="card err" data-kind="error">'
+            '<div class="card err" data-kind="error" '
+            f'{material_card_attributes(check)}>'
             '<span class="tag">ERROR</span>'
             f"<h3>{card_title(check, 'error')}</h3>"
             f"{location_line(check)}"
-            + table
             + receipt
             + (f"<p>{html.escape(expl)}</p>" if expl else "")
-            + (
-                '<div class="machine">Checked by a program: computed from the report.</div>'
-                if check.get("basis") == "report" else
-                '<div class="machine">Checked by a program: the report quote and the evidence value do not match.</div>'
-            )
+            + '<div class="machine">Checked by a program: exact receipt values were grounded; the host agent supplied the labels, explanation, and verdict.</div>'
             + "</div>"
-        )
-    for check in other:
-        error_cards.append(
-            '<div class="card err" data-kind="error">'
-            f'<span class="tag">{html.escape(str(check.get("verdict") or "ERROR").upper())}</span>'
-            f"<h3>{html.escape(check.get('report_quote') or 'Finding')}</h3>"
-            f"{location_line(check)}"
-            + f"<p>{html.escape(public_explanation(check))}</p>"
-            + f'<div class="machine">Checked by a program: {html.escape(str(check.get("verdict")))}.</div>'
-            "</div>"
         )
     if error_cards:
         sections.append(
@@ -2019,29 +1484,26 @@ def html_of(art: dict, raw: dict | None = None,
     hidden_confirmed = confirmed[CONFIRM_CARDS:]
     confirm_cards = []
     for check in shown_confirmed:
-        as_of = is_as_of_confirmed(check)
         title = card_title(check, "confirmed")
-        if check.get("basis") == "report":
-            machine = "Checked by a program: computed from the report."
-        elif as_of and check.get("current_source_kind") == "live_query":
-            machine = "Checked by a program: the report value was compared with the live query result."
-        elif as_of:
-            machine = "Checked by a program: the report value was compared with supplied recorded evidence."
-        else:
-            machine = "Checked by a program: the report quote and the evidence value match."
+        machine = (
+            "Checked by a program: exact receipt values were grounded; "
+            "the host agent supplied the labels, explanation, and verdict."
+        )
         expl = public_explanation(check)
         receipt_html = evidence_value_line(check)
         show_why = expl and expl not in html.unescape(
             re.sub(r"<[^>]+>", " ", receipt_html))
         confirm_cards.append(
-            '<div class="card ok" data-kind="confirmed">'
+            '<div class="card ok" data-kind="confirmed" '
+            f'{material_card_attributes(check)}>'
             '<span class="tag">CONFIRMED</span>'
             f"<h3>{title}</h3>"
             f"{location_line(check)}"
             + receipt_block(
-                curly(check.get("report_quote") or ""),
+                report_operand_line(check),
                 receipt_html,
-                evidence_label=evidence_heading(check),
+                report_label="Report operand",
+                evidence_label=evidence_heading(check, sources),
             )
             + (f"<p>{html.escape(expl)}</p>" if show_why else "")
             + f'<div class="machine">{machine}</div>'
@@ -2064,49 +1526,48 @@ def html_of(art: dict, raw: dict | None = None,
     if csr:
         csr_cards = []
         for check in csr:
-            live_ran = check.get("current_source_kind") == "live_query"
-            report_raw = check.get("report_value")
-            report_val = figure(report_raw) if report_raw is not None else ""
+            source_record = _source_for_check(check, sources)
+            if source_record is None:
+                raise SystemExit("render: temporal check has no retained source")
+            live_ran = source_record.get("kind") == "live_tool"
+            report_raw = check["public_receipt"]["report_operand"]["value"]
+            report_val = str(report_raw)
             current_raw = check.get("current_value")
-            if current_raw is None and isinstance(check.get("comparison"), dict):
-                current_raw = check["comparison"].get("current")
-            current_val = figure(current_raw) if current_raw is not None else ""
-            as_of = pretty_date(check.get("current_as_of") or check.get("evidence_as_of"))
-            source_label = check.get("evidence_file") or "Current evidence"
-            evidence_location = str(check.get("evidence_location") or "").strip()
-            if evidence_location:
-                source_label = f"{source_label}, {evidence_location}"
+            current_val = str(current_raw)
+            as_of = pretty_date(check.get("current_as_of"))
+            source_label = str(source_record["label"])
             if live_ran:
-                current_label = f"Live query, {html.escape(as_of)}" if as_of else "Live query"
+                current_label = (
+                    f"Actual live query: {html.escape(source_label)}, {html.escape(as_of)}"
+                )
             else:
                 current_label = (
                     f"Supplied recorded evidence: {html.escape(str(source_label))}, "
                     f"{html.escape(as_of)}"
-                    if as_of else
-                    f"Supplied recorded evidence: {html.escape(str(source_label))}"
                 )
-            check_report_date = pretty_date(check.get("report_date")) or report_date
-            report_label = (
-                f"Report, {html.escape(check_report_date)}"
-                if check_report_date else "Report"
-            )
-            recon = sanitize_public_text(check.get("reconstruction_attempt")) or ""
+            check_report_date = pretty_date(check.get("report_date"))
+            report_label = f"Report, {html.escape(check_report_date)}"
+            recon = str(check.get("reconstruction_attempt") or "")
             csr_cards.append(
-                '<div class="card chg" data-kind="today-differs">'
+                '<div class="card chg" data-kind="today-differs" '
+                f'{material_card_attributes(check)}>'
                 '<span class="tag">LATER VALUE DIFFERS</span>'
                 f"<h3>{card_title(check, 'csr')}</h3>"
                 f"{location_line(check)}"
                 '<div class="compare">'
                 f'<div class="box"><div class="bl">{report_label}</div>'
                 f'<div class="bv">{html.escape(report_val)}</div></div>'
-                + (
-                    f'<div class="box"><div class="bl">{current_label}</div>'
-                    f'<div class="bv">{html.escape(current_val)}</div></div>'
-                    if current_raw is not None else ""
-                )
+                + f'<div class="box"><div class="bl">{current_label}</div>'
+                f'<div class="bv">{html.escape(current_val)}</div></div>'
                 + "</div>"
+                + receipt_block(
+                    report_operand_line(check),
+                    evidence_value_line(check),
+                    report_label="Report operand",
+                    evidence_label=evidence_heading(check, sources),
+                )
                 + f"<p>{html.escape(public_explanation(check))}</p>"
-                + (f"<p>{html.escape(recon)}</p>" if recon and recon not in public_explanation(check) else "")
+                + (f"<p>{html.escape(recon)}</p>" if recon else "")
                 + (
                     '<div class="machine">Checked by a program: the report value was compared with an actual live-query result.</div>'
                     if live_ran else
@@ -2124,9 +1585,7 @@ def html_of(art: dict, raw: dict | None = None,
     nc_items = []
     for check in not_checkable:
         why = public_explanation(check)
-        if why == "No accepted check reached this claim.":
-            why = "Not externally verified."
-        where = where_from(check.get("location"), check.get("report_quote"))
+        where = str(check.get("location") or "").strip()
         where_html = (
             f' <span class="where">({html.escape(where)})</span>'
             if where else ""
@@ -2137,7 +1596,7 @@ def html_of(art: dict, raw: dict | None = None,
             f"{html.escape(why)}</span></li>"
         )
     for row in unreached:
-        where = where_from(row.get("location"), row.get("quote"))
+        where = str(row.get("location") or "").strip()
         where_html = (
             f' <span class="where">({html.escape(where)})</span>'
             if where else ""
@@ -2145,7 +1604,12 @@ def html_of(art: dict, raw: dict | None = None,
         nc_items.append(
             "<li><span class=\"w\"><strong>"
             f"{curly(row.get('quote') or 'Claim')}</strong>{where_html} "
-            "Not externally verified.</span></li>"
+            + (
+                "Used as an internal arithmetic operand; no semantic verdict was authored."
+                if row.get("outcome") == "used_for_internal_arithmetic"
+                else "Not externally verified."
+            )
+            + "</span></li>"
         )
     if n_nc and not nc_items:
         nc_items.append(
@@ -2177,30 +1641,19 @@ def html_of(art: dict, raw: dict | None = None,
     cited = []
     arith_status = str(doc.get("status") or "not_run")
     if arith_status == "complete":
-        arith_text = (
-            f"Ran on the report. {spell_count(len(findings)).capitalize()} "
-            f"{'error' if len(findings) == 1 else 'errors'} "
-            f"{'was' if len(findings) == 1 else 'were'} found."
-            if findings else
-            "Ran on the report. Every total that was checked equals the sum of its rows."
-        )
+        arith_text = "Deterministic extraction and arithmetic candidate generation ran on the report."
     elif arith_status in {"not_available", "not_run", "skipped"}:
         arith_text = "Did not run."
     else:
         arith_text = html.escape(str(doc.get("detail") or arith_status))
-    live_status = str(
-        (((art.get("verification") or {}).get("live_source") or {}).get("status"))
-        or "not_run"
-    )
+    live_sources = [row for row in sources if row.get("kind") == "live_tool"]
+    supplied_sources = [row for row in sources if row.get("kind") == "supplied_file"]
     if live_source_ran(art):
-        live_text = "An actual live query ran."
-    elif live_status == "failed" and n_csr:
         live_text = (
-            "Supplied recorded evidence was used; a live query attempt did not complete."
+            f"{spell_count(len(live_sources)).capitalize()} retained source result"
+            f"{'s came' if len(live_sources) != 1 else ' came'} from an actual live tool call."
         )
-    elif live_status == "failed":
-        live_text = "A live query was attempted but did not complete."
-    elif n_csr:
+    elif supplied_sources:
         live_text = "Supplied recorded evidence was used; no live query ran."
     else:
         live_text = "Did not run."
@@ -2220,8 +1673,8 @@ def html_of(art: dict, raw: dict | None = None,
     if supplied_n or cited or has_evidence:
         names = ", ".join(f"<code>{html.escape(name)}</code>" for name in cited[:4])
         ev_text = (
-            f"Checked against {spell_count(supplied_n or len(cited))} supplied evidence "
-            f"{'file' if (supplied_n or len(cited)) == 1 else 'files'}"
+            f"Checked against {spell_count(supplied_n or len(cited))} retained source "
+            f"{'result' if (supplied_n or len(cited)) == 1 else 'results'}"
             + (f" ({names})" if names else "")
             + "."
         )
@@ -2263,11 +1716,10 @@ def html_of(art: dict, raw: dict | None = None,
 
     tech_bits = []
     for check in hidden_confirmed:
-        where = where_from(check.get("location"), quote=check.get("report_quote"))
-        where_text = f" ({html.escape(where)})" if where else ""
         line = (
-            f"{curly(check.get('report_quote') or 'Claim')} "
-            f"{evidence_value_line(check)}{where_text}"
+            f"{report_operand_line(check)} "
+            f"{evidence_value_line(check)} "
+            f"{html.escape(public_explanation(check))}"
         )
         tech_bits.append(f"<li>{line}</li>")
     tech_list = (
@@ -2334,18 +1786,9 @@ def attach_receipts_ledger(raw: dict, receipts: dict) -> None:
     cov["claims_reached_by_a_check"] = reached_n
     review = raw.setdefault("evidence_review", {})
     review["outcomes_proposed"] = int(receipts.get("proposed") or 0)
-    review["receipt_failures"] = sum(
-        1 for row in (receipts.get("discarded") or [])
-        if not (
-            isinstance(row, dict)
-            and (
-                row.get("reason") == "deterministic-conflict"
-                or any(
-                    str(item).startswith("deterministic-conflict")
-                    for item in (row.get("problems") or [])
-                )
-            )
-        )
+    review["receipt_failures"] = (
+        len(receipts.get("discarded") or [])
+        + len(receipts.get("discarded_sources") or [])
     )
     if claims:
         raw["claims"] = claims
@@ -2376,6 +1819,7 @@ def attach_receipts_ledger(raw: dict, receipts: dict) -> None:
         src["period_label"] = receipts["report_period"]
     if receipts.get("report_date"):
         src["report_date"] = receipts["report_date"]
+    raw["sources"] = list(receipts.get("sources") or [])
 
 
 def main() -> int:
@@ -2385,10 +1829,6 @@ def main() -> int:
     p.add_argument("--run-id", default=None)
     p.add_argument("--layer2", type=Path, default=None,
                    help="validated Layer 2 findings JSON (list or {findings:[...]}); HTML only")
-    p.add_argument("--ledger", type=Path, default=None,
-                   help="ledger.json for naming where unchecked figures live; HTML only")
-    p.add_argument("--source", type=Path, default=None,
-                   help="source-findings.json from sourcecheck.py; HTML only")
     p.add_argument("--claims", type=Path, default=None,
                    help="claims.json ledger; required if the path is named")
     args = p.parse_args()
@@ -2439,30 +1879,20 @@ def main() -> int:
     if reason:
         print(f"render: {reason}. No shareable artifact written.", file=sys.stderr)
         return 2
-    ledger_raw = None
-    if args.ledger and args.ledger.is_file():
-        ledger_raw = json.loads(args.ledger.read_text())
-    elif args.ledger is None:
-        sibling = args.findings.with_name("ledger.json")
-        if sibling.is_file():
-            ledger_raw = json.loads(sibling.read_text())
-    source = None
-    if args.source and args.source.is_file():
-        source = json.loads(args.source.read_text())
     digest = str((raw.get("source") or {}).get("sha256") or "")
     if len(digest) < 6:
         digest = hashlib.sha256(args.findings.read_bytes()).hexdigest()
     run_id = args.run_id or f"sf-{digest[:6]}"
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     art = artifact_from_findings(raw, run_id=run_id, generated_at=generated_at,
-                                 layer2=layer2, source=source, guidance=guidance)
+                                 layer2=layer2, guidance=guidance)
     if art.get("verdict") == "unable_to_grade":
         print(
             "render: report could not be graded. No shareable artifact written.",
             file=sys.stderr,
         )
         return 2
-    page = html_of(art, raw, ledger_raw)
+    page = html_of(art)
     from artifact_audit import audit_public_artifact  # noqa: E402
     problems = audit_public_artifact(art, page)
     if problems:

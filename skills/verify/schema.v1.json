@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "summation.grade-artifact/v1",
+  "$id": "grade-artifact/public-receipt-v1",
   "title": "GradeArtifact",
   "type": "object",
   "additionalProperties": false,
@@ -24,20 +24,23 @@
     "verification",
     "limitations",
     "offer",
-    "claims"
+    "claims",
+    "sources"
   ],
   "properties": {
-    "schema_version": { "const": "grade-artifact/v1" },
+    "schema_version": { "const": "grade-artifact/public-receipt-v1" },
     "run_id": { "type": "string", "minLength": 1 },
     "generated_at": { "type": "string", "format": "date-time" },
     "source": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["path", "format"],
       "properties": {
         "path": { "type": "string" },
         "format": { "type": "string" },
         "sha256": { "type": ["string", "null"] },
-        "period_label": { "type": ["string", "null"] }
+        "period_label": { "type": ["string", "null"] },
+        "report_date": { "type": ["string", "null"] }
       }
     },
     "source_result": {
@@ -95,89 +98,16 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "type", "basis", "verdict", "importance", "severity", "report_quote", "explanation"],
+        "required": ["id", "type", "basis", "verdict", "importance", "severity", "claim_id", "public_receipt"],
         "properties": {
-          "id": { "type": "string" },
+          "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*$" },
           "type": { "type": "string" },
           "basis": { "type": "string", "enum": ["evidence", "report"] },
           "verdict": { "const": "contradicted" },
           "importance": { "type": "string", "enum": ["material", "supporting"] },
           "severity": { "type": ["string", "null"], "enum": ["high", "medium", "low", null] },
-          "report_quote": { "type": "string" },
-          "report_quote_2": { "type": ["string", "null"] },
-          "evidence_file": { "type": ["string", "null"] },
-          "evidence_quote": { "type": ["string", "null"] },
-          "evidence_json": { "type": "array", "items": { "type": "object" } },
-          "evidence_receipts": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["evidence_file", "evidence_json"],
-              "properties": {
-                "evidence_file": { "type": "string" },
-                "evidence_json": { "type": "array", "items": { "type": "object" } }
-              }
-            }
-          },
-          "evidence_receipt_mode": {
-            "type": ["string", "null"],
-            "enum": ["verbatim", "json-object-fields", "json-pointers", null]
-          },
-          "explanation": { "type": "string" },
-          "claim_id": { "type": ["string", "null"] },
-          "reconstruction_attempt": { "type": ["string", "null"] },
-          "report_value": true,
-          "current_value": true,
-          "current_as_of": { "type": ["string", "null"] },
-          "report_date": { "type": ["string", "null"] },
-          "current_source_kind": {
-            "type": ["string", "null"],
-            "enum": ["supplied_recorded_evidence", "live_query", null]
-          },
-          "location": { "type": ["string", "null"] },
-          "metric_label": { "type": ["string", "null"] },
-          "evidence_location": { "type": ["string", "null"] },
-          "evidence_as_of": { "type": ["string", "null"] },
-          "observed": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["label", "value"],
-              "properties": {
-                "label": { "type": "string" },
-                "value": true,
-                "location": { "type": ["string", "null"] }
-              }
-            }
-          },
-          "comparison": {
-            "type": ["object", "null"],
-            "additionalProperties": false,
-            "properties": {
-              "kind": { "type": "string" },
-              "prior": true,
-              "current": true,
-              "stated": true,
-              "result": true,
-              "direction": { "type": ["string", "null"] },
-              "formula": { "type": ["string", "null"] },
-              "operands": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": ["label", "value"],
-                  "properties": {
-                    "label": { "type": "string" },
-                    "value": true,
-                    "location": { "type": ["string", "null"] }
-                  }
-                }
-              }
-            }
-          }
+          "claim_id": { "type": "string", "minLength": 1 },
+          "public_receipt": { "$ref": "#/$defs/publicReceipt" }
         }
       }
     },
@@ -186,97 +116,45 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "type", "basis", "verdict", "importance", "severity", "report_quote", "explanation"],
+        "required": ["id", "type", "basis", "verdict", "importance", "severity", "claim_id"],
         "properties": {
-          "id": { "type": "string" },
+          "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*$" },
           "type": { "type": "string" },
           "basis": { "type": "string", "enum": ["evidence", "report"] },
           "verdict": { "type": "string", "enum": ["confirmed", "contradicted", "not_checkable", "changed_since_report"] },
           "importance": { "type": "string", "enum": ["material", "supporting"] },
           "severity": { "type": ["string", "null"], "enum": ["high", "medium", "low", null] },
           "report_quote": { "type": "string" },
-          "report_quote_2": { "type": ["string", "null"] },
-          "evidence_file": { "type": ["string", "null"] },
-          "evidence_quote": { "type": ["string", "null"] },
-          "evidence_json": { "type": "array", "items": { "type": "object" } },
-          "evidence_receipts": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["evidence_file", "evidence_json"],
-              "properties": {
-                "evidence_file": { "type": "string" },
-                "evidence_json": { "type": "array", "items": { "type": "object" } }
-              }
-            }
-          },
-          "evidence_receipt_mode": {
-            "type": ["string", "null"],
-            "enum": ["verbatim", "json-object-fields", "json-pointers", null]
-          },
           "explanation": { "type": "string" },
-          "claim_id": { "type": ["string", "null"] },
+          "claim_id": { "type": "string", "minLength": 1 },
+          "public_receipt": { "$ref": "#/$defs/publicReceipt" },
           "reconstruction_attempt": { "type": ["string", "null"] },
           "report_value": true,
           "current_value": true,
           "current_as_of": { "type": ["string", "null"] },
           "report_date": { "type": ["string", "null"] },
-          "current_source_kind": {
-            "type": ["string", "null"],
-            "enum": ["supplied_recorded_evidence", "live_query", null]
-          },
-          "location": { "type": ["string", "null"] },
-          "metric_label": { "type": ["string", "null"] },
-          "evidence_location": { "type": ["string", "null"] },
-          "evidence_as_of": { "type": ["string", "null"] },
-          "observed": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["label", "value"],
+          "location": { "type": ["string", "null"] }
+        },
+        "allOf": [
+          {
+            "if": {
               "properties": {
-                "label": { "type": "string" },
-                "value": true,
-                "location": { "type": ["string", "null"] }
-              }
-            }
-          },
-          "comparison": {
-            "type": ["object", "null"],
-            "additionalProperties": false,
-            "properties": {
-              "kind": { "type": "string" },
-              "prior": true,
-              "current": true,
-              "stated": true,
-              "result": true,
-              "direction": { "type": ["string", "null"] },
-              "formula": { "type": ["string", "null"] },
-              "operands": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": ["label", "value"],
-                  "properties": {
-                    "label": { "type": "string" },
-                    "value": true,
-                    "location": { "type": ["string", "null"] }
-                  }
+                "verdict": {
+                  "enum": ["confirmed", "contradicted", "changed_since_report"]
                 }
-              }
-            }
+              },
+              "required": ["verdict"]
+            },
+            "then": { "required": ["public_receipt"] }
+          },
+          {
+            "if": {
+              "properties": { "verdict": { "const": "not_checkable" } },
+              "required": ["verdict"]
+            },
+            "then": { "required": ["report_quote", "explanation"] }
           }
-        },
-        "if": {
-          "properties": { "verdict": { "const": "changed_since_report" } },
-          "required": ["verdict"]
-        },
-        "then": {
-          "required": ["verdict"]
-        }
+        ]
       }
     },
     "evidence_coverage": {
@@ -430,6 +308,10 @@
         }
       }
     },
+    "sources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/retainedSource" }
+    },
     "presentation": {
       "type": ["object", "null"],
       "additionalProperties": false,
@@ -442,6 +324,72 @@
     }
   },
   "$defs": {
+    "publicOperand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "value", "location"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "value": { "not": { "type": ["null", "boolean"] } },
+        "location": { "type": "string", "minLength": 1 }
+      }
+    },
+    "publicReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["report_operand", "decisive_operands", "explanation"],
+      "properties": {
+        "report_operand": { "$ref": "#/$defs/publicOperand" },
+        "decisive_operands": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/publicOperand" }
+        },
+        "explanation": { "type": "string", "minLength": 1 },
+        "calculation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["expression", "result"],
+          "properties": {
+            "expression": { "type": "string", "minLength": 1 },
+            "result": { "not": { "type": ["null", "boolean"] } }
+          }
+        },
+        "source_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "retainedSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "label", "evidence_file", "result_sha256"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*$" },
+        "kind": { "type": "string", "enum": ["supplied_file", "live_tool"] },
+        "label": { "type": "string", "minLength": 1 },
+        "evidence_file": { "type": "string", "minLength": 1 },
+        "result_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "retrieval": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["retrieved_at", "tool", "arguments"],
+          "properties": {
+            "retrieved_at": { "type": "string", "format": "date-time" },
+            "tool": { "type": "string", "minLength": 1 },
+            "arguments": { "type": "object" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "live_tool" } } },
+          "then": { "required": ["retrieval"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "supplied_file" } } },
+          "then": { "not": { "required": ["retrieval"] } }
+        }
+      ]
+    },
     "verificationStage": {
       "type": "object",
       "additionalProperties": false,

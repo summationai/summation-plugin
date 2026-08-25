@@ -39,7 +39,15 @@ T1 = "96%"
 
 @unittest.skipUnless(FIX.is_dir(), "alg-deploy fixtures are not present")
 class InternalCheckTests(unittest.TestCase):
-    def test_pdf_clean_confirms_rank_and_inventories_source_line(self) -> None:
+    def assert_facts_only(self, candidates: list[dict]) -> None:
+        blob = json.dumps(candidates)
+        for forbidden in (
+            '"verdict"', '"explanation"', '"report_quote"',
+            '"public_receipt"', '"comparison"',
+        ):
+            self.assertNotIn(forbidden, blob)
+
+    def test_pdf_clean_emits_ordered_values_candidate_only(self) -> None:
         path = FIX / "pdf-top5/clean/top-5-segments-clean.pdf"
         inv = extract_inventory(path)
         source = [
@@ -47,60 +55,74 @@ class InternalCheckTests(unittest.TestCase):
             if str(item.get("displayed") or "").lower().startswith("source snapshot")]
         self.assertTrue(source)
         self.assertTrue(all(item.get("importance") == "material" for item in source))
-        outcomes = internal.check_inventory(inv)
-        by_quote = {row["report_quote"]: row for row in outcomes}
-        self.assertEqual(by_quote[P1]["verdict"], "confirmed")
-        self.assertNotIn(
-            "contradicted",
-            {row["verdict"] for row in outcomes if row.get("importance") == "material"},
+        candidates = internal.check_inventory(inv)
+        self.assert_facts_only(candidates)
+        self.assertEqual(len(candidates), 1)
+        facts = candidates[0]["facts"]
+        self.assertEqual(facts["declaration"]["displayed"], P1)
+        self.assertEqual(
+            [row["displayed"] for row in facts["values"]],
+            ["$520", "$410", "$305", "$190", "$120"],
         )
+        self.assertFalse(facts["mismatch"])
 
-    def test_pdf_twin_contradicts_declared_sort(self) -> None:
+    def test_pdf_twin_emits_mismatch_without_a_verdict(self) -> None:
         path = FIX / "pdf-top5/twin/top-5-segments-twin.pdf"
-        outcomes = internal.check_inventory(extract_inventory(path))
-        hits = [
-            row for row in outcomes
-            if row.get("verdict") == "contradicted" and row.get("report_quote") == P1]
-        self.assertEqual(len(hits), 1)
-        self.assertEqual(hits[0]["check_id"], "sel_declared_sort_violated")
+        candidates = internal.check_inventory(extract_inventory(path))
+        self.assert_facts_only(candidates)
+        self.assertEqual(len(candidates), 1)
+        facts = candidates[0]["facts"]
+        self.assertEqual(
+            [row["displayed"] for row in facts["values"]],
+            ["$520", "$305", "$410", "$190", "$120"],
+        )
+        self.assertTrue(facts["mismatch"])
 
-    def test_xlsx_clean_confirms_note_and_margins(self) -> None:
+    def test_xlsx_clean_emits_percentage_point_facts(self) -> None:
         path = FIX / "xlsx-margin/clean/weekly-margin-summary-clean.xlsx"
-        outcomes = internal.check_inventory(extract_inventory(path))
-        notes = [row for row in outcomes if row.get("report_quote") == X1_CLEAN]
-        self.assertTrue(notes)
-        self.assertTrue(all(row["verdict"] == "confirmed" for row in notes))
-        self.assertNotIn(X1, {row.get("report_quote") for row in outcomes})
+        candidates = internal.check_inventory(extract_inventory(path))
+        self.assert_facts_only(candidates)
+        notes = [row for row in candidates if row.get("candidate_id") == "uni_percent_points"]
+        self.assertEqual(len(notes), 1)
+        facts = notes[0]["facts"]
+        self.assertEqual(facts["statement"]["displayed"], X1_CLEAN)
+        self.assertEqual(facts["prior"]["displayed"], "40.0%")
+        self.assertEqual(facts["current"]["displayed"], "43.0%")
+        self.assertEqual(facts["computed_percentage_points"], 3)
+        self.assertFalse(facts["mismatch"])
 
-    def test_xlsx_twin_contradicts_percent_labelled_point_move(self) -> None:
+    def test_xlsx_twin_emits_unit_mismatch_without_a_verdict(self) -> None:
         path = FIX / "xlsx-margin/twin/weekly-margin-summary-twin.xlsx"
-        outcomes = internal.check_inventory(extract_inventory(path))
-        hits = [
-            row for row in outcomes
-            if row.get("verdict") == "contradicted" and row.get("report_quote") == X1]
+        candidates = internal.check_inventory(extract_inventory(path))
+        self.assert_facts_only(candidates)
+        hits = [row for row in candidates if row.get("candidate_id") == "uni_percent_points"]
         self.assertEqual(len(hits), 1)
-        self.assertEqual(hits[0]["check_id"], "uni_percent_vs_points")
-        comparison = hits[0].get("comparison") or {}
-        self.assertEqual(comparison.get("prior"), "40.0%")
-        self.assertEqual(comparison.get("current"), "43.0%")
-        self.assertIn("3.0", str(comparison.get("result") or ""))
-        self.assertIn("percentage-point", hits[0].get("explanation") or "")
+        facts = hits[0]["facts"]
+        self.assertEqual(facts["statement"]["displayed"], X1)
+        self.assertEqual(facts["computed_percentage_points"], 3)
+        self.assertEqual(facts["computed_relative_percent"], 7.5)
+        self.assertTrue(facts["mismatch"])
 
-    def test_pptx_clean_confirms_headline_ratio(self) -> None:
+    def test_pptx_clean_emits_exact_displayed_ratio_only(self) -> None:
         path = FIX / "pptx-kpi/clean/operations-kpi-clean.pptx"
-        outcomes = internal.check_inventory(extract_inventory(path))
-        headlines = [
-            row for row in outcomes if row.get("report_quote") == "94%"]
-        self.assertTrue(headlines)
-        self.assertTrue(all(row["verdict"] == "confirmed" for row in headlines))
+        candidates = internal.check_inventory(extract_inventory(path))
+        self.assert_facts_only(candidates)
+        self.assertEqual(len(candidates), 1)
+        facts = candidates[0]["facts"]
+        self.assertEqual(facts["numerator"], 94)
+        self.assertEqual(facts["denominator"], 100)
+        self.assertEqual(facts["computed"], 94)
+        self.assertFalse(facts["mismatch"])
 
-    def test_pptx_twin_contradicts_headline(self) -> None:
+    def test_pptx_twin_does_not_map_ratio_to_headline(self) -> None:
         path = FIX / "pptx-kpi/twin/operations-kpi-twin.pptx"
-        outcomes = internal.check_inventory(extract_inventory(path))
-        hits = [
-            row for row in outcomes
-            if row.get("verdict") == "contradicted" and row.get("report_quote") == T1]
-        self.assertEqual(len(hits), 1)
+        inv = extract_inventory(path)
+        headline = next(item for item in inv["items"] if item.get("displayed") == T1)
+        candidates = internal.check_inventory(inv)
+        self.assert_facts_only(candidates)
+        self.assertEqual(len(candidates), 1)
+        self.assertNotIn(headline["id"], candidates[0]["inventory_ids"])
+        self.assertEqual(candidates[0]["facts"]["computed"], 94)
 
 
 class SourceSnapshotInventoryTests(unittest.TestCase):

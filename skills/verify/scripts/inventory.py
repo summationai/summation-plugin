@@ -143,15 +143,14 @@ def _html_items(path: pathlib.Path) -> list[dict]:
         for r_i, row in enumerate(table):
             if r_i == 0:
                 continue
-            row_label = row[0] if row else f"row {r_i}"
+            row_label = str(row[0] if row else "").strip()
             kind = "table_total" if is_total_label(row_label) else "table_cell"
             for c_i, cell in enumerate(row):
                 if c_i == 0:
                     continue
                 if parse_number(cell) is None:
                     continue
-                col = header[c_i] if c_i < len(header) and header[c_i] else f"column {c_i + 1}"
-                add(kind, cell, f"table{t_i}/{row_label}/{col}", "material")
+                add(kind, cell, f"table{t_i}/r{r_i + 1}/c{c_i + 1}", "material")
 
     captured = {item["displayed"] for item in items}
     visible = re.sub(r"(\d)([A-Za-z])", r"\1 \2", _visible_text(raw))

@@ -16,7 +16,7 @@ SCRIPTS = ROOT / "skills" / "verify" / "scripts"
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.insert(0, str(SCRIPTS))
 
-from test_verify_render import _check, _minimal_art, render  # noqa: E402
+from test_verify_render import _minimal_art, accept, render  # noqa: E402
 import artifact_audit as audit  # noqa: E402
 
 FIX = pathlib.Path("/Users/ericjaffe/Documents/GitHub/alg-deploy/fixtures-format")
@@ -24,50 +24,77 @@ ARTIFACT_MANIFEST = os.environ.get("ALG_VERIFY_ARTIFACT_MANIFEST", "")
 
 
 def valid_artifact_pair() -> tuple[dict, str]:
-    confirmed = _check(
-        "confirmed",
-        observed=[{"label": "active projects", "value": 12}],
-        evidence_quote="12",
-        report_quote="Active projects: 12",
-        evidence_file="status.json",
-        explanation="Confirmed against external evidence.",
-        location="line 5",
-    )
-    contradicted = _check(
-        "contradicted",
-        observed=[{"label": "at risk", "value": 3}],
-        evidence_quote="3",
-        report_quote="Projects at risk: 1",
-        report_quote_2="Projects at risk: 3",
-        evidence_file="status.json",
-        explanation="The evidence shows 3, not 1.",
-        location="line 6",
-        comparison={
-            "kind": "identity",
-            "stated": 1,
-            "result": 3,
-            "operands": [
-                {"label": "report", "value": 1},
-                {"label": "evidence", "value": 3},
-            ],
-        },
-    )
-    csr = _check(
-        "changed_since_report",
-        report_quote="10,481",
-        report_value=10481,
-        current_value=10613,
-        current_as_of="2026-08-23",
-        report_date="2026-04-04",
-        reconstruction_attempt="The units source has no date column.",
-        evidence_file="live-units.json",
-        evidence_quote=None,
-        location="report text",
-        explanation="Today's value differs from the report claim \"10,481\".",
-        comparison={"kind": "current_vs_report", "stated": 10481, "current": 10613},
-        current_source_kind="supplied_recorded_evidence",
-    )
+    def receipt(report_label, report_value, report_location, decisive_label,
+                decisive_value, decisive_location, explanation, source_id):
+        return {
+            "report_operand": {
+                "label": report_label,
+                "value": report_value,
+                "location": report_location,
+            },
+            "decisive_operands": [{
+                "label": decisive_label,
+                "value": decisive_value,
+                "location": decisive_location,
+            }],
+            "explanation": explanation,
+            "source_id": source_id,
+        }
+
+    confirmed = {
+        "id": "C1", "claim_id": "L1", "type": "semantic",
+        "basis": "evidence", "verdict": "confirmed",
+        "importance": "material", "severity": None,
+        "public_receipt": receipt(
+            "Reported active projects", 12, "Status summary, active projects",
+            "Recorded active projects", 12,
+            "Project status snapshot, active projects",
+            "The recorded project count matches the twelve projects shown in the report.",
+            "project-status",
+        ),
+    }
+    contradicted = {
+        "id": "C2", "claim_id": "L2", "type": "semantic",
+        "basis": "evidence", "verdict": "contradicted",
+        "importance": "material", "severity": "high",
+        "public_receipt": receipt(
+            "Reported projects at risk", 1, "Status summary, risk count",
+            "Recorded projects at risk", 3,
+            "Project status snapshot, risk count",
+            "The recorded risk count is three projects while the report shows one project.",
+            "project-status",
+        ),
+    }
+    csr = {
+        "id": "C3", "claim_id": "L3", "type": "temporal",
+        "basis": "evidence", "verdict": "changed_since_report",
+        "importance": "material", "severity": None,
+        "report_value": 10481, "current_value": 10613,
+        "current_as_of": "2026-08-23", "report_date": "2026-04-04",
+        "reconstruction_attempt": (
+            "The approved history source was checked, but it did not retain the report-date row."
+        ),
+        "public_receipt": receipt(
+            "Reported inventory units", 10481, "Inventory summary, units line",
+            "Later recorded inventory units", 10613,
+            "Inventory units snapshot, current row",
+            "The later recorded snapshot shows 10,613 units after the report recorded 10,481 units.",
+            "live-units",
+        ),
+    }
     art = _minimal_art([confirmed, contradicted, csr])
+    art["sources"] = [
+        {
+            "id": "project-status", "kind": "supplied_file",
+            "label": "Project status snapshot",
+            "evidence_file": "status.json", "result_sha256": "a" * 64,
+        },
+        {
+            "id": "live-units", "kind": "supplied_file",
+            "label": "Inventory units snapshot",
+            "evidence_file": "live-units.json", "result_sha256": "b" * 64,
+        },
+    ]
     art["source"]["report_date"] = "2026-04-04"
     art["source"]["period_label"] = "week ending April 4, 2026"
     art["verdict"] = "fix_first"
@@ -109,7 +136,18 @@ def valid_artifact_pair() -> tuple[dict, str]:
         "evidence_contradicted": 1,
         "validated_outcomes": 3,
         "evidence_files_supplied": 2,
-        "evidence_files_cited": ["status.json", "live-units.json"],
+        "evidence_files_cited": ["Inventory units snapshot", "Project status snapshot"],
+        "provenance_groups": [
+            {
+                "source_id": "project-status", "kind": "supplied_file",
+                "label": "Project status snapshot",
+            },
+            {
+                "source_id": "live-units", "kind": "supplied_file",
+                "label": "Inventory units snapshot",
+            },
+        ],
+        "source_independence": "grouped_by_declared_provenance",
     })
     page = render.html_of(art)
     return art, page
@@ -154,29 +192,62 @@ class InvariantTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in render._material_claims(raw)], ["L1"])
 
     def test_report_only_repeated_claim_is_not_a_receipt(self) -> None:
-        self.assertFalse(render._has_shareable_receipt({
-            "basis": "report",
-            "verdict": "confirmed",
-            "report_quote": "Active projects: 12",
-            "report_quote_2": "Active projects: 12",
-            "explanation": "Active projects: 12",
-        }))
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            report = folder / "report.md"
+            report.write_text("Active projects: 12")
+            check = {
+                "id": "C1", "claim_id": "L1", "type": "semantic",
+                "basis": "report", "verdict": "confirmed",
+                "importance": "material", "report_quote": "Active projects: 12",
+                "public_receipt": {
+                    "report_operand": {
+                        "label": "Reported active projects", "value": 12,
+                        "location": "Project summary",
+                    },
+                    "decisive_operands": [{
+                        "label": "Repeated active projects", "value": 12,
+                        "location": "Project summary",
+                    }],
+                    "explanation": (
+                        "The same report claim is repeated without an independent calculation."
+                    ),
+                },
+            }
+            validated, discarded = accept.validate_receipts(
+                report.read_text(), folder, [check], {"L1"}, report, sources=[])
+            self.assertEqual(validated, [])
+            self.assertTrue(any(
+                "repeats the report operand" in problem
+                for problem in discarded[0]["problems"]
+            ))
 
     def test_report_only_result_without_operands_is_not_a_receipt(self) -> None:
-        self.assertFalse(render._has_shareable_receipt({
-            "basis": "report",
-            "verdict": "confirmed",
-            "report_quote": "Active projects: 12",
-            "comparison": {"kind": "identity", "result": 12},
-        }))
+        receipt = {
+            "report_operand": {
+                "label": "Reported active projects", "value": 12,
+                "location": "Project summary",
+            },
+            "decisive_operands": [],
+            "explanation": "The report calculation uses no declared decisive operands.",
+        }
+        self.assertFalse(render._publishable_receipt(
+            receipt, basis="report", source_ids=set()))
 
     def test_evidence_outcome_without_source_is_not_a_receipt(self) -> None:
-        self.assertFalse(render._has_shareable_receipt({
-            "basis": "evidence",
-            "verdict": "confirmed",
-            "report_quote": "Active projects: 12",
-            "observed": [{"label": "active projects", "value": 12}],
-        }))
+        receipt = {
+            "report_operand": {
+                "label": "Reported active projects", "value": 12,
+                "location": "Project summary",
+            },
+            "decisive_operands": [{
+                "label": "Recorded active projects", "value": 12,
+                "location": "Project status snapshot",
+            }],
+            "explanation": "The recorded project count matches the report project count.",
+        }
+        self.assertFalse(render._publishable_receipt(
+            receipt, basis="evidence", source_ids={"project-status"}))
 
 
 class MutationTests(unittest.TestCase):
@@ -191,6 +262,15 @@ class MutationTests(unittest.TestCase):
 
     def test_swap_operands_fails(self) -> None:
         self._assert_fails(audit.mutate_swap_operands)
+
+    def test_vague_operand_label_fails(self) -> None:
+        self._assert_fails(audit.mutate_vague_operand_label)
+
+    def test_missing_public_explanation_fails(self) -> None:
+        self._assert_fails(audit.mutate_remove_explanation)
+
+    def test_missing_source_link_fails(self) -> None:
+        self._assert_fails(audit.mutate_remove_source_link)
 
     def test_confirmed_calculation_cannot_prove_a_contradiction(self) -> None:
         self._assert_fails(audit.mutate_confirmed_calculation_to_contradiction)
@@ -239,44 +319,6 @@ class MutationTests(unittest.TestCase):
 
     def test_static_evidence_cannot_be_relabeled_live(self) -> None:
         self._assert_fails(audit.mutate_static_evidence_to_live)
-
-    def test_csr_gate_rejects_equal_values(self) -> None:
-        check = _check(
-            "changed_since_report",
-            report_quote="10,481",
-            report_value=10481,
-            current_value=10481,
-            current_as_of="2026-08-23",
-            report_date="2026-04-04",
-            reconstruction_attempt="Tried the history table.",
-            evidence_file="live-units.json",
-        )
-        self.assertFalse(render._has_csr_receipt(check, "2026-04-04"))
-
-    def test_csr_gate_rejects_missing_reconstruction(self) -> None:
-        check = _check(
-            "changed_since_report",
-            report_quote="10,481",
-            report_value=10481,
-            current_value=10613,
-            current_as_of="2026-08-23",
-            report_date="2026-04-04",
-            reconstruction_attempt="",
-            evidence_file="live-units.json",
-        )
-        self.assertFalse(render._has_csr_receipt(check, "2026-04-04"))
-
-    def test_csr_gate_rejects_missing_report_value(self) -> None:
-        check = _check(
-            "changed_since_report",
-            report_quote="As of April 4, inventory was 10,481.",
-            current_value=10613,
-            current_as_of="2026-08-23",
-            report_date="2026-04-04",
-            reconstruction_attempt="Tried the history table.",
-            evidence_file="live-units.json",
-        )
-        self.assertFalse(render._has_csr_receipt(check, "2026-04-04"))
 
 
 @unittest.skipUnless(FIX.is_dir(), "format fixtures are not present")

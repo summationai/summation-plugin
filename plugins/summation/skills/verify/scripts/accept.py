@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 from datetime import date
 from decimal import Decimal, InvalidOperation
+import hashlib
 import json
 import pathlib
 import re
@@ -22,12 +23,9 @@ _SCRIPTS = pathlib.Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 from inventory import claim_inventory_ids, cover, inventory_for  # noqa: E402
+from receipt_math import calculation_problem  # noqa: E402
 from severity import normalize_severity  # noqa: E402
 
-EVIDENCE_SUFFIXES = frozenset({
-    ".json", ".jsonl", ".txt", ".sql", ".csv", ".yaml", ".yml", ".md", ".html",
-})
-REPORT_ONLY_TYPES = frozenset({"internal", "logic", "arithmetic", "units", "selection"})
 FALLBACK_VERDICTS = frozenset({
     "confirmed", "contradicted", "not_checkable", "changed_since_report",
 })
@@ -69,10 +67,6 @@ _DATE_KEYS = frozenset({
     "as_of", "date", "current_as_of", "queried_at", "timestamp",
     "latest_complete_date", "complete_date", "as_of_date", "snapshot_date",
 })
-_CURRENCY_CUE = re.compile(
-    r"(?i)(?:data\s+is\s+)?current\s+through|current\s+as\s+of|"
-    r"\bas\s+of\b|\bas-of\b|\bas\s+at\b"
-)
 _MONTHS = {
     "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
     "july": 7, "august": 8, "september": 9, "october": 10, "november": 11,
@@ -87,19 +81,36 @@ _NAMED_DATE = re.compile(
 _DAY_MONTH_DATE = re.compile(
     rf"(?i)\b(\d{{1,2}})\s+({_MONTH_ALT})\s+(\d{{4}})\b"
 )
-_PREFERRED_DATE_KEYS = (
-    "latest_complete_date", "complete_date", "current_through",
-    "current_through_date", "as_of", "as_of_date", "asof", "as_at",
-    "data_date", "snapshot_date", "effective_date", "date",
-)
-_SKIP_DATE_KEYS = frozenset({
-    "generated_at", "queried_at", "timestamp", "created_at", "updated_at",
-})
-_SKIP_EVIDENCE_NAMES = frozenset({
-    "claims.json", "checks.json", "findings.json", "receipts.json",
-    "grade-artifact.json",
-})
 VISIBLE_REPORT_SUFFIXES = frozenset({".html", ".md", ".txt", ".csv"})
+SOURCE_KINDS = frozenset({"supplied_file", "live_tool"})
+PRIVATE_NAMES = frozenset({
+    "findings.json", "receipts.json", "checks.json", "claims.json",
+    "grade-artifact.json", "report-visible.txt", "ledger.json",
+    "source-findings.json", "provenance.json",
+})
+_ABS_PATH = re.compile(
+    r"(?:/Users/|/home/|/var/folders/|/private/tmp/|/tmp/|[A-Z]:\\)[^\s\"'<]+",
+    re.I,
+)
+_JSON_POINTER_EXACT = re.compile(r"(?:/[A-Za-z0-9_~.-]+)+")
+_RAW_OFFICE_TOKEN = re.compile(r"\b(?:slide|shape)\d+\b", re.I)
+_TENANT_IDENTIFIER = re.compile(
+    r"\b(?:tenant|organization|org)[ _-]?id\b\s*[:=]\s*[\"']?[A-Za-z0-9_-]+",
+    re.I,
+)
+_CREDENTIAL = re.compile(
+    r"\b(?:api[ _-]?key|access[ _-]?token|refresh[ _-]?token|client[ _-]?secret|"
+    r"password|credential)\b\s*[:=]\s*[^\s,;}]+",
+    re.I,
+)
+_BEARER = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.I)
+_VAGUE_OPERAND = re.compile(r"^(?:row|operand|item|value)(?:\s+\d+)?$", re.I)
+_VAGUE_SOURCE = re.compile(
+    r"^(?:source|evidence|supplied evidence|recorded evidence|live data)$", re.I)
+_SOURCE_ID = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
+_ISO_TIME = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
 
 
 def normalize(text: str) -> str:
@@ -144,27 +155,6 @@ def quantities_equal(left, right) -> bool:
     a = parse_quantity(left)
     b = parse_quantity(right)
     return a is not None and b is not None and a == b
-
-
-def unit_class(value) -> str | None:
-    if parse_quantity(value) is None:
-        return None
-    if isinstance(value, bool) or value is None:
-        return None
-    if isinstance(value, (int, float, Decimal)):
-        return "count"
-    text = str(value)
-    if "%" in text:
-        return "percent"
-    if re.search(r"[\$€£¥]", text):
-        return "currency"
-    return "count"
-
-
-def unit_classes_compatible(left, right) -> bool:
-    a = unit_class(left)
-    b = unit_class(right)
-    return a is not None and a == b
 
 
 def values_equal(left, right) -> bool:
@@ -274,76 +264,6 @@ def json_field_receipt(evidence: pathlib.Path, quote: str) -> tuple[bool, str | 
     return False, None
 
 
-_COMPARATIVE_CLAIM = re.compile(
-    r"\b(?:unchanged|increas\w*|decreas\w*|grew|rose|fell|prior|previous|"
-    r"week[- ]over[- ]week|month[- ]over[- ]month|versus|vs\.?)\b",
-    re.I,
-)
-_PRIOR_KEY = re.compile(
-    r"^(?:prior|previous|last)(?:_(?:week|month|quarter|year|period))?_(.+)$",
-    re.I,
-)
-
-
-def _pointer_token(value) -> str:
-    return str(value).replace("~", "~0").replace("/", "~1")
-
-
-def _json_dicts_with_paths(value, prefix=""):
-    if isinstance(value, dict):
-        yield value, prefix
-        for key, child in value.items():
-            child_prefix = f"{prefix}/{_pointer_token(key)}"
-            yield from _json_dicts_with_paths(child, child_prefix)
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            yield from _json_dicts_with_paths(child, f"{prefix}/{index}")
-
-
-def comparative_json_receipt(evidence: pathlib.Path, finding: dict) -> list[dict]:
-    """Return the current/prior sibling pair needed to prove a change claim."""
-    if (evidence.suffix.lower() != ".json"
-            or not _COMPARATIVE_CLAIM.search(str(finding.get("report_quote") or ""))):
-        return []
-    try:
-        payload = json.loads(evidence.read_text())
-    except (json.JSONDecodeError, OSError):
-        return []
-    declared_values = [
-        item.get("value") for item in (finding.get("evidence_json") or [])
-        if isinstance(item, dict) and "value" in item
-    ]
-    if finding.get("evidence_quote") not in (None, ""):
-        declared_values.append(finding.get("evidence_quote"))
-    for obj, prefix in _json_dicts_with_paths(payload):
-        keys = {str(key): key for key in obj}
-        for prior_name, prior_key in keys.items():
-            match = _PRIOR_KEY.match(prior_name)
-            if not match:
-                continue
-            current_name = match.group(1)
-            current_key = keys.get(current_name)
-            if current_key is None:
-                continue
-            current = obj[current_key]
-            prior = obj[prior_key]
-            if declared_values and not any(
-                    values_equal(value, current) or values_equal(value, prior)
-                    for value in declared_values):
-                continue
-            return [
-                {
-                    "pointer": f"{prefix}/{_pointer_token(current_key)}",
-                    "value": current,
-                },
-                {
-                    "pointer": f"{prefix}/{_pointer_token(prior_key)}",
-                    "value": prior,
-                },
-            ]
-    return []
-
-
 def needs_sidecar(report: pathlib.Path) -> bool:
     return report.suffix.lower() not in VISIBLE_REPORT_SUFFIXES
 
@@ -370,38 +290,145 @@ def evidence_path(
     return candidate, None
 
 
-def resolve_json_pointer_receipts(
-        sandbox: pathlib.Path, finding: dict, receipts: list,
-        report_path: pathlib.Path | None) -> tuple[list | None, str | None]:
-    candidates = []
-    path_error = None
-    for name in [finding.get("evidence_file"), *(finding.get("evidence_files") or [])]:
-        name = str(name or "")
-        if not name or name in candidates:
-            continue
-        resolved, err = evidence_path(sandbox, name, report_path)
-        if err:
-            path_error = err
-            continue
-        candidates.append((name, resolved))
-    if not candidates:
-        return None, path_error or "evidence_file is missing"
-    grouped: dict[str, list] = {}
-    for receipt in receipts:
-        matched = None
-        for name, path in candidates:
-            ok, canonical = json_pointer_receipt(path, [receipt])
-            if ok:
-                matched = (name, canonical[0])
-                break
-        if matched is None:
-            return None, path_error or "JSON pointer receipt did not match an evidence file"
-        name, canonical_receipt = matched
-        grouped.setdefault(name, []).append(canonical_receipt)
-    return [
-        {"evidence_file": name, "evidence_json": grouped[name]}
-        for name, _path in candidates if name in grouped
-    ], None
+def _public_text_problem(value, *, operand_label: bool = False,
+                         source_label: bool = False) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return "is missing"
+    if (
+        _ABS_PATH.search(text)
+        or _JSON_POINTER_EXACT.fullmatch(text)
+        or _RAW_OFFICE_TOKEN.search(text)
+        or _TENANT_IDENTIFIER.search(text)
+        or _CREDENTIAL.search(text)
+        or _BEARER.search(text)
+        or any(name.lower() in text.lower() for name in PRIVATE_NAMES)
+    ):
+        return "is private or internal"
+    if operand_label and _VAGUE_OPERAND.fullmatch(text):
+        return "is vague"
+    if source_label and _VAGUE_SOURCE.fullmatch(text):
+        return "is vague"
+    return None
+
+
+def _metadata_problem(value, prefix: str) -> str | None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            key_text = str(key or "").strip()
+            if not key_text:
+                return f"{prefix} has an empty argument name"
+            if re.search(
+                r"(?:password|secret|credential|api[_-]?key|access[_-]?token|"
+                r"refresh[_-]?token)", key_text, re.I
+            ):
+                return f"{prefix}.{key_text} is credential metadata"
+            problem = _metadata_problem(child, f"{prefix}.{key_text}")
+            if problem:
+                return problem
+        return None
+    if isinstance(value, list):
+        for index, child in enumerate(value):
+            problem = _metadata_problem(child, f"{prefix}[{index}]")
+            if problem:
+                return problem
+        return None
+    if value is None or isinstance(value, (bool, int, float)):
+        return None
+    problem = _public_text_problem(value)
+    return f"{prefix} {problem}" if problem else None
+
+
+def validate_sources(sandbox: pathlib.Path, proposed: list,
+                     report_path: pathlib.Path | None = None) -> tuple[list, list]:
+    """Validate retained evidence metadata without inferring source mode."""
+    accepted: list[dict] = []
+    discarded: list[dict] = []
+    seen: set[str] = set()
+    if not isinstance(proposed, list):
+        return [], [{"id": "", "problems": ["sources is not a list"]}]
+    for raw in proposed:
+        source = dict(raw) if isinstance(raw, dict) else {}
+        problems: list[str] = []
+        source_id = str(source.get("id") or "").strip()
+        kind = str(source.get("kind") or "").strip()
+        label = str(source.get("label") or "").strip()
+        filename = str(source.get("evidence_file") or "").strip()
+        digest = str(source.get("result_sha256") or "").strip().lower()
+        if not source_id:
+            problems.append("source id is missing")
+        elif not _SOURCE_ID.fullmatch(source_id):
+            problems.append("source id is not stable or public-safe")
+        elif source_id in seen:
+            problems.append(f"source id {source_id!r} is duplicated")
+        if kind not in SOURCE_KINDS:
+            problems.append("source kind is missing or unknown")
+        label_problem = _public_text_problem(label, source_label=True)
+        if label_problem:
+            problems.append(f"source label {label_problem}")
+        if not filename:
+            problems.append("source evidence_file is missing")
+            evidence = None
+        elif pathlib.Path(filename).name != filename or pathlib.Path(filename).is_absolute():
+            problems.append("source evidence_file must be a filename, not a path")
+            evidence = None
+        elif filename in PRIVATE_NAMES:
+            problems.append("source evidence_file is a private sidecar name")
+            evidence = None
+        else:
+            evidence, path_problem = evidence_path(sandbox, filename, report_path)
+            if path_problem:
+                problems.append(path_problem.replace("evidence_file", "source evidence_file", 1))
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            problems.append("source result_sha256 is missing or invalid")
+        elif evidence is not None:
+            actual = hashlib.sha256(evidence.read_bytes()).hexdigest()
+            if actual != digest:
+                problems.append("source result_sha256 does not match evidence file")
+        retrieval = source.get("retrieval")
+        if kind == "supplied_file" and retrieval is not None:
+            problems.append("supplied_file source must not declare live retrieval metadata")
+        if kind == "live_tool":
+            if not isinstance(retrieval, dict):
+                problems.append("live_tool source retrieval metadata is missing")
+            else:
+                retrieved_at = str(retrieval.get("retrieved_at") or "").strip()
+                tool = str(retrieval.get("tool") or "").strip()
+                arguments = retrieval.get("arguments")
+                if not _ISO_TIME.fullmatch(retrieved_at):
+                    problems.append("live_tool source retrieval.retrieved_at is missing or invalid")
+                tool_problem = _public_text_problem(tool)
+                if tool_problem:
+                    problems.append(f"live_tool source retrieval.tool {tool_problem}")
+                if not isinstance(arguments, dict):
+                    problems.append("live_tool source retrieval.arguments is not an object")
+                else:
+                    metadata_problem = _metadata_problem(arguments, "retrieval.arguments")
+                    if metadata_problem:
+                        problems.append(metadata_problem)
+        allowed = {"id", "kind", "label", "evidence_file", "result_sha256", "retrieval"}
+        unknown = sorted(set(source) - allowed)
+        if unknown:
+            problems.append(f"source has unknown field {unknown[0]!r}")
+        canonical = {
+            "id": source_id,
+            "kind": kind,
+            "label": label,
+            "evidence_file": filename,
+            "result_sha256": digest,
+        }
+        if kind == "live_tool" and isinstance(retrieval, dict):
+            canonical["retrieval"] = {
+                "retrieved_at": str(retrieval.get("retrieved_at") or "").strip(),
+                "tool": str(retrieval.get("tool") or "").strip(),
+                "arguments": retrieval.get("arguments"),
+            }
+        if problems:
+            discarded.append({**canonical, "problems": problems})
+        else:
+            seen.add(source_id)
+            accepted.append(canonical)
+    return accepted, discarded
 
 
 def report_text(report: pathlib.Path, sidecar: pathlib.Path | None) -> str:
@@ -530,21 +557,6 @@ def _date_matches(declared: str, candidates: list[str]) -> bool:
     return False
 
 
-def _load_evidence_payload(
-        finding: dict, receipt_updates: dict, sandbox: pathlib.Path,
-        report_path: pathlib.Path | None) -> tuple[pathlib.Path | None, object]:
-    name = str(finding.get("evidence_file") or receipt_updates.get("evidence_file") or "")
-    path, err = evidence_path(sandbox, name, report_path) if name else (None, "missing")
-    if err or path is None:
-        return None, None
-    if path.suffix.lower() != ".json":
-        return path, None
-    try:
-        return path, json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return path, None
-
-
 def _resolved_receipt_values(finding: dict, receipt_updates: dict) -> list:
     values = list(_json_values_from_receipts(finding, receipt_updates))
     quote = receipt_updates.get("evidence_quote") or finding.get("evidence_quote")
@@ -559,89 +571,173 @@ def _resolved_receipt_values(finding: dict, receipt_updates: dict) -> list:
     return values
 
 
-def _collect_comparable(quote, json_values: list) -> tuple[list, list, list]:
-    numbers = []
-    classes = []
-    strings = []
-    seen_n = set()
-
-    def add_num(number, source):
-        if number is None:
-            return
-        key = str(number)
-        if key not in seen_n:
-            seen_n.add(key)
-            numbers.append(number)
-            classes.append(unit_class(source))
-
-    def add_str(text):
-        item = normalize(str(text))
-        if item and item not in strings:
-            strings.append(item)
-
-    for value in json_values:
-        if isinstance(value, bool):
-            continue
-        parsed = parse_quantity(value)
-        if parsed is not None:
-            add_num(parsed, value)
-        elif isinstance(value, str) and value.strip():
-            add_str(value)
-    if quote:
-        for token in _QTOKEN.findall(str(quote)):
-            add_num(parse_quantity(token), token)
-        add_num(parse_quantity(quote), quote)
-        if not numbers:
-            add_str(quote)
-    return numbers, strings, classes
-
-
-def _strings_match(left: str, right: str) -> bool:
-    return left == right or quote_in_text(left, right) or quote_in_text(right, left)
-
-
-def _verdict_receipt_problem(finding: dict, receipt_updates: dict) -> str | None:
-    verdict = finding.get("verdict")
-    if verdict not in {"confirmed", "contradicted"}:
-        return None
-    report_quote = finding.get("report_quote") or ""
-    if finding.get("basis") == "report":
-        evidence_quote = finding.get("report_quote_2") or ""
-        json_values = []
-    else:
-        evidence_quote = receipt_updates.get("evidence_quote") or finding.get("evidence_quote") or ""
-        json_values = _json_values_from_receipts(finding, receipt_updates)
-    report_nums, report_strs, report_classes = _collect_comparable(report_quote, [])
-    evidence_nums, evidence_strs, evidence_classes = _collect_comparable(
-        evidence_quote, json_values)
-    comparable = (report_nums and evidence_nums) or (report_strs and evidence_strs)
-    if not comparable:
-        return None
-    matched = False
-    if report_nums and evidence_nums:
-        matched = any(
-            values_equal(left, right) for left in report_nums for right in evidence_nums)
-    if not matched and report_strs and evidence_strs:
-        matched = any(
-            _strings_match(left, right) for left in report_strs for right in evidence_strs)
-    if (
-        verdict == "confirmed"
-        and report_nums
-        and evidence_nums
-        and not matched
+def _substantive_explanation(value) -> bool:
+    text = str(value or "").strip()
+    if _public_text_problem(text):
+        return False
+    if not re.search(r"[.!?]$", text):
+        return False
+    words = re.findall(r"[A-Za-z0-9%$]+", text)
+    if len(words) < 6:
+        return False
+    if re.fullmatch(
+        r"(?:confirmed|contradicted|matches?(?: the report)?|"
+        r"the evidence supports the claim|the evidence does not match)\.?",
+        text,
+        re.I,
     ):
-        compatible = any(
-            r is not None and r == e
-            for r in report_classes
-            for e in evidence_classes
+        return False
+    return True
+
+
+def _operand_problem(raw, prefix: str) -> tuple[dict | None, list[str]]:
+    problems: list[str] = []
+    if not isinstance(raw, dict):
+        return None, [f"{prefix} is not an object"]
+    unknown = sorted(set(raw) - {"label", "value", "location"})
+    if unknown:
+        problems.append(f"{prefix} has unknown field {unknown[0]!r}")
+    label = str(raw.get("label") or "").strip()
+    location = str(raw.get("location") or "").strip()
+    value = raw.get("value")
+    label_problem = _public_text_problem(label, operand_label=True)
+    if label_problem:
+        problems.append(f"{prefix}.label {label_problem}")
+    location_problem = _public_text_problem(location)
+    if location_problem:
+        problems.append(f"{prefix}.location {location_problem}")
+    if value in (None, "") or isinstance(value, bool):
+        problems.append(f"{prefix}.value is missing")
+    elif isinstance(value, str):
+        value_problem = _public_text_problem(value)
+        if value_problem:
+            problems.append(f"{prefix}.value {value_problem}")
+    return {"label": label, "value": value, "location": location}, problems
+
+
+def _value_in(value, candidates: list) -> bool:
+    for candidate in candidates:
+        if values_equal(value, candidate):
+            return True
+        if isinstance(value, str) and isinstance(candidate, str):
+            if normalize(value) == normalize(candidate):
+                return True
+    return False
+
+
+def _validate_public_receipt(finding: dict, report: str,
+                             receipt_updates: dict,
+                             sources: dict[str, dict]) -> tuple[dict | None, list[str]]:
+    raw = finding.get("public_receipt")
+    if not isinstance(raw, dict):
+        return None, ["public_receipt is missing or not an object"]
+    problems: list[str] = []
+    allowed = {
+        "report_operand", "decisive_operands", "explanation",
+        "calculation", "source_id",
+    }
+    unknown = sorted(set(raw) - allowed)
+    if unknown:
+        problems.append(f"public_receipt has unknown field {unknown[0]!r}")
+    report_operand, report_problems = _operand_problem(
+        raw.get("report_operand"), "public_receipt.report_operand")
+    problems.extend(report_problems)
+    decisive_raw = raw.get("decisive_operands")
+    decisive: list[dict] = []
+    if not isinstance(decisive_raw, list) or not decisive_raw:
+        problems.append("public_receipt.decisive_operands is missing or empty")
+    else:
+        for index, operand in enumerate(decisive_raw):
+            canonical, operand_problems = _operand_problem(
+                operand, f"public_receipt.decisive_operands[{index}]")
+            problems.extend(operand_problems)
+            if canonical is not None:
+                decisive.append(canonical)
+    explanation = str(raw.get("explanation") or "").strip()
+    if not _substantive_explanation(explanation):
+        problems.append("public_receipt.explanation is missing or not substantive")
+    basis = str(finding.get("basis") or "")
+    source_id = str(raw.get("source_id") or "").strip()
+    source = sources.get(source_id)
+    if basis == "evidence":
+        if not source_id:
+            problems.append("public_receipt.source_id is required for evidence basis")
+        elif source is None:
+            problems.append(f"public_receipt.source_id {source_id!r} is not retained")
+    elif source_id:
+        problems.append("public_receipt.source_id is not allowed for report basis")
+    report_quote = str(finding.get("report_quote") or "")
+    if report_operand is not None and report_operand.get("value") not in (None, ""):
+        if not quote_in_text(str(report_operand["value"]), report_quote):
+            problems.append(
+                "public_receipt.report_operand.value is not visible in report_quote")
+    resolved = _resolved_receipt_values(finding, receipt_updates)
+    evidence_quote = str(
+        receipt_updates.get("evidence_quote")
+        or finding.get("evidence_quote")
+        or ""
+    )
+    for index, operand in enumerate(decisive):
+        value = operand.get("value")
+        grounded = False
+        if basis == "evidence":
+            grounded = _value_in(value, resolved)
+            if not grounded and evidence_quote:
+                grounded = quote_in_text(str(value), evidence_quote)
+        else:
+            grounded = quote_in_text(str(value), report)
+        if not grounded:
+            problems.append(
+                f"public_receipt.decisive_operands[{index}].value is not grounded"
+            )
+    calculation = raw.get("calculation")
+    canonical_calculation = None
+    if calculation is not None:
+        if not isinstance(calculation, dict):
+            problems.append("public_receipt.calculation is not an object")
+        else:
+            unknown_calc = sorted(set(calculation) - {"expression", "result"})
+            if unknown_calc:
+                problems.append(
+                    f"public_receipt.calculation has unknown field {unknown_calc[0]!r}")
+            expression = str(calculation.get("expression") or "").strip()
+            result = calculation.get("result")
+            expression_problem = _public_text_problem(expression)
+            if expression_problem:
+                problems.append(f"public_receipt.calculation.expression {expression_problem}")
+            if result in (None, "") or isinstance(result, bool):
+                problems.append("public_receipt.calculation.result is missing")
+            elif isinstance(result, str):
+                result_problem = _public_text_problem(result)
+                if result_problem:
+                    problems.append(f"public_receipt.calculation.result {result_problem}")
+            if not expression_problem and result not in (None, ""):
+                math_problem = calculation_problem(expression, result, decisive)
+                if math_problem:
+                    problems.append(f"public_receipt.{math_problem}")
+            canonical_calculation = {"expression": expression, "result": result}
+    if (
+        basis == "report"
+        and canonical_calculation is None
+        and report_operand is not None
+        and decisive
+        and all(values_equal(
+            operand.get("value"), report_operand.get("value")
+        ) for operand in decisive)
+    ):
+        problems.append(
+            "public_receipt repeats the report operand without a decisive calculation or distinct operand"
         )
-        if not compatible:
-            return "report and evidence unit classes are not compatible"
-    if verdict == "confirmed" and not matched:
-        return "confirmed verdict is not supported by the receipt values"
-    if verdict == "contradicted" and matched:
-        return "contradicted verdict is not supported by the receipt values"
-    return None
+    canonical = {
+        "report_operand": report_operand,
+        "decisive_operands": decisive,
+        "explanation": explanation,
+    }
+    if canonical_calculation is not None:
+        canonical["calculation"] = canonical_calculation
+    if source_id:
+        canonical["source_id"] = source_id
+    return (None if problems else canonical), problems
 
 
 def validate_claims(report: str, proposed: list) -> tuple[list, list]:
@@ -670,6 +766,9 @@ def validate_claims(report: str, proposed: list) -> tuple[list, list]:
             problems.append("claim importance is missing or unknown")
         if not quote_in_text(str(quote), report):
             problems.append("claim quote not found in visible report text")
+        quote_problem = _public_text_problem(quote)
+        if quote_problem:
+            problems.append(f"claim quote {quote_problem}")
         row = {
             "id": cid,
             "quote": quote,
@@ -697,11 +796,28 @@ def validate_claims(report: str, proposed: list) -> tuple[list, list]:
 
 def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
                       claim_ids: set[str],
-                      report_path: pathlib.Path | None = None) -> tuple[list, list]:
-    validated, discarded = [], []
-    for finding in proposed:
-        problems = []
-        receipt_updates = {}
+                      report_path: pathlib.Path | None = None, *,
+                      sources: list[dict] | None = None,
+                      report_date: str | None = None) -> tuple[list, list]:
+    """Ground agent-authored checks; never invent their public semantics."""
+    validated: list[dict] = []
+    discarded: list[dict] = []
+    source_map = {
+        str(row.get("id") or ""): row for row in (sources or [])
+        if isinstance(row, dict) and row.get("id")
+    }
+    seen_ids: set[str] = set()
+    for raw in proposed:
+        finding = dict(raw) if isinstance(raw, dict) else {}
+        problems: list[str] = []
+        receipt_updates: dict = {}
+        check_id = str(finding.get("id") or "").strip()
+        if not check_id:
+            problems.append("check id is missing")
+        elif not _SOURCE_ID.fullmatch(check_id):
+            problems.append("check id is not stable or public-safe")
+        elif check_id in seen_ids:
+            problems.append(f"check id {check_id!r} is duplicated")
         verdict = finding.get("verdict")
         if verdict not in KNOWN_VERDICTS:
             problems.append("verdict is missing or unknown")
@@ -710,156 +826,193 @@ def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
             problems.append("check has no claim_id")
         elif claim_id not in claim_ids:
             problems.append(f"claim_id {claim_id!r} is not in the ledger")
-        finding = {
-            **finding,
+        basis = str(finding.get("basis") or "").strip()
+        if basis not in {"report", "evidence"}:
+            problems.append("basis is missing or unknown")
+        importance = str(finding.get("importance") or "").strip()
+        if importance not in {"material", "supporting"}:
+            problems.append("check importance is missing or unknown")
+        if not str(finding.get("type") or "").strip():
+            problems.append("check type is missing")
+        finding.update({
+            "id": check_id,
             "claim_id": claim_id,
-            "basis": finding.get("basis") or (
-                "report" if finding.get("type") in REPORT_ONLY_TYPES else "evidence"),
-            "importance": finding.get("importance") or "material",
-        }
+            "basis": basis,
+            "importance": importance,
+        })
         if verdict == "contradicted":
             finding["severity"] = normalize_severity(
                 finding.get("severity"), contradicted=True,
-                importance=str(finding.get("importance") or "material"))
+                importance=importance or "material")
         else:
             finding["severity"] = None
         if not quote_in_text(finding.get("report_quote", ""), report):
             problems.append("report_quote not found in visible report text")
         second = finding.get("report_quote_2")
-        basis = finding.get("basis")
         if second and basis == "report" and not quote_in_text(second, report):
             problems.append("report_quote_2 not found in visible report text")
         elif second and basis != "report":
-            receipt_updates["report_quote_2"] = None
-        if basis == "report" and verdict == "contradicted" and not second:
-            problems.append("report-only contradiction has no second report receipt")
+            problems.append("report_quote_2 is only allowed for report basis")
         if verdict == "changed_since_report" and basis != "evidence":
             problems.append(
-                "changed_since_report requires an evidence receipt for the current value")
+                "changed_since_report requires an evidence receipt for the later value")
+        if finding.get("current_source_kind") not in (None, ""):
+            problems.append("current_source_kind is not accepted; source kind comes from sources")
+        if finding.get("evidence_file") not in (None, "") or finding.get("evidence_files"):
+            problems.append(
+                "check evidence_file is not accepted; link public_receipt.source_id")
+
+        public_raw = finding.get("public_receipt")
+        source_id = str(
+            ((public_raw or {}).get("source_id") or "")
+            if isinstance(public_raw, dict) else ""
+        ).strip()
+        source = source_map.get(source_id)
+        evidence = None
         if basis == "evidence" and verdict in EVIDENCE_RECEIPT_VERDICTS:
-            evidence_name = str(finding.get("evidence_file") or "")
-            json_receipts = finding.get("evidence_json") or []
-            if json_receipts:
-                resolved, path_err = resolve_json_pointer_receipts(
-                    sandbox, finding, json_receipts, report_path)
-                if resolved:
+            if source is not None:
+                evidence, path_problem = evidence_path(
+                    sandbox, source.get("evidence_file"), report_path)
+                if path_problem:
+                    problems.append(path_problem)
+                else:
                     receipt_updates.update({
-                        "evidence_file": (
-                            resolved[0]["evidence_file"] if len(resolved) == 1 else None),
-                        "evidence_receipts": resolved,
+                        "source_id": source_id,
+                        "evidence_mode": source.get("kind"),
+                        "evidence_file": source.get("evidence_file"),
+                    })
+            json_receipts = finding.get("evidence_json")
+            if json_receipts not in (None, []) and not isinstance(json_receipts, list):
+                problems.append("evidence_json is not a list")
+                json_receipts = []
+            json_receipts = json_receipts or []
+            if evidence is not None and json_receipts:
+                matched, canonical = json_pointer_receipt(evidence, json_receipts)
+                if matched:
+                    receipt_updates.update({
                         "evidence_receipt_mode": "json-pointers",
-                        "evidence_json": [
-                            receipt for group in resolved
-                            for receipt in group["evidence_json"]],
+                        "evidence_json": canonical,
                         "evidence_quote": None,
                     })
                 else:
-                    problems.append(
-                        path_err or "JSON pointer receipt did not match an evidence file")
-            else:
-                evidence, path_err = evidence_path(sandbox, evidence_name, report_path)
-                if path_err or evidence is None:
-                    problems.append(path_err or f"evidence_file {evidence_name!r} missing")
-                else:
-                    quote = finding.get("evidence_quote", "")
-                    evidence_texts = (
-                        load_text(evidence),
-                        normalize(evidence.read_text(errors="replace")),
-                    )
-                    if quote and any(quote_in_text(quote, text) for text in evidence_texts):
-                        receipt_updates["evidence_receipt_mode"] = "verbatim"
-                    else:
-                        matched, canonical = json_field_receipt(evidence, quote)
-                        if matched:
-                            receipt_updates.update({
-                                "evidence_receipt_mode": "json-object-fields",
-                                "evidence_quote": canonical,
-                            })
-                        else:
-                            problems.append(
-                                "evidence_quote is neither verbatim nor two exact JSON object fields")
-            # A one-value receipt cannot prove an increase, decrease, or
-            # unchanged claim. When the cited JSON record exposes a clear
-            # current/prior sibling pair, retain both exact operands.
-            comparative_path, _comparative_error = evidence_path(
-                sandbox, evidence_name, report_path)
-            if comparative_path is not None:
-                pair = comparative_json_receipt(comparative_path, finding)
-                if pair:
-                    receipt_updates.update({
-                        "evidence_file": evidence_name,
-                        "evidence_receipts": [{
-                            "evidence_file": evidence_name,
-                            "evidence_json": pair,
-                        }],
-                        "evidence_receipt_mode": "json-pointers",
-                        "evidence_json": pair,
-                        "evidence_quote": None,
-                    })
-        if verdict == "not_checkable" and not str(finding.get("explanation") or "").strip():
-            problems.append("not_checkable outcome has no reason")
-        if verdict == "changed_since_report":
-            if not str(finding.get("reconstruction_attempt") or "").strip():
-                problems.append("changed_since_report has no reconstruction attempt")
-            if finding.get("report_value") in (None, ""):
-                problems.append("changed_since_report has no report value")
-            if finding.get("current_value") in (None, ""):
-                problems.append("changed_since_report has no current value")
-            if not str(finding.get("current_as_of") or "").strip():
-                problems.append("changed_since_report has no current as-of date")
-            if not str(
-                finding.get("evidence_file")
-                or receipt_updates.get("evidence_file")
-                or ""
-            ).strip():
-                problems.append("changed_since_report has no evidence source")
-            if (
-                finding.get("report_value") not in (None, "")
-                and not quote_in_text(
-                    str(finding.get("report_value")),
-                    str(finding.get("report_quote") or ""),
+                    problems.append("JSON pointer receipt did not match the retained source")
+            elif evidence is not None:
+                quote = str(finding.get("evidence_quote") or "")
+                evidence_texts = (
+                    load_text(evidence),
+                    normalize(evidence.read_text(errors="replace")),
                 )
+                if quote and any(quote_in_text(quote, text) for text in evidence_texts):
+                    receipt_updates.update({
+                        "evidence_receipt_mode": "verbatim",
+                        "evidence_quote": quote,
+                    })
+                else:
+                    matched, canonical = json_field_receipt(evidence, quote)
+                    if matched:
+                        receipt_updates.update({
+                            "evidence_receipt_mode": "json-object-fields",
+                            "evidence_quote": canonical,
+                        })
+                    else:
+                        problems.append(
+                            "evidence receipt needs exact pointers or a grounded exact quote")
+        elif basis == "report" and (
+            finding.get("evidence_json") or finding.get("evidence_quote")
+        ):
+            problems.append("report-basis check must not declare evidence receipts")
+
+        if verdict in EVIDENCE_RECEIPT_VERDICTS:
+            public_receipt, public_problems = _validate_public_receipt(
+                finding, report, receipt_updates, source_map)
+            problems.extend(public_problems)
+            if public_receipt is not None:
+                receipt_updates["public_receipt"] = public_receipt
+        elif finding.get("public_receipt") not in (None, {}):
+            problems.append("public_receipt is only allowed for a decisive verdict")
+
+        if verdict == "not_checkable":
+            explanation = str(finding.get("explanation") or "").strip()
+            if not _substantive_explanation(explanation):
+                problems.append("not_checkable explanation is missing or not substantive")
+            finding["explanation"] = explanation
+
+        if verdict == "changed_since_report":
+            reconstruction = str(finding.get("reconstruction_attempt") or "").strip()
+            if not reconstruction:
+                problems.append("changed_since_report has no reconstruction attempt")
+            else:
+                reconstruction_problem = _public_text_problem(reconstruction)
+                if reconstruction_problem:
+                    problems.append(
+                        f"changed_since_report reconstruction_attempt {reconstruction_problem}")
+            report_value = finding.get("report_value")
+            current_value = finding.get("current_value")
+            current_as_of = str(finding.get("current_as_of") or "").strip()
+            canonical_report_date = str(finding.get("report_date") or report_date or "").strip()
+            finding["report_date"] = canonical_report_date
+            if report_value in (None, ""):
+                problems.append("changed_since_report has no report value")
+            if current_value in (None, ""):
+                problems.append("changed_since_report has no current value")
+            if not current_as_of:
+                problems.append("changed_since_report has no current as-of date")
+            if not canonical_report_date:
+                problems.append("changed_since_report has no report date")
+            if report_value not in (None, "") and not quote_in_text(
+                str(report_value), str(finding.get("report_quote") or "")
             ):
                 problems.append(
-                    "changed_since_report report value is not visible in the report quote"
-                )
-            report_qty = parse_quantity(finding.get("report_value"))
-            current_qty = parse_quantity(finding.get("current_value"))
-            if (
-                report_qty is not None
-                and current_qty is not None
-                and report_qty == current_qty
-            ) or values_equal(finding.get("report_quote"), finding.get("current_value")):
-                problems.append(
-                    "changed_since_report current value equals the report value"
-                )
+                    "changed_since_report report value is not visible in report_quote")
+            if values_equal(report_value, current_value):
+                problems.append("changed_since_report current value equals the report value")
             resolved_values = _resolved_receipt_values(finding, receipt_updates)
-            declared = finding.get("current_value")
-            if declared not in (None, "") and not any(
-                values_equal(declared, item) for item in resolved_values
+            if current_value not in (None, "") and not _value_in(
+                current_value, resolved_values
             ):
                 problems.append("current_value does not match the receipt")
-            path, payload = _load_evidence_payload(
-                finding, receipt_updates, sandbox, report_path)
+            receipt = receipt_updates.get("public_receipt") or {}
+            decisive_values = [
+                row.get("value") for row in receipt.get("decisive_operands") or []
+                if isinstance(row, dict)
+            ]
+            if current_value not in (None, "") and not _value_in(
+                current_value, decisive_values
+            ):
+                problems.append("current_value is not a decisive public operand")
+            payload = None
+            if evidence is not None and evidence.suffix.lower() == ".json":
+                try:
+                    payload = json.loads(evidence.read_text())
+                except (OSError, json.JSONDecodeError):
+                    payload = None
             pointers = _json_pointers(finding, receipt_updates)
-            as_of = str(finding.get("current_as_of") or "").strip()
-            dates = []
+            dates: list[str] = []
             if payload is not None:
-                dates = _dates_on_same_record(payload, pointers, declared)
-            if not dates and path is not None:
-                dates = _csv_dates_for_value(path, declared)
-            if as_of:
+                dates = _dates_on_same_record(payload, pointers, current_value)
+            if not dates and evidence is not None:
+                dates = _csv_dates_for_value(evidence, current_value)
+            if current_as_of:
                 if not dates:
                     problems.append(
                         "current_as_of is not on the same record as the current value")
-                elif not _date_matches(as_of, dates):
+                elif not _date_matches(current_as_of, dates):
                     problems.append("current_as_of does not match evidence date")
-        support_problem = _verdict_receipt_problem(finding, receipt_updates)
-        if support_problem:
-            problems.append(support_problem)
-        target = discarded if problems else validated
-        target.append({**finding, **receipt_updates,
-                       **({"problems": problems} if problems else {})})
+            report_day = parse_date(canonical_report_date)
+            current_day = parse_date(current_as_of)
+            if canonical_report_date and report_day is None:
+                problems.append("report_date is not a recognized date")
+            if current_as_of and current_day is None:
+                problems.append("current_as_of is not a recognized date")
+            if report_day is not None and current_day is not None and current_day <= report_day:
+                problems.append("current_as_of is not later than report_date")
+
+        canonical = {**finding, **receipt_updates}
+        if problems:
+            discarded.append({**canonical, "problems": problems})
+        else:
+            seen_ids.add(check_id)
+            validated.append(canonical)
     return validated, discarded
 
 
@@ -896,194 +1049,6 @@ def parse_date(value) -> date | None:
             except ValueError:
                 return None
     return None
-
-
-def is_currency_claim(quote: str) -> bool:
-    return bool(_CURRENCY_CUE.search(quote or ""))
-
-
-def _norm_key(key: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", str(key).lower())
-
-
-def _is_date_field_name(key: str) -> bool:
-    raw = str(key or "")
-    lower = raw.lower()
-    compact = _norm_key(raw)
-    if compact in {_norm_key(item) for item in _SKIP_DATE_KEYS}:
-        return False
-    if lower in _PREFERRED_DATE_KEYS or compact in {
-        _norm_key(item) for item in _PREFERRED_DATE_KEYS
-    }:
-        return True
-    if lower.endswith("_date") or lower.endswith("_as_of") or lower.endswith("asof"):
-        return True
-    return False
-
-
-def _pointer_token(key: str) -> str:
-    return str(key).replace("~", "~0").replace("/", "~1")
-
-
-def _walk_json(value, prefix: str = ""):
-    if isinstance(value, dict):
-        for key, child in value.items():
-            pointer = f"{prefix}/{_pointer_token(key)}"
-            yield pointer, str(key), child
-            yield from _walk_json(child, pointer)
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            pointer = f"{prefix}/{index}"
-            yield pointer, str(index), child
-            yield from _walk_json(child, pointer)
-
-
-def _evidence_date_hits(sandbox: pathlib.Path, report_path: pathlib.Path | None) -> list[dict]:
-    hits = []
-    if sandbox is None or not sandbox.is_dir():
-        return hits
-    preferred_norm = {_norm_key(item) for item in _PREFERRED_DATE_KEYS}
-    for path in sorted(sandbox.rglob("*.json")):
-        if path.name in _SKIP_EVIDENCE_NAMES:
-            continue
-        if "artifact" in path.parts:
-            continue
-        rel = str(path.relative_to(sandbox))
-        resolved, err = evidence_path(sandbox, rel, report_path)
-        if err or resolved is None:
-            continue
-        try:
-            payload = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError):
-            continue
-        for pointer, key, child in _walk_json(payload):
-            if isinstance(child, (dict, list)):
-                continue
-            if not _is_date_field_name(key):
-                continue
-            day = parse_date(child)
-            if day is None:
-                continue
-            hits.append({
-                "file": rel.replace("\\", "/"),
-                "pointer": pointer,
-                "key": key,
-                "value": child,
-                "day": day,
-                "preferred": _norm_key(key) in preferred_norm,
-            })
-    return hits
-
-
-def apply_currency_staleness(
-        validated: list, ledger: list, sandbox: pathlib.Path,
-        report_path: pathlib.Path | None) -> tuple[list, list]:
-    """Ground data-currency dates against evidence date fields.
-
-    When a report as-of/current-through date differs from a supplied evidence
-    date field, the claim becomes contradicted/staleness with a JSON pointer
-    receipt. not_checkable is not kept for that claim.
-    """
-    hits = _evidence_date_hits(sandbox, report_path)
-    if not hits:
-        return validated, ledger
-    out = list(validated)
-    touched: set[str] = set()
-    for claim in ledger:
-        quote = str(claim.get("quote") or "")
-        if not is_currency_claim(quote):
-            continue
-        report_day = parse_date(quote)
-        if report_day is None:
-            continue
-        preferred = [row for row in hits if row.get("preferred")]
-        pool = preferred or hits
-        mismatch = [row for row in pool if row["day"] != report_day]
-        match = [row for row in pool if row["day"] == report_day]
-        cid = str(claim.get("id") or "")
-        existing = [row for row in out if str(row.get("claim_id") or "") == cid]
-        if mismatch:
-            hit = mismatch[0]
-            if any(
-                row.get("verdict") == "contradicted"
-                and row.get("basis") == "evidence"
-                for row in existing
-            ):
-                continue
-            replacement = {
-                "id": (existing[0].get("id") if existing else f"STALE-{cid}"),
-                "claim_id": cid,
-                "type": "staleness",
-                "basis": "evidence",
-                "verdict": "contradicted",
-                "severity": "high",
-                "importance": claim.get("importance") or "material",
-                "report_quote": quote,
-                "evidence_file": hit["file"],
-                "evidence_json": [{"pointer": hit["pointer"], "value": hit["value"]}],
-                "evidence_receipt_mode": "json-pointers",
-                "explanation": (
-                    "The report data-currency date differs from the evidence date."
-                ),
-            }
-            if existing:
-                keep_id = existing[0].get("id")
-                out = [
-                    row for row in out
-                    if str(row.get("claim_id") or "") != cid
-                    or row.get("verdict") == "contradicted"
-                ]
-                replacement["id"] = keep_id
-            out.append(replacement)
-            touched.add(cid)
-            continue
-        if match and any(row.get("verdict") == "not_checkable" for row in existing):
-            hit = match[0]
-            replacement = {
-                "id": existing[0].get("id"),
-                "claim_id": cid,
-                "type": "staleness",
-                "basis": "evidence",
-                "verdict": "confirmed",
-                "importance": claim.get("importance") or "material",
-                "report_quote": quote,
-                "evidence_file": hit["file"],
-                "evidence_json": [{"pointer": hit["pointer"], "value": hit["value"]}],
-                "evidence_receipt_mode": "json-pointers",
-                "explanation": (
-                    "The report data-currency date matches the evidence date."
-                ),
-            }
-            out = [
-                row for row in out
-                if not (
-                    str(row.get("claim_id") or "") == cid
-                    and row.get("verdict") == "not_checkable"
-                )
-            ]
-            out.append(replacement)
-            touched.add(cid)
-    by_claim: dict[str, list] = {}
-    for check in out:
-        by_claim.setdefault(str(check.get("claim_id") or ""), []).append(check)
-    rank = {
-        "error": 0,
-        "contradicted": 0,
-        "changed_since_report": 1,
-        "confirmed": 2,
-        "not_checkable": 3,
-    }
-    for claim in ledger:
-        cid = str(claim.get("id") or "")
-        if cid not in touched:
-            continue
-        options = by_claim.get(cid) or []
-        if not options:
-            continue
-        best = sorted(options, key=lambda row: rank.get(row.get("verdict"), 9))[0]
-        claim["outcome"] = best.get("verdict")
-        claim["check_id"] = best.get("id")
-    return out, ledger
 
 
 def attach_claim_outcomes(claims: list, checks: list) -> list:
@@ -1228,14 +1193,13 @@ def validate_presentation(doc, report: str,
 
 def load_checks(path: pathlib.Path) -> tuple[list, dict | None]:
     doc = json.loads(path.read_text())
-    if isinstance(doc, list):
-        return doc, None
     if not isinstance(doc, dict):
-        raise ValueError("checks file must be a list or an object")
-    for key in ("checks", "findings", "validated"):
-        if isinstance(doc.get(key), list):
-            return doc[key], doc
-    raise ValueError("checks file has no checks array")
+        raise ValueError("checks file must be an object with checks and sources arrays")
+    if not isinstance(doc.get("checks"), list):
+        raise ValueError("checks file has no checks array")
+    if not isinstance(doc.get("sources"), list):
+        raise ValueError("checks file has no sources array")
+    return doc["checks"], doc
 
 
 def load_claims(path: pathlib.Path) -> list:
@@ -1259,226 +1223,14 @@ def load_claims_bundle(path: pathlib.Path) -> tuple[list, dict]:
     raise ValueError("claims file has no claims array")
 
 
-def load_internal_outcomes(path: pathlib.Path | None) -> list:
-    if path is None or not path.is_file():
-        return []
-    try:
-        doc = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError, TypeError):
-        return []
-    rows = doc.get("internal_outcomes")
-    return list(rows) if isinstance(rows, list) else []
-
-
-def _claims_for_internal(ledger: list, outcome: dict) -> list:
-    """Match only on exact inventory-id intersection. No quote fallback."""
-    ids = set(_outcome_inventory_ids(outcome))
-    if not ids:
-        return []
-    found = []
-    for claim in ledger:
-        claim_ids = set(claim_inventory_ids(claim))
-        if not claim_ids:
-            continue
-        if claim_ids & ids:
-            found.append(claim)
-    return found
-
-
-def _internal_check(outcome: dict, claim: dict, check_id: str) -> dict:
-    verdict = str(outcome.get("verdict") or "confirmed")
-    importance = str(outcome.get("importance") or claim.get("importance") or "material")
-    row = {
-        "id": check_id,
-        "claim_id": claim.get("id"),
-        "type": outcome.get("type") or "internal",
-        "basis": "report",
-        "verdict": verdict,
-        "severity": normalize_severity(
-            outcome.get("severity"), contradicted=verdict == "contradicted",
-            importance=importance),
-        "importance": importance,
-        "report_quote": outcome.get("report_quote") or claim.get("quote") or "",
-        "report_quote_2": outcome.get("report_quote_2"),
-        "location": outcome.get("location") or claim.get("location"),
-        "explanation": outcome.get("explanation") or "Deterministic internal check.",
-        "found_by": "internal",
-        "inventory_ids": list(outcome.get("inventory_ids") or claim_inventory_ids(claim)),
-    }
-    if outcome.get("comparison"):
-        row["comparison"] = outcome["comparison"]
-    return row
-
-
-DETERMINISTIC_VERDICTS = frozenset({"confirmed", "contradicted"})
-HOST_OVERRIDE_VERDICTS = frozenset({
-    "confirmed", "contradicted", "not_checkable", "changed_since_report", "error",
-})
-
-
-def _outcome_inventory_ids(outcome: dict) -> list[str]:
-    raw_ids = outcome.get("inventory_ids") or []
-    if isinstance(raw_ids, str):
-        raw_ids = [raw_ids]
-    out = []
-    seen = set()
-    for value in raw_ids:
-        item = str(value or "").strip()
-        if item and item not in seen:
-            seen.add(item)
-            out.append(item)
-    return out
-
-
-def _deterministic_by_inventory_id(outcomes: list) -> dict[str, dict]:
-    by_iid: dict[str, dict] = {}
-    for outcome in outcomes:
-        if not isinstance(outcome, dict):
-            continue
-        verdict = str(outcome.get("verdict") or "")
-        if verdict not in DETERMINISTIC_VERDICTS:
-            continue
-        for iid in _outcome_inventory_ids(outcome):
-            prev = by_iid.get(iid)
-            if prev is None or (
-                    verdict == "contradicted"
-                    and prev.get("verdict") != "contradicted"):
-                by_iid[iid] = outcome
-    return by_iid
-
-
-def is_deterministic_conflict(row: dict) -> bool:
-    if not isinstance(row, dict):
-        return False
-    if row.get("reason") == "deterministic-conflict":
-        return True
-    return any(
-        str(item).startswith("deterministic-conflict")
-        for item in (row.get("problems") or [])
-    )
-
-
-def _proven_internal(row: dict, claim: dict | None,
-                     by_iid: dict) -> tuple[str | None, dict] | None:
-    ids = set(claim_inventory_ids(row))
-    if claim is not None:
-        ids.update(claim_inventory_ids(claim))
-    if not ids:
-        return None
-    hits = [(iid, by_iid[iid]) for iid in ids if iid in by_iid]
-    if not hits:
-        return None
-    hits.sort(key=lambda item: 0 if item[1].get("verdict") == "contradicted" else 1)
-    return hits[0]
-
-
-def attach_internal_outcomes(validated: list, ledger: list,
-                             outcomes: list) -> tuple[list, list, list]:
-    """Merge code findings. Host cannot reverse or downgrade them."""
-    discarded: list = []
-    if not outcomes:
-        return validated, ledger, discarded
-    by_iid = _deterministic_by_inventory_id(outcomes)
-    claims_by_id = {str(row.get("id") or ""): row for row in ledger}
-    kept: list = []
-    for row in validated:
-        claim = claims_by_id.get(str(row.get("claim_id") or ""))
-        hit = _proven_internal(row, claim, by_iid)
-        if hit is None:
-            kept.append(row)
-            continue
-        iid, outcome = hit
-        host_v = str(row.get("verdict") or "")
-        int_v = str(outcome.get("verdict") or "")
-        if host_v == int_v:
-            merged = dict(row)
-            if outcome.get("comparison"):
-                merged["comparison"] = outcome["comparison"]
-            if outcome.get("explanation"):
-                merged["explanation"] = outcome["explanation"]
-            if outcome.get("location") and not merged.get("location"):
-                merged["location"] = outcome["location"]
-            if outcome.get("type"):
-                merged["type"] = outcome["type"]
-            if outcome.get("basis"):
-                merged["basis"] = outcome["basis"]
-            kept.append(merged)
-            continue
-        if host_v in HOST_OVERRIDE_VERDICTS:
-            target = iid or str(row.get("claim_id") or "")
-            discarded.append({
-                **row,
-                "reason": "deterministic-conflict",
-                "problems": [
-                    "deterministic-conflict: "
-                    f"host {host_v} conflicts with internal {int_v} "
-                    f"for inventory id {target}"
-                ],
-            })
-            continue
-        kept.append(row)
-
-    used = {str(row.get("id") or "") for row in kept}
-    next_n = 1
-    touched: set[str] = set()
-
-    def new_id() -> str:
-        nonlocal next_n
-        while f"INT{next_n}" in used:
-            next_n += 1
-        cid = f"INT{next_n}"
-        used.add(cid)
-        next_n += 1
-        return cid
-
-    for outcome in outcomes:
-        verdict = str(outcome.get("verdict") or "")
-        if verdict not in DETERMINISTIC_VERDICTS:
-            continue
-        for claim in _claims_for_internal(ledger, outcome):
-            cid = str(claim.get("id") or "")
-            existing = [
-                row for row in kept if str(row.get("claim_id") or "") == cid]
-            if any(row.get("verdict") == verdict for row in existing):
-                touched.add(cid)
-                continue
-            kept = [
-                row for row in kept if str(row.get("claim_id") or "") != cid]
-            kept.append(_internal_check(outcome, claim, new_id()))
-            touched.add(cid)
-    by_claim: dict[str, list] = {}
-    for check in kept:
-        by_claim.setdefault(str(check.get("claim_id") or ""), []).append(check)
-    rank = {
-        "error": 0,
-        "contradicted": 0,
-        "changed_since_report": 1,
-        "confirmed": 2,
-        "not_checkable": 3,
-    }
-    for claim in ledger:
-        cid = str(claim.get("id") or "")
-        if cid not in touched:
-            continue
-        options = by_claim.get(cid) or []
-        if not options:
-            continue
-        best = sorted(options, key=lambda row: rank.get(row.get("verdict"), 9))[0]
-        claim["outcome"] = best.get("verdict")
-        claim["check_id"] = best.get("id")
-    return kept, ledger, discarded
-
-
 def apply_host_classifications(ledger: list, discarded_claims: list,
-                               inventory: dict,
-                               outcomes: list | None = None) -> list:
+                               inventory: dict) -> list:
     """Apply host supporting_provenance. Code does not guess meaning from words."""
     by_id = {
         str(item.get("id") or ""): item
         for item in (inventory.get("items") or [])
         if isinstance(item, dict) and item.get("id")
     }
-    proven = _deterministic_by_inventory_id(outcomes or [])
     used: set[str] = set()
     kept = []
     for claim in ledger:
@@ -1503,264 +1255,49 @@ def apply_host_classifications(ledger: list, discarded_claims: list,
                 if iid in used:
                     problems.append(
                         f"inventory id {iid!r} already has supporting_provenance")
-                outcome = proven.get(iid)
-                if outcome is not None:
-                    int_v = str(outcome.get("verdict") or "")
-                    problems.append(
-                        "deterministic-conflict: "
-                        f"supporting_provenance conflicts with internal {int_v} "
-                        f"for inventory id {iid}"
-                    )
                 if not problems:
                     used.add(iid)
                     item["importance"] = "supporting"
                     claim["importance"] = "supporting"
         if problems:
             dropped = {**claim, "problems": problems}
-            if any(str(row).startswith("deterministic-conflict") for row in problems):
-                dropped["reason"] = "deterministic-conflict"
             discarded_claims.append(dropped)
-            other = [
-                row for row in problems
-                if not str(row).startswith("deterministic-conflict")]
-            if not other:
-                claim["classification"] = "material_claim"
-                claim["importance"] = "material"
-                claim.pop("reason", None)
-                kept.append(claim)
         else:
             kept.append(claim)
     return kept
 
 
-def apply_inventory_importance(ledger: list, validated: list, inventory: dict) -> None:
-    """Keep host importance from claiming a supporting inventory item as material."""
-    by_id = {
-        str(item.get("id") or ""): item
-        for item in (inventory.get("items") or [])
-        if isinstance(item, dict)
-    }
-    for claim in ledger:
-        ids = claim_inventory_ids(claim)
-        imps = [
-            by_id[iid].get("importance") for iid in ids if iid in by_id]
-        if imps and all(item == "supporting" for item in imps):
-            claim["importance"] = "supporting"
-        locations = [
-            by_id[iid].get("location") for iid in ids
-            if iid in by_id and by_id[iid].get("location")
-        ]
-        if len(set(locations)) == 1 and not claim.get("location"):
-            claim["location"] = locations[0]
-    by_claim = {str(row.get("id") or ""): row for row in ledger}
-    for check in validated:
-        claim = by_claim.get(str(check.get("claim_id") or ""))
-        if claim and claim.get("location") and not check.get("location"):
-            check["location"] = claim["location"]
-        if check.get("found_by") == "internal":
-            continue
-        if claim and claim.get("importance") == "supporting":
-            check["importance"] = "supporting"
-
-
-def load_arithmetic_findings(path: pathlib.Path | None) -> list:
-    if path is None:
-        return []
-    doc = json.loads(path.read_text())
-    out = []
-    for item in doc.get("findings") or []:
-        if not isinstance(item, dict):
-            continue
-        if item.get("check_id") == "ari_total_footing" or (
-                item.get("tier") == "D" and item.get("family") == "internal_arithmetic"):
-            out.append(item)
-    return out
-
-
-def _claim_for_quantity(ledger: list, value, location=None) -> dict | None:
-    if location:
-        exact = [
-            claim for claim in ledger
-            if claim.get("location") == location
-            and quantities_equal(claim.get("quote"), value)
-        ]
-        if len(exact) == 1:
-            return exact[0]
-    matches = []
-    for claim in ledger:
-        displayed = claim.get("quote")
-        if (
-            quantities_equal(displayed, value)
-            or quote_in_text(str(value), str(displayed or ""))
-            or quote_in_text(str(displayed or ""), str(value))
-        ):
-            matches.append(claim)
-    return matches[0] if len(matches) == 1 else None
-
-
-def _footing_comparison(use: dict, *, include_stated: bool = True) -> dict:
-    operands = []
-    for item in use.get("addends") or []:
-        if not isinstance(item, dict):
-            continue
-        operands.append({
-            "label": str(item.get("label") or "row"),
-            "value": item.get("displayed") if item.get("displayed") not in (None, "") else item.get("value"),
-            "location": item.get("location"),
-        })
-    if include_stated:
-        operands.append({
-            "label": "report total",
-            "value": (
-                use.get("stated_displayed")
-                if use.get("stated_displayed") not in (None, "")
-                else use.get("stated")
-            ),
-        })
-    operands.append({
-        "label": "sum of rows",
-        "value": use.get("computed"),
-    })
-    comparison = {
-        "kind": "identity",
-        "formula": "sum of rows",
-        "result": use.get("computed"),
-        "operands": operands,
-    }
-    if include_stated:
-        comparison["stated"] = use.get("stated")
-    return comparison
-
-
 def attach_arithmetic_uses(ledger: list, validated: list, uses: list) -> tuple[list, list]:
-    """Mark values used in footing as internal arithmetic, not unchecked."""
+    """Mark exact inventory ids as arithmetic inputs without creating verdicts."""
     if not uses:
         return validated, ledger
-    used_ids = {str(row.get("id") or "") for row in validated if row.get("id")}
-    next_n = 1
-
-    def new_id() -> str:
-        nonlocal next_n
-        while f"ARI{next_n}" in used_ids:
-            next_n += 1
-        cid = f"ARI{next_n}"
-        used_ids.add(cid)
-        next_n += 1
-        return cid
-
-    protected = {"error", "contradicted", "changed_since_report"}
+    used_inventory_ids: set[str] = set()
     for use in uses:
         if not isinstance(use, dict):
             continue
-        comparison = _footing_comparison(use)
-        addend_comparison = (
-            comparison if use.get("matched")
-            else _footing_comparison(use, include_stated=False)
-        )
-        targets = []
+        for value in use.get("inventory_ids") or []:
+            item = str(value or "").strip()
+            if item:
+                used_inventory_ids.add(item)
         for addend in use.get("addends") or []:
-            claim = _claim_for_quantity(
-                ledger,
-                addend.get("displayed") or addend.get("value"),
-                addend.get("location"),
-            )
-            if claim is not None:
-                targets.append(
-                    (
-                        claim,
-                        "addend",
-                        addend.get("location") or claim.get("location"),
-                    )
-                )
-        total = _claim_for_quantity(
-            ledger, use.get("stated_displayed") or use.get("stated"),
-            use.get("location"))
-        if total is not None:
-            targets.append(
-                (
-                    total,
-                    "total",
-                    use.get("location") or total.get("location"),
-                )
-            )
-        seen_claims = set()
-        for claim, role, target_location in targets:
-            cid = str(claim.get("id") or "")
-            if not cid or cid in seen_claims:
+            if not isinstance(addend, dict):
                 continue
-            seen_claims.add(cid)
-            if claim.get("classification") == "supporting_provenance":
-                continue
-            claim["verification_mode"] = "internal_arithmetic"
-            claim["found_by"] = claim.get("found_by") or "arithmetic"
-            if claim.get("outcome") in protected:
-                continue
-            if role == "total" and not use.get("matched"):
-                continue
-            claim["outcome"] = "confirmed"
-            check = {
-                "id": new_id(),
-                "claim_id": cid,
-                "type": "arithmetic",
-                "basis": "report",
-                "verdict": "confirmed",
-                "importance": claim.get("importance") or "material",
-                "severity": None,
-                "report_quote": str(claim.get("quote") or ""),
-                "location": target_location,
-                "explanation": "Used for internal arithmetic.",
-                "found_by": "arithmetic",
-                "comparison": addend_comparison if role == "addend" else comparison,
-            }
-            validated.append(check)
-            claim["check_id"] = check["id"]
+            item = str(addend.get("inventory_id") or "").strip()
+            if item:
+                used_inventory_ids.add(item)
+    if not used_inventory_ids:
+        return validated, ledger
+    for claim in ledger:
+        if claim.get("classification") == "supporting_provenance":
+            continue
+        if not (set(claim_inventory_ids(claim)) & used_inventory_ids):
+            continue
+        claim["verification_mode"] = "internal_arithmetic"
+        claim["found_by"] = claim.get("found_by") or "arithmetic"
+        if claim.get("outcome") in (None, "not_reached"):
+            claim["outcome"] = "used_for_internal_arithmetic"
+            claim["check_id"] = None
     return validated, ledger
-
-
-def attach_arithmetic_claims(ledger: list, findings: list) -> list:
-    """Each arithmetic error maps to one ledger claim. Add a row when none match."""
-    if not findings:
-        return ledger
-    seen = {str(row.get("id") or "") for row in ledger}
-    next_n = 1
-    for finding in findings:
-        detail = finding.get("detail") or {}
-        stated = detail.get("stated")
-        if stated in (None, ""):
-            continue
-        matched = None
-        for claim in ledger:
-            if quantities_equal(claim.get("quote"), stated):
-                matched = claim
-                break
-            if quote_in_text(str(stated), str(claim.get("quote") or "")):
-                matched = claim
-                break
-        if matched is not None:
-            if matched.get("outcome") not in {"error", "contradicted"}:
-                matched["outcome"] = "error"
-                matched["check_id"] = finding.get("check_id")
-            matched["found_by"] = matched.get("found_by") or "arithmetic"
-            continue
-        while f"AR{next_n}" in seen:
-            next_n += 1
-        cid = f"AR{next_n}"
-        seen.add(cid)
-        next_n += 1
-        loc = str(finding.get("location") or "")
-        parts = loc.split("/")
-        label = parts[2] if len(parts) == 3 else "Total"
-        quote = str(finding.get("statement") or f"{label} {stated}")
-        ledger.append({
-            "id": cid,
-            "quote": quote,
-            "importance": "material",
-            "found_by": "arithmetic",
-            "outcome": "error",
-            "check_id": finding.get("check_id"),
-            "location": loc,
-        })
-    return ledger
 
 
 def _missing(path: pathlib.Path, label: str) -> int:
@@ -1815,42 +1352,29 @@ def main() -> int:
         )
         return 2
 
+    proposed_sources = list((checks_doc or {}).get("sources") or [])
+    accepted_sources, discarded_sources = validate_sources(
+        sandbox, proposed_sources, args.report)
     grounded_claims, discarded_claims = validate_claims(text, proposed_claims)
     claim_ids = {row["id"] for row in grounded_claims}
     validated, discarded = validate_receipts(
-        text, sandbox, proposed, claim_ids, args.report)
+        text, sandbox, proposed, claim_ids, args.report,
+        sources=accepted_sources, report_date=claims_meta.get("report_date"))
     ledger = attach_claim_outcomes(grounded_claims, validated)
-    try:
-        arith = load_arithmetic_findings(args.findings)
-    except (ValueError, json.JSONDecodeError) as exc:
-        print(f"accept: {exc}", file=sys.stderr)
-        return 2
-    ledger = attach_arithmetic_claims(ledger, arith)
-    validated, ledger = apply_currency_staleness(
-        validated, ledger, sandbox, args.report)
     inventory = None
-    internal_outcomes: list = []
     arithmetic_uses: list = []
     if args.findings is not None and args.findings.is_file():
         try:
             findings_doc = json.loads(args.findings.read_text())
             inventory = findings_doc.get("inventory")
-            internal_outcomes = list(findings_doc.get("internal_outcomes") or [])
             arithmetic_uses = list(findings_doc.get("arithmetic_uses") or [])
         except (OSError, json.JSONDecodeError, TypeError):
             inventory = None
-            internal_outcomes = []
             arithmetic_uses = []
     if not isinstance(inventory, dict):
         inventory = inventory_for(args.report)
-    ledger = apply_host_classifications(
-        ledger, discarded_claims, inventory, internal_outcomes)
-    apply_inventory_importance(ledger, validated, inventory)
-    validated, ledger, internal_conflicts = attach_internal_outcomes(
-        validated, ledger, internal_outcomes)
-    discarded.extend(internal_conflicts)
+    ledger = apply_host_classifications(ledger, discarded_claims, inventory)
     validated, ledger = attach_arithmetic_uses(ledger, validated, arithmetic_uses)
-    apply_inventory_importance(ledger, validated, inventory)
     inventory_cover = cover(inventory, ledger)
     accepted_ids = {
         str(row.get("id") or "").strip() for row in validated if row.get("id")}
@@ -1876,6 +1400,8 @@ def main() -> int:
         "checks": validated,
         "validated": validated,
         "discarded": discarded,
+        "sources": accepted_sources,
+        "discarded_sources": discarded_sources,
         "proposed": len(material_proposed),
         "grounded": len(material_validated),
         "claims": ledger,
@@ -1905,6 +1431,8 @@ def main() -> int:
     )
     for row in discarded_claims:
         print(f"  DISCARDED CLAIM {row.get('id')}: {'; '.join(row.get('problems') or [])}")
+    for row in discarded_sources:
+        print(f"  DISCARDED SOURCE {row.get('id')}: {'; '.join(row.get('problems') or [])}")
     for row in discarded:
         print(f"  DISCARDED {row.get('id')}: {'; '.join(row.get('problems') or [])}")
     return 0
