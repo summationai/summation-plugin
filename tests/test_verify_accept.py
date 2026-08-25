@@ -151,6 +151,73 @@ class AcceptTests(unittest.TestCase):
             self.assertEqual(payload["grounded"], 1)
             self.assertEqual(payload["checks"][0]["evidence_receipt_mode"], "json-pointers")
 
+    def test_parse_date_iso_and_month_name(self) -> None:
+        from datetime import date
+        self.assertEqual(accept.parse_date("2026-08-14"), date(2026, 8, 14))
+        self.assertEqual(accept.parse_date("August 11, 2026"), date(2026, 8, 11))
+        self.assertEqual(accept.parse_date("11 August 2026"), date(2026, 8, 11))
+        self.assertTrue(accept.is_currency_claim(
+            "Data is current through August 11, 2026."))
+        self.assertFalse(accept.is_currency_claim(
+            "Source snapshot: CRM revenue export, 2026-07-05."))
+
+    def test_as_of_field_grounds_currency_date(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text(
+                "Data is current through August 11, 2026.")
+            (folder / "snap.json").write_text('{"as_of": "2026-08-14"}\n')
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C1",
+                "claim_id": "L1",
+                "type": "staleness",
+                "basis": "evidence",
+                "verdict": "not_checkable",
+                "importance": "material",
+                "report_quote": "Data is current through August 11, 2026.",
+                "explanation": "No live source was queried.",
+            }]}))
+            self.assertEqual(run_accept(
+                "--report", str(folder / "report.md"),
+                "--checks", str(folder / "checks.json"),
+                "--evidence-dir", str(folder),
+                "--out", str(folder / "receipts.json"),
+            ), 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(payload["claims"][0]["outcome"], "contradicted")
+            check = next(
+                row for row in payload["checks"] if row.get("verdict") == "contradicted")
+            self.assertEqual(check["type"], "staleness")
+            self.assertEqual(check["evidence_json"][0]["pointer"], "/as_of")
+
+    def test_generic_date_field_grounds_currency_date(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text(
+                "Data is current as of 2026-08-01.")
+            (folder / "snap.json").write_text('{"date": "2026-08-09"}\n')
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C1",
+                "claim_id": "L1",
+                "type": "semantic",
+                "basis": "evidence",
+                "verdict": "not_checkable",
+                "importance": "material",
+                "report_quote": "Data is current as of 2026-08-01.",
+                "explanation": "No warehouse query ran.",
+            }]}))
+            self.assertEqual(run_accept(
+                "--report", str(folder / "report.md"),
+                "--checks", str(folder / "checks.json"),
+                "--evidence-dir", str(folder),
+                "--out", str(folder / "receipts.json"),
+            ), 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(payload["claims"][0]["outcome"], "contradicted")
+            check = next(
+                row for row in payload["checks"] if row.get("verdict") == "contradicted")
+            self.assertEqual(check["evidence_json"][0]["pointer"], "/date")
+
     def test_report_text_sidecar_for_binary_formats(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)

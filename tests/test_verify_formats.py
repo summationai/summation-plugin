@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -144,6 +145,14 @@ def contradicted_report(cid: str, claim_id: str, quote: str, quote2: str) -> dic
     }
 
 
+def parse_date_value(value) -> tuple[int, int, int] | None:
+    text = str(value or "")
+    match = re.search(r"(\d{4})-(\d{2})-(\d{2})", text)
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
 def contradicted_evidence(cid: str, claim_id: str, quote: str, pointer: str, value) -> dict:
     return {
         "id": cid,
@@ -231,6 +240,53 @@ class FormatGradeTests(unittest.TestCase):
             self.assertEqual(art["verdict"], "fix_first")
             self.assertIn("August 11, 2026", page)
             self.assertIn("<b>Next:</b>", page)
+
+    def test_codex_m1_not_checkable_is_contradicted_with_m2_m4(self) -> None:
+        """Prior Codex run inventoried M1 then marked it not_checkable. That fails."""
+        rows = [
+            (M1, {
+                "id": "C1",
+                "claim_id": "L1",
+                "type": "staleness",
+                "basis": "evidence",
+                "verdict": "not_checkable",
+                "importance": "material",
+                "report_quote": M1,
+                "explanation": "No live source was queried for the currency date.",
+            }),
+            (M2, contradicted_evidence("C2", "L2", M2, "/active_projects", 12)),
+            (M3, contradicted_evidence("C3", "L3", M3, "/at_risk_projects", 3)),
+            ("Projects blocked: 1", confirmed_report("C4", "L4", "Projects blocked: 1")),
+            (M4, contradicted_evidence("C5", "L5", M4, "/prior_week_at_risk_projects", 2)),
+        ]
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            claims = [{"id": f"L{i}", "quote": q} for i, (q, _) in enumerate(rows, 1)]
+            checks = [row[1] for row in rows]
+            art, page = grade(
+                folder, MD_PLANTED, claims=claims, checks=checks,
+                evidence_dir=MD_EV, run_id="md-planted-codex-m1")
+            receipts = json.loads((folder / "receipts.json").read_text())
+            by_quote = {row.get("quote"): row for row in receipts["claims"]}
+            self.assertEqual(by_quote[M1]["outcome"], "contradicted")
+            self.assertEqual(by_quote[M2]["outcome"], "contradicted")
+            self.assertEqual(by_quote[M3]["outcome"], "contradicted")
+            self.assertEqual(by_quote[M4]["outcome"], "contradicted")
+            m1_checks = [
+                row for row in receipts["checks"]
+                if row.get("claim_id") == "L1" and row.get("verdict") == "contradicted"]
+            self.assertTrue(m1_checks)
+            pointers = [
+                item.get("pointer")
+                for row in m1_checks
+                for item in (row.get("evidence_json") or [])
+            ]
+            self.assertTrue(pointers)
+            self.assertTrue(any(parse_date_value(item.get("value")) == (2026, 8, 14)
+                                for row in m1_checks
+                                for item in (row.get("evidence_json") or [])))
+            self.assertEqual(art["verdict"], "fix_first")
+            self.assertIn("August 11, 2026", page)
 
     def test_pdf_clean_is_safe_to_share(self) -> None:
         quotes = [

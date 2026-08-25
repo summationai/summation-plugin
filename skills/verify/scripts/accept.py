@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from datetime import date
 from decimal import Decimal, InvalidOperation
 import json
 import pathlib
@@ -64,6 +65,37 @@ _QTOKEN = re.compile(
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _DATE_KEYS = frozenset({
     "as_of", "date", "current_as_of", "queried_at", "timestamp",
+    "latest_complete_date", "complete_date", "as_of_date", "snapshot_date",
+})
+_CURRENCY_CUE = re.compile(
+    r"(?i)(?:data\s+is\s+)?current\s+through|current\s+as\s+of|"
+    r"\bas\s+of\b|\bas-of\b|\bas\s+at\b"
+)
+_MONTHS = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11,
+    "december": 12,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6, "jul": 7, "aug": 8,
+    "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+_MONTH_ALT = "|".join(sorted(_MONTHS, key=len, reverse=True))
+_NAMED_DATE = re.compile(
+    rf"(?i)\b({_MONTH_ALT})\s+(\d{{1,2}})(?:,)?\s+(\d{{4}})\b"
+)
+_DAY_MONTH_DATE = re.compile(
+    rf"(?i)\b(\d{{1,2}})\s+({_MONTH_ALT})\s+(\d{{4}})\b"
+)
+_PREFERRED_DATE_KEYS = (
+    "latest_complete_date", "complete_date", "current_through",
+    "current_through_date", "as_of", "as_of_date", "asof", "as_at",
+    "data_date", "snapshot_date", "effective_date", "date",
+)
+_SKIP_DATE_KEYS = frozenset({
+    "generated_at", "queried_at", "timestamp", "created_at", "updated_at",
+})
+_SKIP_EVIDENCE_NAMES = frozenset({
+    "claims.json", "checks.json", "findings.json", "receipts.json",
+    "grade-artifact.json",
 })
 VISIBLE_REPORT_SUFFIXES = frozenset({".html", ".md", ".txt", ".csv"})
 
@@ -694,6 +726,229 @@ def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
     return validated, discarded
 
 
+def parse_date(value) -> date | None:
+    """Parse an ISO day or a month-name day. Time-of-day text is ignored."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, date) and not hasattr(value, "hour"):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    match = _DATE.search(text)
+    if match:
+        year, month, day = (int(part) for part in match.group(0).split("-"))
+        try:
+            return date(year, month, day)
+        except ValueError:
+            return None
+    match = _NAMED_DATE.search(text)
+    if match:
+        month = _MONTHS.get(match.group(1).lower())
+        if month:
+            try:
+                return date(int(match.group(3)), month, int(match.group(2)))
+            except ValueError:
+                return None
+    match = _DAY_MONTH_DATE.search(text)
+    if match:
+        month = _MONTHS.get(match.group(2).lower())
+        if month:
+            try:
+                return date(int(match.group(3)), month, int(match.group(1)))
+            except ValueError:
+                return None
+    return None
+
+
+def is_currency_claim(quote: str) -> bool:
+    return bool(_CURRENCY_CUE.search(quote or ""))
+
+
+def _norm_key(key: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(key).lower())
+
+
+def _is_date_field_name(key: str) -> bool:
+    raw = str(key or "")
+    lower = raw.lower()
+    compact = _norm_key(raw)
+    if compact in {_norm_key(item) for item in _SKIP_DATE_KEYS}:
+        return False
+    if lower in _PREFERRED_DATE_KEYS or compact in {
+        _norm_key(item) for item in _PREFERRED_DATE_KEYS
+    }:
+        return True
+    if lower.endswith("_date") or lower.endswith("_as_of") or lower.endswith("asof"):
+        return True
+    return False
+
+
+def _pointer_token(key: str) -> str:
+    return str(key).replace("~", "~0").replace("/", "~1")
+
+
+def _walk_json(value, prefix: str = ""):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            pointer = f"{prefix}/{_pointer_token(key)}"
+            yield pointer, str(key), child
+            yield from _walk_json(child, pointer)
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            pointer = f"{prefix}/{index}"
+            yield pointer, str(index), child
+            yield from _walk_json(child, pointer)
+
+
+def _evidence_date_hits(sandbox: pathlib.Path, report_path: pathlib.Path | None) -> list[dict]:
+    hits = []
+    if sandbox is None or not sandbox.is_dir():
+        return hits
+    preferred_norm = {_norm_key(item) for item in _PREFERRED_DATE_KEYS}
+    for path in sorted(sandbox.rglob("*.json")):
+        if path.name in _SKIP_EVIDENCE_NAMES:
+            continue
+        if "artifact" in path.parts:
+            continue
+        rel = str(path.relative_to(sandbox))
+        resolved, err = evidence_path(sandbox, rel, report_path)
+        if err or resolved is None:
+            continue
+        try:
+            payload = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        for pointer, key, child in _walk_json(payload):
+            if isinstance(child, (dict, list)):
+                continue
+            if not _is_date_field_name(key):
+                continue
+            day = parse_date(child)
+            if day is None:
+                continue
+            hits.append({
+                "file": rel.replace("\\", "/"),
+                "pointer": pointer,
+                "key": key,
+                "value": child,
+                "day": day,
+                "preferred": _norm_key(key) in preferred_norm,
+            })
+    return hits
+
+
+def apply_currency_staleness(
+        validated: list, ledger: list, sandbox: pathlib.Path,
+        report_path: pathlib.Path | None) -> tuple[list, list]:
+    """Ground data-currency dates against evidence date fields.
+
+    When a report as-of/current-through date differs from a supplied evidence
+    date field, the claim becomes contradicted/staleness with a JSON pointer
+    receipt. not_checkable is not kept for that claim.
+    """
+    hits = _evidence_date_hits(sandbox, report_path)
+    if not hits:
+        return validated, ledger
+    out = list(validated)
+    touched: set[str] = set()
+    for claim in ledger:
+        quote = str(claim.get("quote") or "")
+        if not is_currency_claim(quote):
+            continue
+        report_day = parse_date(quote)
+        if report_day is None:
+            continue
+        preferred = [row for row in hits if row.get("preferred")]
+        pool = preferred or hits
+        mismatch = [row for row in pool if row["day"] != report_day]
+        match = [row for row in pool if row["day"] == report_day]
+        cid = str(claim.get("id") or "")
+        existing = [row for row in out if str(row.get("claim_id") or "") == cid]
+        if mismatch:
+            hit = mismatch[0]
+            if any(
+                row.get("verdict") == "contradicted"
+                and row.get("basis") == "evidence"
+                for row in existing
+            ):
+                continue
+            replacement = {
+                "id": (existing[0].get("id") if existing else f"STALE-{cid}"),
+                "claim_id": cid,
+                "type": "staleness",
+                "basis": "evidence",
+                "verdict": "contradicted",
+                "severity": "high",
+                "importance": claim.get("importance") or "material",
+                "report_quote": quote,
+                "evidence_file": hit["file"],
+                "evidence_json": [{"pointer": hit["pointer"], "value": hit["value"]}],
+                "evidence_receipt_mode": "json-pointers",
+                "explanation": (
+                    "The report data-currency date differs from the evidence date."
+                ),
+            }
+            if existing:
+                keep_id = existing[0].get("id")
+                out = [
+                    row for row in out
+                    if str(row.get("claim_id") or "") != cid
+                    or row.get("verdict") == "contradicted"
+                ]
+                replacement["id"] = keep_id
+            out.append(replacement)
+            touched.add(cid)
+            continue
+        if match and any(row.get("verdict") == "not_checkable" for row in existing):
+            hit = match[0]
+            replacement = {
+                "id": existing[0].get("id"),
+                "claim_id": cid,
+                "type": "staleness",
+                "basis": "evidence",
+                "verdict": "confirmed",
+                "importance": claim.get("importance") or "material",
+                "report_quote": quote,
+                "evidence_file": hit["file"],
+                "evidence_json": [{"pointer": hit["pointer"], "value": hit["value"]}],
+                "evidence_receipt_mode": "json-pointers",
+                "explanation": (
+                    "The report data-currency date matches the evidence date."
+                ),
+            }
+            out = [
+                row for row in out
+                if not (
+                    str(row.get("claim_id") or "") == cid
+                    and row.get("verdict") == "not_checkable"
+                )
+            ]
+            out.append(replacement)
+            touched.add(cid)
+    by_claim: dict[str, list] = {}
+    for check in out:
+        by_claim.setdefault(str(check.get("claim_id") or ""), []).append(check)
+    rank = {
+        "error": 0,
+        "contradicted": 0,
+        "changed_since_report": 1,
+        "confirmed": 2,
+        "not_checkable": 3,
+    }
+    for claim in ledger:
+        cid = str(claim.get("id") or "")
+        if cid not in touched:
+            continue
+        options = by_claim.get(cid) or []
+        if not options:
+            continue
+        best = sorted(options, key=lambda row: rank.get(row.get("verdict"), 9))[0]
+        claim["outcome"] = best.get("verdict")
+        claim["check_id"] = best.get("id")
+    return out, ledger
+
+
 def attach_claim_outcomes(claims: list, checks: list) -> list:
     rank = {
         "error": 0,
@@ -983,6 +1238,8 @@ def main() -> int:
         print(f"accept: {exc}", file=sys.stderr)
         return 2
     ledger = attach_arithmetic_claims(ledger, arith)
+    validated, ledger = apply_currency_staleness(
+        validated, ledger, sandbox, args.report)
     inventory = None
     if args.findings is not None and args.findings.is_file():
         try:

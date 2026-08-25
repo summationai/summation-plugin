@@ -418,7 +418,28 @@ def _verification_public(raw: dict, source: dict | None,
     return {"document": document, "semantic": semantic, "live_source": live}
 
 
-def _combined_verdict(base: str, layer2: list[dict], source: dict | None) -> str:
+def _internally_complete(raw: dict | None, layer2: list[dict]) -> bool:
+    """True when extract and material outcomes are complete with no report error."""
+    if not isinstance(raw, dict):
+        return False
+    inv = raw.get("inventory") or {}
+    if not inv.get("complete"):
+        return False
+    if not coverage_ok(raw):
+        return False
+    if any(check.get("verdict") == "contradicted" for check in layer2):
+        return False
+    if any(
+        check.get("verdict") == "not_checkable"
+        and check.get("importance") == "material"
+        for check in layer2
+    ):
+        return False
+    return True
+
+
+def _combined_verdict(base: str, layer2: list[dict], source: dict | None,
+                      raw: dict | None = None) -> str:
     contradicted = [
         check for check in layer2 if check.get("verdict") == "contradicted"]
     if source and source.get("status") != "failed" and int(source.get("contradicted") or 0):
@@ -445,7 +466,8 @@ def _combined_verdict(base: str, layer2: list[dict], source: dict | None) -> str
         return "needs_review"
     if source and source.get("status") in {"failed", "partial", "not_applicable"}:
         if base in {"safe_to_share", "share_with_caveats"}:
-            return "needs_review"
+            if not _internally_complete(raw, layer2):
+                return "needs_review"
     return base
 
 
@@ -517,13 +539,15 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
             "kind": "tier_d_per_100_claims",
             "value": headline["tier_d_per_100_claims"],
         }
-    verdict = _combined_verdict(verdict_of(raw), list(layer2 or []), source)
+    layer2_list = list(layer2 or [])
+    verdict = _combined_verdict(verdict_of(raw), layer2_list, source, raw)
     semantic_status = (((raw.get("verification") or {}).get("semantic") or {})
                        .get("status"))
     if semantic_status in {"failed", "not_run", "skipped"} and verdict in {
         "safe_to_share", "share_with_caveats"
     }:
-        verdict = "needs_review"
+        if not _internally_complete(raw, layer2_list):
+            verdict = "needs_review"
     verdict = public_verdict(verdict)
     art = {
         "schema_version": SCHEMA_VERSION,

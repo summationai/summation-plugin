@@ -54,7 +54,7 @@ uv run "$VERIFY/scripts/extract.py" \
 
 If `uv` is missing, run `python3` on `extract.py` only when `pypdf`, `openpyxl`, and `python-pptx` already import. Do not `pip install` without asking. Do not call OfficeCLI or Poppler.
 
-Then write `claims.json` and `checks.json`. Every material inventory id must have one accepted completed outcome. `not_checkable` is complete only when it has a specific reason. Convert every unresolved material claim to an honest `not_checkable` result before `render.py`. Do not leave `not_reached` rows.
+Then write `claims.json` and `checks.json`. Every material inventory id must have one accepted completed outcome. Confirm every claim that you can prove from the report itself: arithmetic, rank order, percentages, displayed values, and internal consistency. Use `basis: report` and `verdict: confirmed` for those claims. External evidence is not required for them. `not_checkable` is only for a fact that needs an external source and has no grounded evidence. Convert every unresolved material claim to an honest `not_checkable` result before `render.py`. Do not leave `not_reached` rows. A remaining material `not_checkable` claim prevents `safe_to_share`.
 
 If the report is HTML, Markdown, or plain text:
 
@@ -140,6 +140,10 @@ After evidence, write one outcome per claim you actually checked. Each row names
 - Prefer `evidence_json` pointers for JSON files.
 - `not_checkable` needs a specific reason. Do not attach a fake receipt.
 - Subagents per section are optional. Hosts without subagents do the same writes in sequence.
+
+### Data-currency dates
+
+A report claim that names a data-currency or as-of date must be compared with a supplied evidence date field. Accept generic field names such as `latest_complete_date`, `as_of`, and `date`. Parse ISO days and month-name days. If the report date and the grounded evidence date differ, write `verdict: contradicted` with `type: staleness`, a JSON pointer receipt, and `basis: evidence`. Do not write `not_checkable` for that claim. `accept.py` applies this rule when the host omits it.
 
 ### Live source (closed period first)
 
