@@ -82,7 +82,7 @@ class AcceptTests(unittest.TestCase):
             report = folder / "report.html"
             report.write_text("<p>Revenue grew 12% year over year.</p>")
             evidence = folder / "q3.json"
-            evidence.write_text('{"revenue_yoy": "9.8%"}\n')
+            evidence.write_text('{"revenue_yoy": 0.098}\n')
             checks = folder / "checks.json"
             checks.write_text(json.dumps({"checks": [
                 {
@@ -93,7 +93,7 @@ class AcceptTests(unittest.TestCase):
                     "importance": "material",
                     "report_quote": "Revenue grew 12% year over year.",
                     "evidence_file": "q3.json",
-                    "evidence_quote": '"revenue_yoy": "9.8%"',
+                    "evidence_quote": '"revenue_yoy": 0.098',
                     "explanation": "The file shows 9.8%, not 12%.",
                 },
                 {
@@ -459,7 +459,7 @@ class AcceptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
             (folder / "report.md").write_text("Revenue grew 12% year over year.")
-            (folder / "q3.json").write_text('{"revenue_yoy": "9.8%"}\n')
+            (folder / "q3.json").write_text('{"revenue_yoy": 0.098}\n')
             (folder / "claims.json").write_text(json.dumps({
                 "claims": [{
                     "id": "L1",
@@ -475,7 +475,7 @@ class AcceptTests(unittest.TestCase):
                 "importance": "material",
                 "report_quote": "Revenue grew 12% year over year.",
                 "evidence_file": "q3.json",
-                "evidence_json": [{"pointer": "/revenue_yoy", "value": "9.8%"}],
+                "evidence_json": [{"pointer": "/revenue_yoy", "value": 0.098}],
                 "explanation": "The file shows 9.8%.",
             }
             (folder / "checks.json").write_text(json.dumps({
@@ -491,15 +491,15 @@ class AcceptTests(unittest.TestCase):
             confirmed = json.loads((folder / "confirmed.json").read_text())
             self.assertEqual(confirmed["grounded"], 0)
             self.assertIn(
-                "confirmed verdict is not supported by the receipt values",
+                "report and evidence unit classes are not compatible",
                 confirmed["discarded"][0]["problems"],
             )
-            (folder / "match.json").write_text('{"revenue_yoy": "12%"}\n')
+            (folder / "match.json").write_text('{"revenue_yoy": 12}\n')
             (folder / "checks.json").write_text(json.dumps({"checks": [{
                 **mismatch,
                 "verdict": "contradicted",
                 "evidence_file": "match.json",
-                "evidence_json": [{"pointer": "/revenue_yoy", "value": "12%"}],
+                "evidence_json": [{"pointer": "/revenue_yoy", "value": 12}],
                 "explanation": "The file shows 12%.",
             }]}))
             self.assertEqual(run_accept(
@@ -558,7 +558,8 @@ class AcceptTests(unittest.TestCase):
             self.assertEqual(accept.unit_class("4.6%"), "percent")
             self.assertEqual(accept.unit_class(10613), "count")
             self.assertFalse(accept.unit_classes_compatible("4.6%", 10613))
-            self.assertFalse(accept.unit_classes_compatible("$4.2M", 4200000))
+            self.assertTrue(accept.quantities_equal("12%", 12))
+            self.assertTrue(accept.quantities_equal("$4.2M", 4200000))
 
     def test_evidence_path_must_stay_inside_evidence_dir(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -686,7 +687,7 @@ class AcceptTests(unittest.TestCase):
             evidence.mkdir()
             html = report_dir / "weekly.html"
             html.write_text("<p>Revenue grew 12% year over year.</p>")
-            (evidence / "q3.json").write_text('{"revenue_yoy": "12%"}\n')
+            (evidence / "q3.json").write_text('{"revenue_yoy": 12}\n')
             claims = run / "claims.json"
             checks = run / "checks.json"
             claims.write_text(json.dumps({
@@ -705,7 +706,7 @@ class AcceptTests(unittest.TestCase):
                 "importance": "material",
                 "report_quote": "Revenue grew 12% year over year.",
                 "evidence_file": "q3.json",
-                "evidence_json": [{"pointer": "/revenue_yoy", "value": "12%"}],
+                "evidence_json": [{"pointer": "/revenue_yoy", "value": 12}],
                 "explanation": "The file matches the report.",
             }]}))
             html_cmd = [

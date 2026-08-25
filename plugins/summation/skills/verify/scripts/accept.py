@@ -508,14 +508,6 @@ def _verdict_receipt_problem(finding: dict, receipt_updates: dict) -> str | None
     comparable = (report_nums and evidence_nums) or (report_strs and evidence_strs)
     if not comparable:
         return None
-    if report_nums and evidence_nums:
-        compatible = any(
-            r is not None and r == e
-            for r in report_classes
-            for e in evidence_classes
-        )
-        if not compatible:
-            return "report and evidence unit classes are not compatible"
     matched = False
     if report_nums and evidence_nums:
         matched = any(
@@ -523,6 +515,19 @@ def _verdict_receipt_problem(finding: dict, receipt_updates: dict) -> str | None
     if not matched and report_strs and evidence_strs:
         matched = any(
             _strings_match(left, right) for left in report_strs for right in evidence_strs)
+    if (
+        verdict == "confirmed"
+        and report_nums
+        and evidence_nums
+        and not matched
+    ):
+        compatible = any(
+            r is not None and r == e
+            for r in report_classes
+            for e in evidence_classes
+        )
+        if not compatible:
+            return "report and evidence unit classes are not compatible"
     if verdict == "confirmed" and not matched:
         return "confirmed verdict is not supported by the receipt values"
     if verdict == "contradicted" and matched:
