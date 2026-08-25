@@ -35,12 +35,21 @@ SNAP_PREDICATE = re.compile(
     r"\b(?:active|missed|grew|declined|increased|decreased|was|is|"
     r"equals|were|improved|fell|rose|dropped|ranked|grown|fallen|"
     r"equal|lagged|exceeded|beat|versus|vs|stale|incomplete|missing|"
-    r"delayed|failed|current)\b",
+    r"delayed|failed|current|corrupt|deprecated|unreliable|empty|"
+    r"partial|invalid|broken|outdated)\b",
     re.I,
 )
 SOURCE_OBJECT_NOUNS = frozenset({
     "export", "extract", "file", "table", "dataset", "warehouse",
     "database", "system", "snapshot",
+})
+NEUTRAL_DESCRIPTORS = frozenset({
+    "revenue", "sales", "data", "order", "orders",
+})
+STATUS_ADJECTIVES = frozenset({
+    "corrupt", "deprecated", "unreliable", "empty", "stale", "incomplete",
+    "missing", "delayed", "failed", "partial", "invalid", "broken",
+    "outdated", "current", "active",
 })
 TABLE_LOC_RE = re.compile(r"^table\d+$", re.I)
 READERS = {
@@ -200,12 +209,30 @@ def _entire_file_path(text: str) -> bool:
     if not compact or " " in compact:
         return False
     return bool(re.fullmatch(
-        r"[\w./\\-]+\.(json|jsonl|csv|xlsx|xls|txt|md|parquet|log|sql|tsv)",
+        r"(?:[a-z][a-z0-9+.-]*://)?[\w./\\-]+\."
+        r"(json|jsonl|csv|xlsx|xls|txt|md|parquet|log|sql|tsv)",
         compact, re.I))
 
 
+def _is_proper_name_or_acronym(token: str) -> bool:
+    if len(token) < 2 or not token[0].isalpha():
+        return False
+    if token.isupper() and token.isalpha():
+        return True
+    return token[0].isupper() and token[1:].isalnum()
+
+
+def _allowed_provenance_token(token: str) -> bool:
+    low = token.lower()
+    if low in STATUS_ADJECTIVES:
+        return False
+    if low in SOURCE_OBJECT_NOUNS or low in NEUTRAL_DESCRIPTORS:
+        return True
+    return _is_proper_name_or_acronym(token)
+
+
 def _pure_provenance_suffix(rest: str) -> bool:
-    """True only when the whole suffix is a source name/path plus optional date."""
+    """True only for a path/URI or a strict proper-name plus descriptor sequence."""
     text = _unwrap_source_suffix(rest)
     if not text:
         return False
@@ -221,10 +248,10 @@ def _pure_provenance_suffix(rest: str) -> bool:
         return False
     if SPELLED_QTY.search(body) or SNAP_PREDICATE.search(body):
         return False
-    tokens = re.findall(r"[A-Za-z]+", body.lower())
-    if not tokens or tokens[-1] not in SOURCE_OBJECT_NOUNS:
+    tokens = re.findall(r"[A-Za-z]+", body)
+    if not tokens or tokens[-1].lower() not in SOURCE_OBJECT_NOUNS:
         return False
-    return True
+    return all(_allowed_provenance_token(tok) for tok in tokens[:-1])
 
 
 def source_snapshot_importance(shown: str) -> str | None:

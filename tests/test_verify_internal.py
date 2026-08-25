@@ -174,6 +174,31 @@ class SourceSnapshotInventoryTests(unittest.TestCase):
                 item = next(row for row in inv["items"] if row["displayed"] == line)
                 self.assertTrue(item.get("location"))
 
+    def test_status_adjectives_before_source_object_are_material(self) -> None:
+        lines = (
+            "Source snapshot: corrupt CRM database",
+            "Source snapshot: deprecated sales system",
+            "Source snapshot: unreliable warehouse",
+            "Source snapshot: empty orders table",
+            "Source snapshot: partial CRM export",
+            "Source snapshot: invalid dataset",
+            "Source snapshot: broken warehouse",
+            "Source snapshot: outdated Salesforce extract",
+            "Source snapshot: funky warehouse",
+        )
+        for line in lines:
+            with self.subTest(line=line):
+                self.assertEqual(
+                    inventory.source_snapshot_importance(line), "material")
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "report.md"
+            path.write_text("\n".join(lines) + "\n")
+            inv = inventory.inventory_for(path)
+            shown = [item["displayed"] for item in inv["items"]
+                     if item.get("importance") == "material"]
+            for line in lines:
+                self.assertIn(line, shown)
+
     def test_unknown_source_snapshot_prose_is_material(self) -> None:
         lines = (
             "Source snapshot: conversion lagged target",
