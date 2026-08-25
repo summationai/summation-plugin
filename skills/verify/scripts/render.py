@@ -834,7 +834,20 @@ def ungraded_reason(raw: dict, layer2_named: bool, receipts: dict | list | None
             ]
             if discarded_claims:
                 return "material claims were discarded"
-            if payload.get("discarded"):
+            receipt_failures = [
+                row for row in (payload.get("discarded") or [])
+                if not (
+                    isinstance(row, dict)
+                    and (
+                        row.get("reason") == "deterministic-conflict"
+                        or any(
+                            str(item).startswith("deterministic-conflict")
+                            for item in (row.get("problems") or [])
+                        )
+                    )
+                )
+            ]
+            if receipt_failures:
                 return "receipt failures remain"
     if (raw.get("agentic_only") and not raw.get("agentic_scan_completed")
             and not inv.get("complete")):
@@ -1515,7 +1528,19 @@ def attach_receipts_ledger(raw: dict, receipts: dict) -> None:
     cov["claims_reached_by_a_check"] = reached_n
     review = raw.setdefault("evidence_review", {})
     review["outcomes_proposed"] = int(receipts.get("proposed") or 0)
-    review["receipt_failures"] = len(receipts.get("discarded") or [])
+    review["receipt_failures"] = sum(
+        1 for row in (receipts.get("discarded") or [])
+        if not (
+            isinstance(row, dict)
+            and (
+                row.get("reason") == "deterministic-conflict"
+                or any(
+                    str(item).startswith("deterministic-conflict")
+                    for item in (row.get("problems") or [])
+                )
+            )
+        )
+    )
     if claims:
         raw["claims"] = claims
     if isinstance(receipts.get("inventory"), dict):

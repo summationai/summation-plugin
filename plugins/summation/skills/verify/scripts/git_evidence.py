@@ -21,14 +21,45 @@ def _git(repo: pathlib.Path, *args: str) -> tuple[int, str]:
     return proc.returncode, (proc.stdout or "").strip()
 
 
+def _remote_ref_names(text: str) -> list[str]:
+    names = []
+    seen = set()
+    for line in (text or "").splitlines():
+        name = line.strip()
+        if not name or " -> " in name:
+            continue
+        if name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names
+
+
 def collect(repo: pathlib.Path) -> dict:
+    """Local git state for eval setup. Never infers live remote proof."""
     head_code, head = _git(repo, "rev-parse", "HEAD")
     branch_code, branch = _git(repo, "branch", "--show-current")
     status_code, porcelain = _git(repo, "status", "--porcelain=v1")
     up_code, upstream = _git(repo, "rev-parse", "--abbrev-ref", "@{upstream}")
+    has_upstream = up_code == 0 and bool(upstream)
+
+    rr_code, rr_out = _git(repo, "branch", "-r")
+    remote_refs = _remote_ref_names(rr_out) if rr_code == 0 else []
+    contains_code, contains_out = _git(repo, "branch", "-r", "--contains", "HEAD")
+    containing = _remote_ref_names(contains_out) if contains_code == 0 else []
+
+    ahead_of: dict[str, int] = {}
+    for ref in remote_refs:
+        count_code, count = _git(repo, "rev-list", "--count", f"{ref}..HEAD")
+        if count_code != 0:
+            continue
+        try:
+            ahead_of[ref] = int(count)
+        except ValueError:
+            continue
+
     contained = None
     unpushed = None
-    if up_code == 0 and upstream:
+    if has_upstream:
         anc_code, _ = _git(repo, "merge-base", "--is-ancestor", "HEAD", upstream)
         contained = anc_code == 0
         count_code, count = _git(repo, "rev-list", "--count", f"{upstream}..HEAD")
@@ -37,16 +68,21 @@ def collect(repo: pathlib.Path) -> dict:
                 unpushed = int(count)
             except ValueError:
                 unpushed = None
+
     return {
         "repo": str(repo),
         "head": head if head_code == 0 else None,
         "branch": branch if branch_code == 0 else None,
         "status_porcelain": porcelain if status_code == 0 else None,
         "worktree_clean": status_code == 0 and porcelain == "",
-        "upstream": upstream if up_code == 0 else None,
+        "upstream": upstream if has_upstream else None,
         "contained_in_upstream": contained,
         "unpushed_commit_count": unpushed,
-        "local_only": up_code != 0 or (unpushed or 0) > 0,
+        "local_only": None,
+        "remote_query": "local_refs" if remote_refs else "none",
+        "live_remote_query": False,
+        "remote_refs_containing_head": containing,
+        "ahead_of_remote_refs": ahead_of,
     }
 
 

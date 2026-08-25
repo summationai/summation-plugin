@@ -949,6 +949,169 @@ class AcceptTests(unittest.TestCase):
                 "unknown check id" in item
                 for item in unknown["presentation_problems"]))
 
+    def _internal_rank_fixture(self, folder: pathlib.Path, *,
+                               internal_verdict: str) -> None:
+        report = folder / "report.md"
+        report.write_text(
+            "Ranked from highest to lowest revenue.\n"
+            "Enterprise $520\n"
+            "Mid-market $410\n"
+        )
+        (folder / "findings.json").write_text(json.dumps({
+            "inventory": {
+                "reader": "md",
+                "complete": True,
+                "items": [
+                    {
+                        "id": "INV1",
+                        "kind": "md_line",
+                        "displayed": "Ranked from highest to lowest revenue.",
+                        "location": "line1",
+                        "importance": "material",
+                        "quote": "Ranked from highest to lowest revenue.",
+                    },
+                    {
+                        "id": "INV2",
+                        "kind": "md_line",
+                        "displayed": "Enterprise $520",
+                        "location": "line2",
+                        "importance": "material",
+                        "quote": "Enterprise $520",
+                    },
+                ],
+                "reason": None,
+            },
+            "internal_outcomes": [{
+                "check_id": "sel_declared_sort_violated",
+                "family": "selection",
+                "type": "selection",
+                "verdict": internal_verdict,
+                "basis": "report",
+                "importance": "material",
+                "severity": "high" if internal_verdict == "contradicted" else None,
+                "inventory_ids": ["INV1"],
+                "report_quote": "Ranked from highest to lowest revenue.",
+                "location": "line1",
+                "explanation": "Deterministic rank check.",
+                "found_by": "internal",
+            }],
+        }))
+        (folder / "claims.json").write_text(json.dumps({
+            "claims": [
+                {
+                    "id": "L1",
+                    "quote": "Ranked from highest to lowest revenue.",
+                    "importance": "material",
+                    "inventory_ids": ["INV1"],
+                },
+                {
+                    "id": "L2",
+                    "quote": "Enterprise $520",
+                    "importance": "material",
+                    "inventory_ids": ["INV2"],
+                },
+            ],
+        }))
+
+    def test_host_contradiction_cannot_override_internal_confirmed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            self._internal_rank_fixture(folder, internal_verdict="confirmed")
+            (folder / "checks.json").write_text(json.dumps({"checks": [
+                {
+                    "id": "C1",
+                    "claim_id": "L1",
+                    "type": "semantic",
+                    "basis": "report",
+                    "verdict": "contradicted",
+                    "severity": "high",
+                    "importance": "material",
+                    "report_quote": "Ranked from highest to lowest revenue.",
+                    "report_quote_2": "Enterprise $520",
+                    "explanation": "Host says the rank is wrong.",
+                },
+                {
+                    "id": "C2",
+                    "claim_id": "L2",
+                    "type": "semantic",
+                    "basis": "report",
+                    "verdict": "confirmed",
+                    "importance": "material",
+                    "report_quote": "Enterprise $520",
+                    "explanation": "Matches the report.",
+                },
+            ]}))
+            self.assertEqual(run_accept(
+                "--report", str(folder / "report.md"),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--findings", str(folder / "findings.json"),
+                "--out", str(folder / "receipts.json"),
+            ), 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            by_id = {row["id"]: row for row in payload["claims"]}
+            self.assertEqual(by_id["L1"]["outcome"], "confirmed")
+            self.assertEqual(by_id["L2"]["outcome"], "confirmed")
+            conflicts = [
+                row for row in payload["discarded"]
+                if accept.is_deterministic_conflict(row)]
+            self.assertEqual(len(conflicts), 1)
+            self.assertEqual(conflicts[0]["id"], "C1")
+            self.assertTrue(any(
+                str(item).startswith("deterministic-conflict")
+                for item in conflicts[0]["problems"]))
+            kept = {row.get("claim_id"): row for row in payload["validated"]}
+            self.assertNotEqual(kept["L1"].get("verdict"), "contradicted")
+
+    def test_host_confirmation_cannot_override_internal_contradicted(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            self._internal_rank_fixture(folder, internal_verdict="contradicted")
+            (folder / "checks.json").write_text(json.dumps({"checks": [
+                {
+                    "id": "C1",
+                    "claim_id": "L1",
+                    "type": "semantic",
+                    "basis": "report",
+                    "verdict": "confirmed",
+                    "importance": "material",
+                    "report_quote": "Ranked from highest to lowest revenue.",
+                    "explanation": "Host says the rank is fine.",
+                },
+                {
+                    "id": "C2",
+                    "claim_id": "L2",
+                    "type": "semantic",
+                    "basis": "report",
+                    "verdict": "confirmed",
+                    "importance": "material",
+                    "report_quote": "Enterprise $520",
+                    "explanation": "Matches the report.",
+                },
+            ]}))
+            self.assertEqual(run_accept(
+                "--report", str(folder / "report.md"),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--findings", str(folder / "findings.json"),
+                "--out", str(folder / "receipts.json"),
+            ), 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            by_id = {row["id"]: row for row in payload["claims"]}
+            self.assertEqual(by_id["L1"]["outcome"], "contradicted")
+            self.assertEqual(by_id["L2"]["outcome"], "confirmed")
+            conflicts = [
+                row for row in payload["discarded"]
+                if accept.is_deterministic_conflict(row)]
+            self.assertEqual(len(conflicts), 1)
+            self.assertEqual(conflicts[0]["id"], "C1")
+            kept_l1 = [
+                row for row in payload["validated"]
+                if row.get("claim_id") == "L1"]
+            self.assertTrue(kept_l1)
+            self.assertTrue(all(
+                row.get("verdict") == "contradicted" for row in kept_l1))
+
 
 if __name__ == "__main__":
     unittest.main()

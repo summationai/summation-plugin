@@ -92,9 +92,9 @@ uv run --with jsonschema python3 "$VERIFY/scripts/render.py" \
 
 If `uv` is missing and `jsonschema` already imports, run `python3` on `render.py`. Do not `pip install` without asking.
 
-`extract.py` writes visible text, the machine inventory, and deterministic internal outcomes (rank order, arithmetic/ratio, percent versus points, direction, period display). `accept.py` merges those outcomes into the ledger. The host cannot downgrade a deterministic internal confirmed or contradicted result to `not_checkable`. The host only grades semantic or external claims that code cannot prove.
+`extract.py` writes visible text, the machine inventory, and deterministic internal outcomes (rank order, arithmetic/ratio, percent versus points, direction, period display). `accept.py` merges those outcomes into the ledger. A deterministic confirmed or contradicted result for an inventory id is authoritative. The host cannot downgrade or reverse it. `accept.py` rejects a conflicting host outcome with reason `deterministic-conflict`. The host only grades semantic or external claims that code cannot prove.
 
-If `render.py` exits 2 because a material inventory item is missing or a claim is `not_reached`, repair that claim and run `accept.py` then `render.py` again. Source/provenance labels such as `Source snapshot:` are supporting metadata, not material claims.
+If `render.py` exits 2 because a material inventory item is missing or a claim is `not_reached`, repair that claim and run `accept.py` then `render.py` again. A pure source/provenance label such as `Source snapshot: CRM revenue export, 2026-07-05` is supporting metadata. If that same line states a KPI, currency, percent, change, rank, or other analytical claim, inventory that claim as material.
 
 ## You write checks.json
 

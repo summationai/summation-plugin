@@ -22,6 +22,17 @@ COMPLETED = frozenset({
     "confirmed", "contradicted", "not_checkable", "changed_since_report", "error",
 })
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+SOURCE_SNAP_HEAD = re.compile(r"(?i)^source snapshot\b")
+ANALYTICAL_SNAP = re.compile(
+    r"\$|£|€|%|"
+    r"\bmillion\b|\bbillion\b|\bthousand\b|"
+    r"\bdeclined?\b|\bimproved?\b|\bincreased?\b|\bdecreased?\b|"
+    r"\bfell\b|\bfallen\b|\brose\b|\bgrew\b|\bgrown\b|\bdropped\b|"
+    r"\branked?\b|\bhighest\b|\blowest\b|"
+    r"\btop\s+\d+|"
+    r"\bpercent(?:age)?(?:\s+points?)?\b",
+    re.I,
+)
 TABLE_LOC_RE = re.compile(r"^table\d+$", re.I)
 READERS = {
     ".html": "html",
@@ -167,6 +178,26 @@ def _html_items(path: pathlib.Path) -> list[dict]:
     return items
 
 
+def source_snapshot_importance(shown: str) -> str | None:
+    """supporting for a pure provenance label. material when the line asserts a KPI."""
+    text = re.sub(r"\s+", " ", shown or "").strip()
+    if not SOURCE_SNAP_HEAD.match(text):
+        return None
+    rest = SOURCE_SNAP_HEAD.sub("", text, count=1)
+    rest = rest.lstrip(":- ").strip()
+    rest = DATE_RE.sub(" ", rest)
+    if ANALYTICAL_SNAP.search(rest):
+        return "material"
+    for token in re.findall(r"\$?\d[\d,]*(?:\.\d+)?%?", rest):
+        if "$" in token or "%" in token:
+            return "material"
+        if re.fullmatch(r"\d{1,2}", token):
+            continue
+        if parse_number(token) is not None:
+            return "material"
+    return "supporting"
+
+
 def _bag_add(items: list, seen: set, kind: str, displayed: str, location: str,
              importance: str = "material") -> None:
     shown = re.sub(r"\s+", " ", displayed).strip()
@@ -195,10 +226,12 @@ def _md_items(path: pathlib.Path) -> list[dict]:
             continue
         if line.startswith("#"):
             continue
-        if line.lower().startswith("source snapshot"):
-            continue
         shown = re.sub(r"^[-*]\s+", "", line).strip()
         if not shown:
+            continue
+        snap = source_snapshot_importance(shown)
+        if snap == "supporting":
+            _bag_add(items, seen, "md_source", shown, f"line{index}", "supporting")
             continue
         _bag_add(items, seen, "md_line", shown, f"line{index}", "material")
     return items
@@ -230,7 +263,8 @@ def _pdf_items(path: pathlib.Path) -> tuple[list[dict], str, str | None]:
                 continue
             if re.fullmatch(r"\d{1,2}", shown):
                 continue
-            importance = "supporting" if shown.lower().startswith("source snapshot") else "material"
+            snap = source_snapshot_importance(shown)
+            importance = snap or "material"
             kind = "pdf_source" if importance == "supporting" else "pdf_line"
             _bag_add(items, seen, kind, shown, f"page{page_i}/line{line_i}", importance)
     visible = "\n".join(pages).strip()
@@ -286,8 +320,14 @@ def _xlsx_items(path: pathlib.Path) -> tuple[list[dict], str, str | None]:
                 numeric = isinstance(cell.value, (int, float)) and not isinstance(
                     cell.value, bool)
                 note = shown.lower().startswith("note:")
-                importance = "material" if numeric or note else "supporting"
+                snap = source_snapshot_importance(shown)
+                if snap is not None:
+                    importance = snap
+                else:
+                    importance = "material" if numeric or note else "supporting"
                 kind = "xlsx_note" if note else "xlsx_cell"
+                if snap == "supporting":
+                    kind = "xlsx_source"
                 _bag_add(
                     items, seen, kind, shown,
                     f"{sheet.title}/{cell.coordinate}", importance)

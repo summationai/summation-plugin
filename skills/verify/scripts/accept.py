@@ -1173,12 +1173,108 @@ def _internal_check(outcome: dict, claim: dict, check_id: str) -> dict:
     }
 
 
-def attach_internal_outcomes(validated: list, ledger: list, outcomes: list) -> tuple[list, list]:
-    """Merge code findings. Host not_checkable cannot override them."""
+DETERMINISTIC_VERDICTS = frozenset({"confirmed", "contradicted"})
+HOST_OVERRIDE_VERDICTS = frozenset({
+    "confirmed", "contradicted", "not_checkable", "changed_since_report", "error",
+})
+
+
+def _outcome_inventory_ids(outcome: dict) -> list[str]:
+    raw_ids = outcome.get("inventory_ids") or []
+    if isinstance(raw_ids, str):
+        raw_ids = [raw_ids]
+    out = []
+    seen = set()
+    for value in raw_ids:
+        item = str(value or "").strip()
+        if item and item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+def is_deterministic_conflict(row: dict) -> bool:
+    if not isinstance(row, dict):
+        return False
+    if row.get("reason") == "deterministic-conflict":
+        return True
+    return any(
+        str(item).startswith("deterministic-conflict")
+        for item in (row.get("problems") or [])
+    )
+
+
+def _proven_internal(row: dict, claim: dict | None, by_iid: dict,
+                     outcomes: list) -> tuple[str | None, dict] | None:
+    ids = set(claim_inventory_ids(row))
+    if claim is not None:
+        ids.update(claim_inventory_ids(claim))
+    hits = [(iid, by_iid[iid]) for iid in ids if iid in by_iid]
+    if hits:
+        hits.sort(key=lambda item: 0 if item[1].get("verdict") == "contradicted" else 1)
+        return hits[0]
+    pool = [claim] if claim is not None else []
+    for outcome in outcomes:
+        if str(outcome.get("verdict") or "") not in DETERMINISTIC_VERDICTS:
+            continue
+        if pool and _claims_for_internal(pool, outcome):
+            iids = _outcome_inventory_ids(outcome)
+            return (iids[0] if iids else None, outcome)
+        quote = str(outcome.get("report_quote") or "")
+        shown = str((claim or {}).get("quote") or row.get("report_quote") or "")
+        if quote and shown and (
+                quote_in_text(quote, shown) or quote_in_text(shown, quote)):
+            iids = _outcome_inventory_ids(outcome)
+            return (iids[0] if iids else None, outcome)
+    return None
+
+
+def attach_internal_outcomes(validated: list, ledger: list,
+                             outcomes: list) -> tuple[list, list, list]:
+    """Merge code findings. Host cannot reverse or downgrade them."""
+    discarded: list = []
     if not outcomes:
-        return validated, ledger
-    out = list(validated)
-    used = {str(row.get("id") or "") for row in out}
+        return validated, ledger, discarded
+    by_iid: dict[str, dict] = {}
+    for outcome in outcomes:
+        verdict = str(outcome.get("verdict") or "")
+        if verdict not in DETERMINISTIC_VERDICTS:
+            continue
+        for iid in _outcome_inventory_ids(outcome):
+            prev = by_iid.get(iid)
+            if prev is None or (
+                    verdict == "contradicted"
+                    and prev.get("verdict") != "contradicted"):
+                by_iid[iid] = outcome
+    claims_by_id = {str(row.get("id") or ""): row for row in ledger}
+    kept: list = []
+    for row in validated:
+        claim = claims_by_id.get(str(row.get("claim_id") or ""))
+        hit = _proven_internal(row, claim, by_iid, outcomes)
+        if hit is None:
+            kept.append(row)
+            continue
+        iid, outcome = hit
+        host_v = str(row.get("verdict") or "")
+        int_v = str(outcome.get("verdict") or "")
+        if host_v == int_v:
+            kept.append(row)
+            continue
+        if host_v in HOST_OVERRIDE_VERDICTS:
+            target = iid or str(row.get("claim_id") or "")
+            discarded.append({
+                **row,
+                "reason": "deterministic-conflict",
+                "problems": [
+                    "deterministic-conflict: "
+                    f"host {host_v} conflicts with internal {int_v} "
+                    f"for inventory id {target}"
+                ],
+            })
+            continue
+        kept.append(row)
+
+    used = {str(row.get("id") or "") for row in kept}
     next_n = 1
     touched: set[str] = set()
 
@@ -1193,46 +1289,21 @@ def attach_internal_outcomes(validated: list, ledger: list, outcomes: list) -> t
 
     for outcome in outcomes:
         verdict = str(outcome.get("verdict") or "")
-        if verdict not in {"confirmed", "contradicted"}:
+        if verdict not in DETERMINISTIC_VERDICTS:
             continue
         for claim in _claims_for_internal(ledger, outcome):
             cid = str(claim.get("id") or "")
             existing = [
-                row for row in out if str(row.get("claim_id") or "") == cid]
-            if verdict == "contradicted":
-                out = [
-                    row for row in out
-                    if not (
-                        str(row.get("claim_id") or "") == cid
-                        and row.get("verdict") in {"not_checkable", "confirmed"}
-                    )
-                ]
-                if any(row.get("verdict") == "contradicted" for row in existing):
-                    touched.add(cid)
-                    continue
-                out.append(_internal_check(outcome, claim, new_id()))
+                row for row in kept if str(row.get("claim_id") or "") == cid]
+            if any(row.get("verdict") == verdict for row in existing):
                 touched.add(cid)
                 continue
-            out = [
-                row for row in out
-                if not (
-                    str(row.get("claim_id") or "") == cid
-                    and row.get("verdict") == "not_checkable"
-                )
-            ]
-            if any(
-                row.get("verdict") in {
-                    "contradicted", "confirmed", "changed_since_report", "error",
-                }
-                for row in existing
-            ):
-                if any(row.get("verdict") == "not_checkable" for row in existing):
-                    touched.add(cid)
-                continue
-            out.append(_internal_check(outcome, claim, new_id()))
+            kept = [
+                row for row in kept if str(row.get("claim_id") or "") != cid]
+            kept.append(_internal_check(outcome, claim, new_id()))
             touched.add(cid)
     by_claim: dict[str, list] = {}
-    for check in out:
+    for check in kept:
         by_claim.setdefault(str(check.get("claim_id") or ""), []).append(check)
     rank = {
         "error": 0,
@@ -1251,7 +1322,7 @@ def attach_internal_outcomes(validated: list, ledger: list, outcomes: list) -> t
         best = sorted(options, key=lambda row: rank.get(row.get("verdict"), 9))[0]
         claim["outcome"] = best.get("verdict")
         claim["check_id"] = best.get("id")
-    return out, ledger
+    return kept, ledger, discarded
 
 
 def apply_inventory_importance(ledger: list, validated: list, inventory: dict) -> None:
@@ -1411,8 +1482,9 @@ def main() -> int:
             internal_outcomes = []
     if not isinstance(inventory, dict):
         inventory = inventory_for(args.report)
-    validated, ledger = attach_internal_outcomes(
+    validated, ledger, internal_conflicts = attach_internal_outcomes(
         validated, ledger, internal_outcomes)
+    discarded.extend(internal_conflicts)
     apply_inventory_importance(ledger, validated, inventory)
     inventory_cover = cover(inventory, ledger)
     accepted_ids = {

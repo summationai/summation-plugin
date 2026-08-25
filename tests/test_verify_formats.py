@@ -549,6 +549,62 @@ class FormatGradeTests(unittest.TestCase):
                     if row.get("verdict") == "contradicted":
                         self.assertIn(row.get("severity"), {"high", "medium", "low"})
 
+    def test_host_contradiction_cannot_override_clean_pdf_rank(self) -> None:
+        quotes = [
+            "Top 5 customer segments - Q2 2026",
+            P1,
+            "Enterprise", "$520", "Mid-market", "$410", "SMB", "$305",
+            "Startup", "$190", "Education", "$120",
+            "The ranking is complete and follows the displayed revenue values.",
+            "Source snapshot: CRM revenue export, 2026-07-05.",
+        ]
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            claims = [{"id": f"L{i}", "quote": q} for i, q in enumerate(quotes, 1)]
+            checks = []
+            for i, q in enumerate(quotes, 1):
+                if q == P1:
+                    checks.append(contradicted_report(
+                        f"C{i}", f"L{i}", P1, "Mid-market"))
+                else:
+                    checks.append(confirmed_report(f"C{i}", f"L{i}", q))
+            art, page = grade(
+                folder, PDF_CLEAN, claims=claims, checks=checks,
+                evidence_dir=None, run_id="pdf-clean-host-conflict")
+            self.assertEqual(art["verdict"], "safe_to_share")
+            self.assertNotIn("<b>Next:</b>", page)
+            receipts = json.loads((folder / "receipts.json").read_text())
+            rank = next(
+                row for row in receipts["claims"] if row.get("quote") == P1)
+            self.assertEqual(rank["outcome"], "confirmed")
+            self.assertTrue(any(
+                "deterministic-conflict" in str(row.get("problems"))
+                for row in receipts["discarded"]))
+
+    def test_host_confirmation_cannot_override_planted_pdf_rank(self) -> None:
+        quotes = [
+            "Top 5 customer segments - Q2 2026",
+            P1,
+            "Enterprise", "$520", "SMB", "$305", "Mid-market", "$410",
+            "Startup", "$190", "Education", "$120",
+            "The ranking is presented as final for the quarter.",
+            "Source snapshot: CRM revenue export, 2026-07-05.",
+        ]
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            claims = [{"id": f"L{i}", "quote": q} for i, q in enumerate(quotes, 1)]
+            checks = [
+                confirmed_report(f"C{i}", f"L{i}", q) for i, q in enumerate(quotes, 1)]
+            art, page = grade(
+                folder, PDF_PLANTED, claims=claims, checks=checks,
+                evidence_dir=None, run_id="pdf-planted-host-override")
+            self.assertEqual(art["verdict"], "fix_first")
+            self.assertIn(P1, page)
+            receipts = json.loads((folder / "receipts.json").read_text())
+            rank = next(
+                row for row in receipts["claims"] if row.get("quote") == P1)
+            self.assertEqual(rank["outcome"], "contradicted")
+
 
 if __name__ == "__main__":
     unittest.main()
