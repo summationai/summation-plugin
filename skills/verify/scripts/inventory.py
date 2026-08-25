@@ -1,7 +1,8 @@
 """Machine claim inventory for the verify skill.
 
 HTML: table cells via html_arith plus alg numparse over visible text.
-PDF, xlsx, and pptx share this return shape. Those readers are not complete.
+Markdown, PDF, xlsx, and pptx use the same item shape and complete=True
+when the reader obtained visible text.
 """
 from __future__ import annotations
 
@@ -166,17 +167,225 @@ def _html_items(path: pathlib.Path) -> list[dict]:
     return items
 
 
-def inventory_for(path: pathlib.Path) -> dict:
-    """Same shape for every format. Only HTML is complete in this change."""
+def _bag_add(items: list, seen: set, kind: str, displayed: str, location: str,
+             importance: str = "material") -> None:
+    shown = re.sub(r"\s+", " ", displayed).strip()
+    if not shown:
+        return
+    key = (kind, shown, location)
+    if key in seen:
+        return
+    seen.add(key)
+    items.append({
+        "id": f"INV{len(items) + 1}",
+        "kind": kind,
+        "displayed": shown,
+        "location": location,
+        "importance": importance,
+        "quote": shown,
+    })
+
+
+def _md_items(path: pathlib.Path) -> list[dict]:
+    items: list[dict] = []
+    seen: set[tuple] = set()
+    for index, raw in enumerate(path.read_text(errors="replace").splitlines(), 1):
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            continue
+        if line.lower().startswith("source snapshot"):
+            continue
+        shown = re.sub(r"^[-*]\s+", "", line).strip()
+        if not shown:
+            continue
+        _bag_add(items, seen, "md_line", shown, f"line{index}", "material")
+    return items
+
+
+def visible_markdown(path: pathlib.Path) -> str:
+    return path.read_text(errors="replace")
+
+
+def _pdf_items(path: pathlib.Path) -> tuple[list[dict], str, str | None]:
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return [], "", "pypdf is not installed"
+    try:
+        reader = PdfReader(str(path))
+    except Exception as exc:  # noqa: BLE001 — fail closed on unreadable PDF
+        return [], "", f"unreadable PDF: {exc}"
+    items: list[dict] = []
+    seen: set[tuple] = set()
+    pages: list[str] = []
+    skip = {"rank", "segment", "revenue ($k)", "revenue"}
+    for page_i, page in enumerate(reader.pages, start=1):
+        text = page.extract_text() or ""
+        pages.append(text)
+        for line_i, raw in enumerate(text.splitlines(), start=1):
+            shown = re.sub(r"\s+", " ", raw).strip()
+            if not shown or shown.lower() in skip:
+                continue
+            if re.fullmatch(r"\d{1,2}", shown):
+                continue
+            _bag_add(items, seen, "pdf_line", shown, f"page{page_i}/line{line_i}")
+    visible = "\n".join(pages).strip()
+    if not visible:
+        return [], "", "no extractable PDF text"
+    return items, visible, None
+
+
+def _xlsx_display(cell) -> str | None:
+    value = cell.value
+    if value is None or value == "":
+        return None
+    fmt = str(cell.number_format or "General")
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, str):
+        shown = re.sub(r"\s+", " ", value).strip()
+        return shown or None
+    if isinstance(value, (int, float)):
+        if "%" in fmt:
+            match = re.search(r"0\.(0+)%", fmt)
+            places = len(match.group(1)) if match else 0
+            return f"{float(value) * 100:.{places}f}%"
+        if "0.00" in fmt:
+            return f"{float(value):,.2f}"
+        if "#,##0" in fmt:
+            return f"{float(value):,.0f}"
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value)
+    return str(value)
+
+
+def _xlsx_items(path: pathlib.Path) -> tuple[list[dict], str, str | None]:
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        return [], "", "openpyxl is not installed"
+    try:
+        book = load_workbook(path, data_only=False)
+    except Exception as exc:  # noqa: BLE001
+        return [], "", f"unreadable xlsx: {exc}"
+    items: list[dict] = []
+    seen: set[tuple] = set()
+    lines: list[str] = []
+    for sheet in book.worksheets:
+        for row in sheet.iter_rows():
+            for cell in row:
+                shown = _xlsx_display(cell)
+                if shown is None:
+                    continue
+                lines.append(f"{sheet.title}!{cell.coordinate} {shown}")
+                numeric = isinstance(cell.value, (int, float)) and not isinstance(
+                    cell.value, bool)
+                note = shown.lower().startswith("note:")
+                importance = "material" if numeric or note else "supporting"
+                kind = "xlsx_note" if note else "xlsx_cell"
+                _bag_add(
+                    items, seen, kind, shown,
+                    f"{sheet.title}/{cell.coordinate}", importance)
+    visible = "\n".join(lines)
+    if not visible:
+        return [], "", "no visible xlsx cells"
+    return items, visible, None
+
+
+def _pptx_items(path: pathlib.Path) -> tuple[list[dict], str, str | None]:
+    try:
+        from pptx import Presentation
+    except ImportError:
+        return [], "", "python-pptx is not installed"
+    try:
+        deck = Presentation(str(path))
+    except Exception as exc:  # noqa: BLE001
+        return [], "", f"unreadable pptx: {exc}"
+    items: list[dict] = []
+    seen: set[tuple] = set()
+    lines: list[str] = []
+    for slide_i, slide in enumerate(deck.slides, start=1):
+        for shape_i, shape in enumerate(slide.shapes, start=1):
+            if not getattr(shape, "has_text_frame", False):
+                continue
+            text = re.sub(r"\s+", " ", shape.text_frame.text or "").strip()
+            if not text:
+                continue
+            lines.append(text)
+            _bag_add(
+                items, seen, "pptx_shape", text,
+                f"slide{slide_i}/shape{shape_i}")
+    visible = "\n".join(lines)
+    if not visible:
+        return [], "", "no visible pptx text"
+    return items, visible, None
+
+
+def visible_text_for(path: pathlib.Path) -> tuple[str, str | None]:
+    """Visible report text plus an error when extraction failed."""
     suffix = path.suffix.lower()
     reader = READERS.get(suffix, suffix.lstrip(".") or "unknown")
     if reader == "html":
-        items = _html_items(path)
+        return _visible_text(path.read_text(errors="replace")), None
+    if reader in {"md", "txt"}:
+        return visible_markdown(path), None
+    if reader == "pdf":
+        _items, visible, err = _pdf_items(path)
+        return visible, err
+    if reader == "xlsx":
+        _items, visible, err = _xlsx_items(path)
+        return visible, err
+    if reader == "pptx":
+        _items, visible, err = _pptx_items(path)
+        return visible, err
+    return "", f"no visible-text reader for {reader}"
+
+
+def inventory_for(path: pathlib.Path) -> dict:
+    """Same shape for every supported format."""
+    suffix = path.suffix.lower()
+    reader = READERS.get(suffix, suffix.lstrip(".") or "unknown")
+    if reader == "html":
         return {
             "reader": "html",
             "complete": True,
+            "items": _html_items(path),
+            "reason": None,
+        }
+    if reader in {"md", "txt"}:
+        items = _md_items(path)
+        return {
+            "reader": reader,
+            "complete": True,
             "items": items,
             "reason": None,
+        }
+    if reader == "pdf":
+        items, _visible, err = _pdf_items(path)
+        return {
+            "reader": "pdf",
+            "complete": err is None,
+            "items": items if err is None else [],
+            "reason": err,
+        }
+    if reader == "xlsx":
+        items, _visible, err = _xlsx_items(path)
+        return {
+            "reader": "xlsx",
+            "complete": err is None,
+            "items": items if err is None else [],
+            "reason": err,
+        }
+    if reader == "pptx":
+        items, _visible, err = _pptx_items(path)
+        return {
+            "reader": "pptx",
+            "complete": err is None,
+            "items": items if err is None else [],
+            "reason": err,
         }
     return {
         "reader": reader,

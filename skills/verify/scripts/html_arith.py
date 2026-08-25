@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Deterministic HTML table footing. No summation-flow. No network.
 
-Writes a findings.json that render.py can consume. Non-HTML files get an
-agentic_only stub. render.py writes no shareable page until receipts.json
-records a completed host review.
+Writes a findings.json that render.py can consume. Non-HTML files use the
+same inventory readers as extract.py. Unreadable inputs stay incomplete.
 """
 from __future__ import annotations
 
@@ -146,7 +145,8 @@ def footing_findings(tables: list[list[list[str]]]) -> tuple[list[dict], int]:
 
 
 def findings_doc(report: pathlib.Path, findings: list[dict], *, html: bool,
-                 arithmetic_checks: int = 0) -> dict:
+                 arithmetic_checks: int = 0, intake_error: str | None = None
+                 ) -> dict:
     scripts = pathlib.Path(__file__).resolve().parent
     if str(scripts) not in sys.path:
         sys.path.insert(0, str(scripts))
@@ -154,9 +154,19 @@ def findings_doc(report: pathlib.Path, findings: list[dict], *, html: bool,
     digest = hashlib.sha256(report.read_bytes()).hexdigest()
     d_count = sum(1 for item in findings if item.get("tier") == "D")
     inventory = inventory_for(report)
+    complete = bool(inventory.get("complete")) and not intake_error
+    if intake_error:
+        inventory = {
+            **inventory,
+            "complete": False,
+            "items": [],
+            "reason": intake_error,
+        }
     material_n = sum(
         1 for item in inventory.get("items") or []
         if item.get("importance") == "material")
+    reader = inventory.get("reader") or (
+        "html" if html else report.suffix.lower().lstrip("."))
     return {
         "source": {
             "path": str(report.name),
@@ -183,16 +193,19 @@ def findings_doc(report: pathlib.Path, findings: list[dict], *, html: bool,
         },
         "findings": findings,
         "findings_truncated": False,
-        "agentic_only": not html,
-        "agentic_scan_completed": bool(html),
-        "extraction_method": None if html else "host-agent visible text",
+        "agentic_only": not complete,
+        "agentic_scan_completed": complete,
+        "extraction_method": None if not complete else f"{reader} extract.py",
+        "intake_error": intake_error or inventory.get("reason"),
         "verification": {
             "document": {
-                "status": "complete" if html else "not_available",
+                "status": "complete" if complete else "not_available",
                 "detail": (
                     "Table footing ran on HTML."
-                    if html else
-                    "Rule-based document checks are not available for this file format."
+                    if html and complete else
+                    "Deterministic extraction ran on this file."
+                    if complete else
+                    "Deterministic extraction did not complete."
                 ),
             },
             "semantic": {

@@ -41,6 +41,34 @@ assert arith_spec.loader is not None
 arith_spec.loader.exec_module(html_arith)
 
 
+def write_incomplete_md_findings(folder: pathlib.Path, extra: dict | None = None) -> None:
+    """Ledger tests that skip extract.py must not pick up a complete Markdown inventory."""
+    doc = {
+        "findings": [],
+        "coverage": {
+            "claims_in_ledger": 0,
+            "claims_reached_by_a_check": 0,
+            "extractor_checkable_fraction": 1.0,
+            "engine_checkable_fraction": 1.0,
+            "checks_registered": 0,
+            "checks_with_findings": 0,
+            "checks_found_nothing": 0,
+            "checks_errored": 0,
+        },
+        "source": {"path": "report.md", "format": "md", "sha256": "abc"},
+        "findings_truncated": False,
+        "inventory": {
+            "reader": "md",
+            "complete": False,
+            "items": [],
+            "reason": "synthetic ledger test",
+        },
+    }
+    if extra:
+        doc.update(extra)
+    (folder / "findings.json").write_text(json.dumps(doc))
+
+
 def claims_from_checks(checks_path: pathlib.Path) -> pathlib.Path:
     doc = json.loads(checks_path.read_text())
     items = doc if isinstance(doc, list) else list(doc.get("checks") or [])
@@ -561,14 +589,10 @@ class RenderArtifactTests(unittest.TestCase):
                 }]
             }
             (folder / "checks.json").write_text(json.dumps(checks))
-            self.assertEqual(run_mod(accept, "accept.py", [
-                "--report", str(report),
-                "--checks", str(folder / "checks.json"),
-                "--evidence-dir", str(folder),
-                "--out", str(folder / "receipts.json"),
-            ]), 0)
-            findings = {
-                "findings": [],
+            write_incomplete_md_findings(folder, {
+                "agentic_only": True,
+                "agentic_scan_completed": True,
+                "extraction_method": "host-agent visible text",
                 "coverage": {
                     "claims_in_ledger": 0,
                     "claims_reached_by_a_check": 0,
@@ -579,13 +603,13 @@ class RenderArtifactTests(unittest.TestCase):
                     "checks_found_nothing": 0,
                     "checks_errored": 0,
                 },
-                "source": {"path": "report.md", "format": "md", "sha256": "abc"},
-                "findings_truncated": False,
-                "agentic_only": True,
-                "agentic_scan_completed": True,
-                "extraction_method": "host-agent visible text",
-            }
-            (folder / "findings.json").write_text(json.dumps(findings))
+            })
+            self.assertEqual(run_mod(accept, "accept.py", [
+                "--report", str(report),
+                "--checks", str(folder / "checks.json"),
+                "--evidence-dir", str(folder),
+                "--out", str(folder / "receipts.json"),
+            ]), 0)
             out = folder / "artifact"
             code = run_mod(render, "render.py", [
                 "--findings", str(folder / "findings.json"),
@@ -635,6 +659,10 @@ class RenderArtifactTests(unittest.TestCase):
                     "explanation": f"{name} matches.",
                 })
             (folder / "checks.json").write_text(json.dumps({"checks": rows}))
+            write_incomplete_md_findings(folder, {
+                "agentic_only": True,
+                "agentic_scan_completed": True,
+            })
             self.assertEqual(run_mod(accept, "accept.py", [
                 "--report", str(report),
                 "--checks", str(folder / "checks.json"),
@@ -643,24 +671,6 @@ class RenderArtifactTests(unittest.TestCase):
             ]), 0)
             receipts = json.loads((folder / "receipts.json").read_text())
             self.assertEqual(receipts["proposed"], 5)
-            findings = {
-                "findings": [],
-                "coverage": {
-                    "claims_in_ledger": 0,
-                    "claims_reached_by_a_check": 0,
-                    "extractor_checkable_fraction": 1.0,
-                    "engine_checkable_fraction": 1.0,
-                    "checks_registered": 0,
-                    "checks_with_findings": 0,
-                    "checks_found_nothing": 0,
-                    "checks_errored": 0,
-                },
-                "source": {"path": "report.md", "format": "md", "sha256": "abc"},
-                "findings_truncated": False,
-                "agentic_only": True,
-                "agentic_scan_completed": True,
-            }
-            (folder / "findings.json").write_text(json.dumps(findings))
             out = folder / "artifact"
             self.assertEqual(run_mod(render, "render.py", [
                 "--findings", str(folder / "findings.json"),
@@ -793,6 +803,7 @@ class RenderArtifactTests(unittest.TestCase):
                 "evidence_quote": '"ok": true',
                 "explanation": "The first claim matches.",
             }]}))
+            write_incomplete_md_findings(folder)
             self.assertEqual(run_mod(accept, "accept.py", [
                 "--report", str(folder / "report.md"),
                 "--claims", str(folder / "claims.json"),
@@ -803,22 +814,6 @@ class RenderArtifactTests(unittest.TestCase):
             receipts = json.loads((folder / "receipts.json").read_text())
             self.assertEqual(receipts["claims_in_ledger"], 50)
             self.assertEqual(receipts["claims_reached_by_a_check"], 1)
-            findings = {
-                "findings": [],
-                "coverage": {
-                    "claims_in_ledger": 0,
-                    "claims_reached_by_a_check": 0,
-                    "extractor_checkable_fraction": 1.0,
-                    "engine_checkable_fraction": 1.0,
-                    "checks_registered": 0,
-                    "checks_with_findings": 0,
-                    "checks_found_nothing": 0,
-                    "checks_errored": 0,
-                },
-                "source": {"path": "report.md", "format": "md", "sha256": "abc"},
-                "findings_truncated": False,
-            }
-            (folder / "findings.json").write_text(json.dumps(findings))
             out = folder / "artifact"
             self.assertEqual(run_mod(render, "render.py", [
                 "--findings", str(folder / "findings.json"),
@@ -930,6 +925,7 @@ class RenderArtifactTests(unittest.TestCase):
                 "evidence_json": [{"pointer": "/alpha", "value": 1}],
                 "explanation": "Alpha matches.",
             }]}))
+            write_incomplete_md_findings(folder)
             self.assertEqual(run_mod(accept, "accept.py", [
                 "--report", str(folder / "report.md"),
                 "--claims", str(folder / "claims.json"),
@@ -939,21 +935,6 @@ class RenderArtifactTests(unittest.TestCase):
             ]), 0)
             receipts = json.loads((folder / "receipts.json").read_text())
             self.assertEqual(receipts["semantic_status"], "partial")
-            (folder / "findings.json").write_text(json.dumps({
-                "findings": [],
-                "coverage": {
-                    "claims_in_ledger": 0,
-                    "claims_reached_by_a_check": 0,
-                    "extractor_checkable_fraction": 1.0,
-                    "engine_checkable_fraction": 1.0,
-                    "checks_registered": 0,
-                    "checks_with_findings": 0,
-                    "checks_found_nothing": 0,
-                    "checks_errored": 0,
-                },
-                "source": {"path": "report.md", "format": "md", "sha256": "abc"},
-                "findings_truncated": False,
-            }))
             out = folder / "artifact"
             self.assertEqual(run_mod(render, "render.py", [
                 "--findings", str(folder / "findings.json"),
@@ -983,6 +964,7 @@ class RenderArtifactTests(unittest.TestCase):
                 "report_quote": "Alpha is 1.",
                 "explanation": "No warehouse snapshot remains for this figure.",
             }]}))
+            write_incomplete_md_findings(folder)
             self.assertEqual(run_mod(accept, "accept.py", [
                 "--report", str(folder / "report.md"),
                 "--claims", str(folder / "claims.json"),
@@ -992,21 +974,6 @@ class RenderArtifactTests(unittest.TestCase):
             receipts = json.loads((folder / "receipts.json").read_text())
             self.assertEqual(receipts["claims_reached_by_a_check"], 1)
             self.assertEqual(receipts["claims"][0]["outcome"], "not_checkable")
-            (folder / "findings.json").write_text(json.dumps({
-                "findings": [],
-                "coverage": {
-                    "claims_in_ledger": 0,
-                    "claims_reached_by_a_check": 0,
-                    "extractor_checkable_fraction": 1.0,
-                    "engine_checkable_fraction": 1.0,
-                    "checks_registered": 0,
-                    "checks_with_findings": 0,
-                    "checks_found_nothing": 0,
-                    "checks_errored": 0,
-                },
-                "source": {"path": "report.md", "format": "md", "sha256": "abc"},
-                "findings_truncated": False,
-            }))
             out = folder / "artifact"
             self.assertEqual(run_mod(render, "render.py", [
                 "--findings", str(folder / "findings.json"),

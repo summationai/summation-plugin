@@ -13,7 +13,7 @@ If they name a report that already lives in Summation (no disk file), run the `v
 
 1. Before any grading: `command -v uv` succeeds, or `python3 -c "import jsonschema"` succeeds. If neither, resolve that with the user now. Do not start a long run that dies at render.
 2. Ask which file. If they already attached one, use it.
-3. Read the report. Write `claims.json` now, before you gather evidence. After `html_arith.py` runs, read `inventory` in `findings.json`. Cover every material inventory item plus every other load-bearing claim. Each claim names the inventory ids it covers: `{"report_period": "week ending April 4, 2026", "report_date": "2026-04-04", "claims": [{"id": "L1", "quote": "exact visible text", "importance": "material", "inventory_ids": ["INV1"]}]}`. One claim may list two ids only when the quote names both locations. `importance` is `material` or `supporting`. Quotes are visible text. `report_period` is the display string. `report_date` is ISO `YYYY-MM-DD`. Leave either field out when the report does not name a period.
+3. Run `extract.py` first. Read `inventory` in `findings.json` and `report-visible.txt`. Then write `claims.json`. Cover every material inventory item plus every other load-bearing claim. Each claim names the inventory ids it covers: `{"report_period": "week ending April 4, 2026", "report_date": "2026-04-04", "claims": [{"id": "L1", "quote": "exact visible text", "importance": "material", "inventory_ids": ["INV1"]}]}`. One claim may list two ids only when the quote names both locations. `importance` is `material` or `supporting`. Quotes are visible text. `report_period` is the display string. `report_date` is ISO `YYYY-MM-DD`. Leave either field out when the report does not name a period. Do not write claims from PowerPoint speaker notes.
 4. If a nearby `evidence/` folder exists, ask once whether to use it. Do not scan their whole disk.
 5. If GitHub, Snowflake, Slack, or similar tools are already connected in this session, ask once whether to query them. Save raw tool results as files under the run `evidence/` folder. Do not ask them to sign in to Summation to get evidence.
 6. State duration, then work:
@@ -28,16 +28,16 @@ Create a run folder next to the report (or in `/tmp/summation-verify-<id>/`):
 ```text
 run/
   report/          original file
-  report-visible.txt   required when the file is not HTML, Markdown, or plain text
+  report-visible.txt   extract.py writes this
   evidence/        unchanged tool results and user files
-  claims.json      you write this first: every load-bearing claim
+  claims.json      you write this after inventory: every load-bearing claim
   checks.json      you write this after evidence
-  findings.json    html_arith.py writes this
+  findings.json    extract.py writes this
   receipts.json    accept.py writes this
   artifact/        render.py writes grade-artifact.html + .json
 ```
 
-For PDF, xlsx, pptx, or images: extract visible text yourself into `report-visible.txt`. Do not install OfficeCLI or Poppler.
+Do not install OfficeCLI or Poppler. Do not copy speaker notes into claims.
 
 ## Scripts
 
@@ -46,9 +46,15 @@ For PDF, xlsx, pptx, or images: extract visible text yourself into `report-visib
 If those variables are empty, resolve `VERIFY` from this skill’s directory.
 
 ```bash
-python3 "$VERIFY/scripts/html_arith.py" \
-  --report "$RUN/report/<file>" --out "$RUN/findings.json"
+uv run "$VERIFY/scripts/extract.py" \
+  --report "$RUN/report/<file>" \
+  --visible "$RUN/report-visible.txt" \
+  --out "$RUN/findings.json"
 ```
+
+If `uv` is missing, run `python3` on `extract.py` only when `pypdf`, `openpyxl`, and `python-pptx` already import. Do not `pip install` without asking. Do not call OfficeCLI or Poppler.
+
+Then write `claims.json` and `checks.json`. Every material inventory id must have one accepted completed outcome. `not_checkable` is complete only when it has a specific reason. Convert every unresolved material claim to an honest `not_checkable` result before `render.py`. Do not leave `not_reached` rows.
 
 If the report is HTML, Markdown, or plain text:
 
@@ -62,7 +68,7 @@ python3 "$VERIFY/scripts/accept.py" \
   --out "$RUN/receipts.json"
 ```
 
-If the report is PDF, xlsx, pptx, or an image, write `report-visible.txt` first. Then:
+If the report is PDF, xlsx, or pptx:
 
 ```bash
 python3 "$VERIFY/scripts/accept.py" \
@@ -86,7 +92,7 @@ uv run --with jsonschema python3 "$VERIFY/scripts/render.py" \
 
 If `uv` is missing and `jsonschema` already imports, run `python3` on `render.py`. Do not `pip install` without asking.
 
-`html_arith.py` is best-effort table footing on HTML and writes the machine claim inventory. Other formats still get a `findings.json` stub with an incomplete inventory reader. Always run it. If `render.py` exits 2 because claims miss an inventory item, add the missing quote, put that inventory id on the claim, and run `accept.py` then `render.py` again.
+`extract.py` writes visible text and the machine inventory. HTML also gets table footing. If `render.py` exits 2 because a material inventory item is missing or a claim is `not_reached`, repair that claim and run `accept.py` then `render.py` again.
 
 ## You write checks.json
 

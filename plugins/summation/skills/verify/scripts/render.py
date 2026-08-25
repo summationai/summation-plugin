@@ -114,15 +114,18 @@ def _is_diagnostic_record(f: dict) -> bool:
 def verdict_of(raw: dict) -> str:
     if not isinstance(raw, dict) or "findings" not in raw:
         return "unable_to_grade"
-    if raw.get("agentic_only"):
-        return "needs_review" if raw.get("agentic_scan_completed") else "unable_to_grade"
     findings = raw.get("findings")
     if not isinstance(findings, list):
+        return "unable_to_grade"
+    inv = raw.get("inventory") or {}
+    if raw.get("intake_error") and not inv.get("complete"):
+        return "unable_to_grade"
+    if (raw.get("agentic_only") and not raw.get("agentic_scan_completed")
+            and not inv.get("complete")):
         return "unable_to_grade"
     tiers = {str(f.get("tier")) for f in findings if not _is_diagnostic_record(f)}
     if "D" in tiers:
         return "fix_first"
-    inv = raw.get("inventory") or {}
     if inv.get("complete"):
         if not coverage_ok(raw):
             return "needs_review"
@@ -767,6 +770,7 @@ def ungraded_reason(raw: dict, layer2_named: bool, receipts: dict | list | None
         row for row in material
         if row.get("outcome") in GROUNDED_OUTCOMES
     ]
+    inv = payload.get("inventory") or raw.get("inventory") or {}
     if layer2_named:
         if semantic in UNFINISHED_SEMANTIC:
             return "semantic review did not complete"
@@ -777,7 +781,23 @@ def ungraded_reason(raw: dict, layer2_named: bool, receipts: dict | list | None
             checks = receipts
         if not checks and not grounded:
             return "no grounded material claims"
-    if raw.get("agentic_only") and not raw.get("agentic_scan_completed"):
+        if inv.get("complete"):
+            unfinished = [
+                row for row in material
+                if row.get("outcome") not in GROUNDED_OUTCOMES
+            ]
+            if unfinished:
+                return "material claims are not complete"
+            discarded_claims = [
+                row for row in (payload.get("discarded_claims") or [])
+                if row.get("importance") == "material"
+            ]
+            if discarded_claims:
+                return "material claims were discarded"
+            if payload.get("discarded"):
+                return "receipt failures remain"
+    if (raw.get("agentic_only") and not raw.get("agentic_scan_completed")
+            and not inv.get("complete")):
         if semantic not in {"complete", "partial"}:
             return "host review did not complete"
     return None
