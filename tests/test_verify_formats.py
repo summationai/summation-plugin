@@ -398,10 +398,18 @@ class FormatGradeTests(unittest.TestCase):
             self.assertTrue(all(
                 row.get("outcome") not in (None, "not_reached") for row in material))
             self.assertIn("3%", page)
+            self.assertIn("40.0%", page)
+            self.assertIn("43.0%", page)
+            self.assertIn("3.0 percentage-point", page)
+            self.assertIn("not a 3% relative", page)
+            self.assertNotIn("The report claim", page)
             contradicted = [
                 row for row in art["evidence_checks"]
                 if row.get("verdict") == "contradicted"]
             self.assertEqual(len(contradicted), 1)
+            self.assertAlmostEqual(
+                float((art.get("score") or {}).get("value") or 0),
+                100.0 / 9, places=3)
 
     def test_pptx_clean_is_safe_to_share(self) -> None:
         quotes = [

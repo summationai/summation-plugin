@@ -1171,7 +1171,7 @@ def _claims_for_internal(ledger: list, outcome: dict) -> list:
 def _internal_check(outcome: dict, claim: dict, check_id: str) -> dict:
     verdict = str(outcome.get("verdict") or "confirmed")
     importance = str(outcome.get("importance") or claim.get("importance") or "material")
-    return {
+    row = {
         "id": check_id,
         "claim_id": claim.get("id"),
         "type": outcome.get("type") or "internal",
@@ -1188,6 +1188,9 @@ def _internal_check(outcome: dict, claim: dict, check_id: str) -> dict:
         "found_by": "internal",
         "inventory_ids": list(outcome.get("inventory_ids") or claim_inventory_ids(claim)),
     }
+    if outcome.get("comparison"):
+        row["comparison"] = outcome["comparison"]
+    return row
 
 
 DETERMINISTIC_VERDICTS = frozenset({"confirmed", "contradicted"})
@@ -1271,7 +1274,18 @@ def attach_internal_outcomes(validated: list, ledger: list,
         host_v = str(row.get("verdict") or "")
         int_v = str(outcome.get("verdict") or "")
         if host_v == int_v:
-            kept.append(row)
+            merged = dict(row)
+            if outcome.get("comparison"):
+                merged["comparison"] = outcome["comparison"]
+            if outcome.get("explanation"):
+                merged["explanation"] = outcome["explanation"]
+            if outcome.get("location") and not merged.get("location"):
+                merged["location"] = outcome["location"]
+            if outcome.get("type"):
+                merged["type"] = outcome["type"]
+            if outcome.get("basis"):
+                merged["basis"] = outcome["basis"]
+            kept.append(merged)
             continue
         if host_v in HOST_OVERRIDE_VERDICTS:
             target = iid or str(row.get("claim_id") or "")

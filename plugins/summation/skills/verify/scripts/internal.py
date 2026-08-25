@@ -69,11 +69,20 @@ def _is_percent(text: str) -> bool:
     return "%" in (text or "")
 
 
+def _pct_text(value: Decimal, displayed: str | None = None) -> str:
+    text = str(displayed or "").strip()
+    if text.endswith("%"):
+        return text
+    quantized = value.quantize(Decimal("0.1"))
+    return f"{quantized}%"
+
+
 def _outcome(*, check_id: str, family: str, type_: str, verdict: str,
              inventory_ids: list[str], report_quote: str,
              report_quote_2: str | None = None, location: str | None = None,
-             explanation: str, importance: str = "material") -> dict:
-    return {
+             explanation: str, importance: str = "material",
+             comparison: dict | None = None) -> dict:
+    row = {
         "check_id": check_id,
         "family": family,
         "type": type_,
@@ -88,6 +97,9 @@ def _outcome(*, check_id: str, family: str, type_: str, verdict: str,
         "explanation": explanation,
         "found_by": "internal",
     }
+    if comparison:
+        row["comparison"] = comparison
+    return row
 
 
 def _xlsx_grid(items: list[dict]) -> dict:
@@ -283,6 +295,28 @@ def _ari_xlsx(items: list[dict]) -> list[dict]:
         if {"revenue", "cogs", "gp"} <= set(by_key):
             rev, cogs, gp = by_key["revenue"], by_key["cogs"], by_key["gp"]
             computed = rev[2] - cogs[2]
+            comparison = {
+                "kind": "identity",
+                "formula": "revenue minus cost of goods",
+                "result": str(gp[1].get("displayed") or computed),
+                "operands": [
+                    {
+                        "label": "revenue",
+                        "value": str(rev[1].get("displayed") or rev[2]),
+                        "location": rev[1].get("location"),
+                    },
+                    {
+                        "label": "cost of goods",
+                        "value": str(cogs[1].get("displayed") or cogs[2]),
+                        "location": cogs[1].get("location"),
+                    },
+                    {
+                        "label": "gross profit",
+                        "value": str(gp[1].get("displayed") or gp[2]),
+                        "location": gp[1].get("location"),
+                    },
+                ],
+            }
             if abs(computed - gp[2]) <= MONEY_EPS:
                 for key in ("revenue", "cogs", "gp"):
                     _row, item, _val = by_key[key]
@@ -295,6 +329,7 @@ def _ari_xlsx(items: list[dict]) -> list[dict]:
                         report_quote=str(item.get("displayed") or ""),
                         location=item.get("location"),
                         explanation="Gross profit equals revenue minus cost of goods.",
+                        comparison=comparison,
                     ))
             else:
                 out.append(_outcome(
@@ -307,11 +342,34 @@ def _ari_xlsx(items: list[dict]) -> list[dict]:
                     report_quote_2=str(rev[1].get("displayed") or ""),
                     location=gp[1].get("location"),
                     explanation="Gross profit does not equal revenue minus cost of goods.",
+                    comparison=comparison,
                 ))
         if {"revenue", "gp", "margin"} <= set(by_key) and by_key["revenue"][2] != 0:
             rev, gp, margin = by_key["revenue"], by_key["gp"], by_key["margin"]
             computed = (gp[2] / rev[2]) * Decimal(100)
             shown = margin[2]
+            comparison = {
+                "kind": "identity",
+                "formula": "gross profit divided by revenue",
+                "result": str(margin[1].get("displayed") or shown),
+                "operands": [
+                    {
+                        "label": "gross profit",
+                        "value": str(gp[1].get("displayed") or gp[2]),
+                        "location": gp[1].get("location"),
+                    },
+                    {
+                        "label": "revenue",
+                        "value": str(rev[1].get("displayed") or rev[2]),
+                        "location": rev[1].get("location"),
+                    },
+                    {
+                        "label": "gross margin",
+                        "value": str(margin[1].get("displayed") or shown),
+                        "location": margin[1].get("location"),
+                    },
+                ],
+            }
             # Inventory stores 40.0% as 40.0 after parse_number.
             if abs(computed - shown) <= PCT_EPS:
                 out.append(_outcome(
@@ -323,6 +381,7 @@ def _ari_xlsx(items: list[dict]) -> list[dict]:
                     report_quote=str(margin[1].get("displayed") or ""),
                     location=margin[1].get("location"),
                     explanation="Gross margin equals gross profit divided by revenue.",
+                    comparison=comparison,
                 ))
             else:
                 out.append(_outcome(
@@ -335,6 +394,7 @@ def _ari_xlsx(items: list[dict]) -> list[dict]:
                     report_quote_2=str(gp[1].get("displayed") or ""),
                     location=margin[1].get("location"),
                     explanation="Gross margin does not equal gross profit divided by revenue.",
+                    comparison=comparison,
                 ))
     return out
 
@@ -372,6 +432,29 @@ def _uni_percent_points(items: list[dict]) -> list[dict]:
             old, new = group[0][1], group[1][1]
             point = new - old
             rel = None if old == 0 else (Decimal(100) * point / old)
+            prior_text = _pct_text(old, str(group[0][0].get("displayed") or ""))
+            current_text = _pct_text(new, str(group[1][0].get("displayed") or ""))
+            point_abs = abs(point).quantize(Decimal("0.1"))
+            direction = "increase" if point > 0 else "decrease"
+            comparison = {
+                "kind": "percentage_points",
+                "prior": prior_text,
+                "current": current_text,
+                "result": f"{point_abs} percentage points",
+                "direction": direction,
+                "operands": [
+                    {
+                        "label": "prior margin",
+                        "value": prior_text,
+                        "location": group[0][0].get("location"),
+                    },
+                    {
+                        "label": "current margin",
+                        "value": current_text,
+                        "location": group[1][0].get("location"),
+                    },
+                ],
+            }
             for note in notes:
                 text = str(note.get("displayed") or "")
                 stated = _first_num(text)
@@ -381,6 +464,11 @@ def _uni_percent_points(items: list[dict]) -> list[dict]:
                 says_percent = bool(PERCENT_WORD.search(text)) and not says_points
                 matches_points = abs(stated - abs(point)) <= PCT_EPS
                 matches_rel = rel is not None and abs(stated - abs(rel)) <= PCT_EPS
+                stated_pct = f"{stated.quantize(Decimal('1')) if stated == stated.to_integral() else stated}%"
+                comparison = {
+                    **comparison,
+                    "stated": stated_pct,
+                }
                 if matches_points and says_percent and not matches_rel:
                     out.append(_outcome(
                         check_id="uni_percent_vs_points",
@@ -392,9 +480,10 @@ def _uni_percent_points(items: list[dict]) -> list[dict]:
                         report_quote_2=str(group[1][0].get("displayed") or ""),
                         location=note.get("location"),
                         explanation=(
-                            "The stated move matches a percentage-point change, "
-                            "not a percent change."
+                            f"This is a {point_abs} percentage-point {direction}, "
+                            f"not a {stated_pct} relative {direction}."
                         ),
+                        comparison=comparison,
                     ))
                 elif (matches_points and says_points) or (
                         matches_rel and says_percent):
@@ -406,7 +495,11 @@ def _uni_percent_points(items: list[dict]) -> list[dict]:
                         inventory_ids=[note.get("id")],
                         report_quote=text,
                         location=note.get("location"),
-                        explanation="The stated move matches the displayed percent levels.",
+                        explanation=(
+                            f"The displayed move is a {point_abs} percentage-point "
+                            f"{direction}, matching the note."
+                        ),
+                        comparison=comparison,
                     ))
                 if IMPROVE.search(text) and point > 0:
                     out.append(_outcome(

@@ -80,6 +80,11 @@ class InternalCheckTests(unittest.TestCase):
             if row.get("verdict") == "contradicted" and row.get("report_quote") == X1]
         self.assertEqual(len(hits), 1)
         self.assertEqual(hits[0]["check_id"], "uni_percent_vs_points")
+        comparison = hits[0].get("comparison") or {}
+        self.assertEqual(comparison.get("prior"), "40.0%")
+        self.assertEqual(comparison.get("current"), "43.0%")
+        self.assertIn("3.0", str(comparison.get("result") or ""))
+        self.assertIn("percentage-point", hits[0].get("explanation") or "")
 
     def test_pptx_clean_confirms_headline_ratio(self) -> None:
         path = FIX / "pptx-kpi/clean/operations-kpi-clean.pptx"

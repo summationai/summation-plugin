@@ -467,10 +467,13 @@ class TrustCorrectionTests(unittest.TestCase):
             self.assertIsNone(art.get("source_result"))
             self.assertNotIn("presentation", art)
             for row in art.get("evidence_checks") or []:
-                self.assertNotIn("evidence_file", row)
-                self.assertNotIn("evidence_quote", row)
                 self.assertNotIn("evidence_json", row)
                 self.assertNotIn("reconstruction_attempt", row)
+                quote = str(row.get("evidence_quote") or "")
+                self.assertNotIn(SENTINEL, quote)
+                self.assertNotIn("/", quote)
+                if row.get("evidence_file"):
+                    self.assertNotIn(SENTINEL, str(row["evidence_file"]))
 
     def test_malicious_presentation_absent_from_safe_and_caveated(self) -> None:
         cases = (
