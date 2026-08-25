@@ -434,7 +434,9 @@ class HtmlParityTests(unittest.TestCase):
         self.assertIn("unmodeled_verdict", page)
 
     def test_html_has_exactly_one_next_block(self) -> None:
-        page = render.html_of(_minimal_art([_check("contradicted")]))
+        art = _minimal_art([_check("contradicted")])
+        art["verdict"] = "fix_first"
+        page = render.html_of(art)
         self.assertEqual(page.count('class="next"') + page.count("class='next'"), 1)
         safe = render.html_of(_minimal_art([_check("confirmed")]))
         self.assertEqual(safe.count('class="next"') + safe.count("class='next'"), 0)

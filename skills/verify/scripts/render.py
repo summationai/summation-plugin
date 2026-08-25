@@ -11,6 +11,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from severity import normalize_severity  # noqa: E402
+
 SCHEMA_VERSION = "grade-artifact/v1"
 MIN_CLAIMS = 1
 SHAREABLE_CHECK_KEYS = (
@@ -218,8 +223,11 @@ def _public_layer2(layer2: list[dict] | None) -> list[dict]:
                 "report" if f.get("type") in MATERIAL_REPORT_ONLY_TYPES else "evidence")),
             "verdict": verdict,
             "importance": str(f.get("importance") or "material"),
-            "severity": (str(f.get("severity") or "medium")
-                         if verdict == "contradicted" else None),
+            "severity": (
+                normalize_severity(
+                    f.get("severity"), contradicted=True,
+                    importance=str(f.get("importance") or "material"))
+                if verdict == "contradicted" else None),
             "report_quote": str(f.get("report_quote") or ""),
             "report_quote_2": f.get("report_quote_2"),
             "explanation": public_explanation(f),
@@ -442,9 +450,17 @@ def _combined_verdict(base: str, layer2: list[dict], source: dict | None,
                       raw: dict | None = None) -> str:
     contradicted = [
         check for check in layer2 if check.get("verdict") == "contradicted"]
+    for check in contradicted:
+        check["severity"] = normalize_severity(
+            check.get("severity"), contradicted=True,
+            importance=str(check.get("importance") or "material"))
     if source and source.get("status") != "failed" and int(source.get("contradicted") or 0):
         return "fix_first"
-    if any(f.get("severity") in {"high", "medium"} for f in contradicted):
+    if any(
+        check.get("importance") == "material" for check in contradicted
+    ) or any(
+        check.get("severity") in {"high", "medium"} for check in contradicted
+    ):
         return "fix_first"
     if contradicted and base == "safe_to_share":
         return "share_with_caveats"
@@ -1113,11 +1129,7 @@ def html_of(art: dict, raw: dict | None = None,
             n_nc += ledger - classified
 
     csr_ran = n_csr > 0 or live_source_ran(art)
-    page_v = customer_verdict(str(art.get("verdict") or "needs_review"))
-    if n_err:
-        page_v = "fix_first"
-    elif page_v == "fix_first":
-        page_v = "share_with_caveats"
+    page_v = customer_verdict(str(art.get("verdict") or "unable_to_grade"))
 
     src = art.get("source") or {}
     filename = src.get("path") or "report"

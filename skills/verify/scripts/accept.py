@@ -22,6 +22,7 @@ _SCRIPTS = pathlib.Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 from inventory import claim_inventory_ids, cover, inventory_for  # noqa: E402
+from severity import normalize_severity  # noqa: E402
 
 EVIDENCE_SUFFIXES = frozenset({
     ".json", ".jsonl", ".txt", ".sql", ".csv", ".yaml", ".yml", ".md", ".html",
@@ -629,7 +630,9 @@ def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
             "importance": finding.get("importance") or "material",
         }
         if verdict == "contradicted":
-            finding["severity"] = finding.get("severity") or "medium"
+            finding["severity"] = normalize_severity(
+                finding.get("severity"), contradicted=True,
+                importance=str(finding.get("importance") or "material"))
         else:
             finding["severity"] = None
         if not quote_in_text(finding.get("report_quote", ""), report):
@@ -1115,6 +1118,162 @@ def load_claims_bundle(path: pathlib.Path) -> tuple[list, dict]:
     raise ValueError("claims file has no claims array")
 
 
+def load_internal_outcomes(path: pathlib.Path | None) -> list:
+    if path is None or not path.is_file():
+        return []
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError, TypeError):
+        return []
+    rows = doc.get("internal_outcomes")
+    return list(rows) if isinstance(rows, list) else []
+
+
+def _claims_for_internal(ledger: list, outcome: dict) -> list:
+    ids = set()
+    raw_ids = outcome.get("inventory_ids") or []
+    if isinstance(raw_ids, str):
+        raw_ids = [raw_ids]
+    for value in raw_ids:
+        item = str(value or "").strip()
+        if item:
+            ids.add(item)
+    quote = str(outcome.get("report_quote") or "")
+    found = []
+    for claim in ledger:
+        claim_ids = set(claim_inventory_ids(claim))
+        if ids and claim_ids & ids:
+            found.append(claim)
+            continue
+        shown = str(claim.get("quote") or "")
+        if quote and (quote_in_text(quote, shown) or quote_in_text(shown, quote)):
+            found.append(claim)
+    return found
+
+
+def _internal_check(outcome: dict, claim: dict, check_id: str) -> dict:
+    verdict = str(outcome.get("verdict") or "confirmed")
+    importance = str(claim.get("importance") or outcome.get("importance") or "material")
+    return {
+        "id": check_id,
+        "claim_id": claim.get("id"),
+        "type": outcome.get("type") or "internal",
+        "basis": "report",
+        "verdict": verdict,
+        "severity": normalize_severity(
+            outcome.get("severity"), contradicted=verdict == "contradicted",
+            importance=importance),
+        "importance": importance,
+        "report_quote": outcome.get("report_quote") or claim.get("quote") or "",
+        "report_quote_2": outcome.get("report_quote_2"),
+        "location": outcome.get("location") or claim.get("location"),
+        "explanation": outcome.get("explanation") or "Deterministic internal check.",
+        "found_by": "internal",
+        "inventory_ids": list(outcome.get("inventory_ids") or claim_inventory_ids(claim)),
+    }
+
+
+def attach_internal_outcomes(validated: list, ledger: list, outcomes: list) -> tuple[list, list]:
+    """Merge code findings. Host not_checkable cannot override them."""
+    if not outcomes:
+        return validated, ledger
+    out = list(validated)
+    used = {str(row.get("id") or "") for row in out}
+    next_n = 1
+    touched: set[str] = set()
+
+    def new_id() -> str:
+        nonlocal next_n
+        while f"INT{next_n}" in used:
+            next_n += 1
+        cid = f"INT{next_n}"
+        used.add(cid)
+        next_n += 1
+        return cid
+
+    for outcome in outcomes:
+        verdict = str(outcome.get("verdict") or "")
+        if verdict not in {"confirmed", "contradicted"}:
+            continue
+        for claim in _claims_for_internal(ledger, outcome):
+            cid = str(claim.get("id") or "")
+            existing = [
+                row for row in out if str(row.get("claim_id") or "") == cid]
+            if verdict == "contradicted":
+                out = [
+                    row for row in out
+                    if not (
+                        str(row.get("claim_id") or "") == cid
+                        and row.get("verdict") in {"not_checkable", "confirmed"}
+                    )
+                ]
+                if any(row.get("verdict") == "contradicted" for row in existing):
+                    touched.add(cid)
+                    continue
+                out.append(_internal_check(outcome, claim, new_id()))
+                touched.add(cid)
+                continue
+            out = [
+                row for row in out
+                if not (
+                    str(row.get("claim_id") or "") == cid
+                    and row.get("verdict") == "not_checkable"
+                )
+            ]
+            if any(
+                row.get("verdict") in {
+                    "contradicted", "confirmed", "changed_since_report", "error",
+                }
+                for row in existing
+            ):
+                if any(row.get("verdict") == "not_checkable" for row in existing):
+                    touched.add(cid)
+                continue
+            out.append(_internal_check(outcome, claim, new_id()))
+            touched.add(cid)
+    by_claim: dict[str, list] = {}
+    for check in out:
+        by_claim.setdefault(str(check.get("claim_id") or ""), []).append(check)
+    rank = {
+        "error": 0,
+        "contradicted": 0,
+        "changed_since_report": 1,
+        "confirmed": 2,
+        "not_checkable": 3,
+    }
+    for claim in ledger:
+        cid = str(claim.get("id") or "")
+        if cid not in touched:
+            continue
+        options = by_claim.get(cid) or []
+        if not options:
+            continue
+        best = sorted(options, key=lambda row: rank.get(row.get("verdict"), 9))[0]
+        claim["outcome"] = best.get("verdict")
+        claim["check_id"] = best.get("id")
+    return out, ledger
+
+
+def apply_inventory_importance(ledger: list, validated: list, inventory: dict) -> None:
+    """Keep host importance from claiming a supporting inventory item as material."""
+    by_id = {
+        str(item.get("id") or ""): item
+        for item in (inventory.get("items") or [])
+        if isinstance(item, dict)
+    }
+    for claim in ledger:
+        ids = claim_inventory_ids(claim)
+        imps = [
+            by_id[iid].get("importance") for iid in ids if iid in by_id]
+        if imps and all(item == "supporting" for item in imps):
+            claim["importance"] = "supporting"
+    by_claim = {str(row.get("id") or ""): row for row in ledger}
+    for check in validated:
+        claim = by_claim.get(str(check.get("claim_id") or ""))
+        if claim and claim.get("importance") == "supporting":
+            check["importance"] = "supporting"
+
+
 def load_arithmetic_findings(path: pathlib.Path | None) -> list:
     if path is None:
         return []
@@ -1241,13 +1400,20 @@ def main() -> int:
     validated, ledger = apply_currency_staleness(
         validated, ledger, sandbox, args.report)
     inventory = None
+    internal_outcomes: list = []
     if args.findings is not None and args.findings.is_file():
         try:
-            inventory = json.loads(args.findings.read_text()).get("inventory")
+            findings_doc = json.loads(args.findings.read_text())
+            inventory = findings_doc.get("inventory")
+            internal_outcomes = list(findings_doc.get("internal_outcomes") or [])
         except (OSError, json.JSONDecodeError, TypeError):
             inventory = None
+            internal_outcomes = []
     if not isinstance(inventory, dict):
         inventory = inventory_for(args.report)
+    validated, ledger = attach_internal_outcomes(
+        validated, ledger, internal_outcomes)
+    apply_inventory_importance(ledger, validated, inventory)
     inventory_cover = cover(inventory, ledger)
     accepted_ids = {
         str(row.get("id") or "").strip() for row in validated if row.get("id")}

@@ -92,7 +92,9 @@ uv run --with jsonschema python3 "$VERIFY/scripts/render.py" \
 
 If `uv` is missing and `jsonschema` already imports, run `python3` on `render.py`. Do not `pip install` without asking.
 
-`extract.py` writes visible text and the machine inventory. HTML also gets table footing. If `render.py` exits 2 because a material inventory item is missing or a claim is `not_reached`, repair that claim and run `accept.py` then `render.py` again.
+`extract.py` writes visible text, the machine inventory, and deterministic internal outcomes (rank order, arithmetic/ratio, percent versus points, direction, period display). `accept.py` merges those outcomes into the ledger. The host cannot downgrade a deterministic internal confirmed or contradicted result to `not_checkable`. The host only grades semantic or external claims that code cannot prove.
+
+If `render.py` exits 2 because a material inventory item is missing or a claim is `not_reached`, repair that claim and run `accept.py` then `render.py` again. Source/provenance labels such as `Source snapshot:` are supporting metadata, not material claims.
 
 ## You write checks.json
 

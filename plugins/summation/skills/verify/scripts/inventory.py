@@ -230,7 +230,9 @@ def _pdf_items(path: pathlib.Path) -> tuple[list[dict], str, str | None]:
                 continue
             if re.fullmatch(r"\d{1,2}", shown):
                 continue
-            _bag_add(items, seen, "pdf_line", shown, f"page{page_i}/line{line_i}")
+            importance = "supporting" if shown.lower().startswith("source snapshot") else "material"
+            kind = "pdf_source" if importance == "supporting" else "pdf_line"
+            _bag_add(items, seen, kind, shown, f"page{page_i}/line{line_i}", importance)
     visible = "\n".join(pages).strip()
     if not visible:
         return [], "", "no extractable PDF text"

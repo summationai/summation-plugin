@@ -78,13 +78,12 @@ def grade(folder: pathlib.Path, report: pathlib.Path, *,
     by_shown = {
         item["displayed"]: item
         for item in findings["inventory"]["items"]
-        if item.get("importance") == "material"
     }
     for claim in claims:
         shown = claim["quote"]
         item = by_shown[shown]
         claim["inventory_ids"] = [item["id"]]
-        claim.setdefault("importance", "material")
+        claim.setdefault("importance", item.get("importance") or "material")
     (folder / "claims.json").write_text(json.dumps({"claims": claims}))
     (folder / "checks.json").write_text(json.dumps({"checks": checks}))
     ev = evidence_dir if evidence_dir is not None else folder
@@ -449,6 +448,106 @@ class FormatGradeTests(unittest.TestCase):
                 row for row in art["evidence_checks"]
                 if row.get("verdict") == "contradicted"]
             self.assertEqual(len(contradicted), 1)
+
+    def test_codex_clean_pdf_xlsx_pptx_not_checkable_become_safe(self) -> None:
+        cases = [
+            (PDF_CLEAN, [
+                "Top 5 customer segments - Q2 2026",
+                P1, "Enterprise", "$520", "Mid-market", "$410", "SMB", "$305",
+                "Startup", "$190", "Education", "$120",
+                "The ranking is complete and follows the displayed revenue values.",
+            ], "pdf-clean-codex"),
+            (XLSX_CLEAN, list(XLSX_MATERIAL) + [
+                "Note: gross margin improved 3 percentage points week over week.",
+            ], "xlsx-clean-codex"),
+            (PPTX_CLEAN, [
+                "Q2 operations review", "94%", "On-time deliveries in Q2",
+                "Appendix: delivery calculation",
+                "94 on-time deliveries / 100 total deliveries = 94%",
+            ], "pptx-clean-codex"),
+        ]
+        for report, quotes, run_id in cases:
+            with self.subTest(run_id=run_id), tempfile.TemporaryDirectory() as raw:
+                folder = pathlib.Path(raw)
+                claims = [{"id": f"L{i}", "quote": q} for i, q in enumerate(quotes, 1)]
+                checks = [
+                    {
+                        "id": f"C{i}",
+                        "claim_id": f"L{i}",
+                        "type": "semantic",
+                        "basis": "evidence",
+                        "verdict": "not_checkable",
+                        "importance": "material",
+                        "report_quote": q,
+                        "explanation": "No external source was supplied.",
+                    }
+                    for i, q in enumerate(quotes, 1)
+                ]
+                art, page = grade(
+                    folder, report, claims=claims, checks=checks,
+                    evidence_dir=None, run_id=run_id)
+                self.assertEqual(art["verdict"], "safe_to_share")
+                self.assertNotIn("<b>Next:</b>", page)
+                receipts = json.loads((folder / "receipts.json").read_text())
+                material = [
+                    row for row in receipts["claims"]
+                    if row.get("importance") == "material"]
+                self.assertTrue(material)
+                self.assertTrue(all(
+                    row.get("outcome") not in (None, "not_reached", "not_checkable")
+                    for row in material))
+
+    def test_codex_planted_major_is_fix_first_in_json_and_html(self) -> None:
+        cases = [
+            (PDF_PLANTED, [
+                "Top 5 customer segments - Q2 2026",
+                P1, "Enterprise", "$520", "SMB", "$305", "Mid-market", "$410",
+                "Startup", "$190", "Education", "$120",
+                "The ranking is presented as final for the quarter.",
+            ], P1, "pdf-planted-codex"),
+            (XLSX_PLANTED, list(XLSX_MATERIAL) + [X1], X1, "xlsx-planted-codex"),
+            (PPTX_PLANTED, [
+                "Q2 operations review", T1, "On-time deliveries in Q2",
+                "Appendix: delivery calculation",
+                "94 on-time deliveries / 100 total deliveries = 94%",
+            ], T1, "pptx-planted-codex"),
+        ]
+        for report, quotes, needle, run_id in cases:
+            with self.subTest(run_id=run_id), tempfile.TemporaryDirectory() as raw:
+                folder = pathlib.Path(raw)
+                claims = [{"id": f"L{i}", "quote": q} for i, q in enumerate(quotes, 1)]
+                checks = []
+                for i, q in enumerate(quotes, 1):
+                    if q == needle:
+                        second = {
+                            P1: "Mid-market",
+                            X1: "43.0%",
+                            T1: "94 on-time deliveries / 100 total deliveries = 94%",
+                        }[needle]
+                        row = contradicted_report(f"C{i}", f"L{i}", q, second)
+                        row["severity"] = "major"
+                        checks.append(row)
+                    else:
+                        checks.append({
+                            "id": f"C{i}",
+                            "claim_id": f"L{i}",
+                            "type": "semantic",
+                            "basis": "evidence",
+                            "verdict": "not_checkable",
+                            "importance": "material",
+                            "report_quote": q,
+                            "explanation": "No external source was supplied.",
+                        })
+                art, page = grade(
+                    folder, report, claims=claims, checks=checks,
+                    evidence_dir=None, run_id=run_id)
+                self.assertEqual(art["verdict"], "fix_first")
+                self.assertIn("<b>Next:</b>", page)
+                self.assertIn("FIX FIRST", page)
+                self.assertIn(needle.split()[0] if needle != T1 else "96%", page)
+                for row in art["evidence_checks"]:
+                    if row.get("verdict") == "contradicted":
+                        self.assertIn(row.get("severity"), {"high", "medium", "low"})
 
 
 if __name__ == "__main__":

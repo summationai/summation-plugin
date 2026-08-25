@@ -24,7 +24,8 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from html_arith import findings_doc, footing_findings, _Tables  # noqa: E402
-from inventory import visible_text_for  # noqa: E402
+from inventory import inventory_for, visible_text_for  # noqa: E402
+from internal import check_inventory  # noqa: E402
 
 
 def main() -> int:
@@ -64,6 +65,8 @@ def main() -> int:
     args.visible.write_text(visible if visible.endswith("\n") else visible + "\n")
     doc = findings_doc(
         args.report, findings, html=html, arithmetic_checks=arithmetic_checks)
+    inv = doc.get("inventory") or inventory_for(args.report)
+    doc["internal_outcomes"] = check_inventory(inv, visible)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(doc, indent=2) + "\n")
     print(f"extract: {len(doc.get('inventory', {}).get('items') or [])} inventory item(s) → {args.out}")
