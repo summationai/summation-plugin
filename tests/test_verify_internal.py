@@ -152,6 +152,26 @@ class SourceSnapshotInventoryTests(unittest.TestCase):
                 item = next(row for row in inv["items"] if row["displayed"] == line)
                 self.assertTrue(item.get("location"))
 
+    def test_unknown_source_snapshot_prose_is_material(self) -> None:
+        lines = (
+            "Source snapshot: conversion lagged target",
+            "Source snapshot: defects exceeded tolerance",
+        )
+        for line in lines:
+            with self.subTest(line=line):
+                self.assertEqual(
+                    inventory.source_snapshot_importance(line), "material")
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "report.md"
+            path.write_text("\n".join(lines) + "\n")
+            inv = inventory.inventory_for(path)
+            shown = [item["displayed"] for item in inv["items"]
+                     if item.get("importance") == "material"]
+            for line in lines:
+                self.assertIn(line, shown)
+                item = next(row for row in inv["items"] if row["displayed"] == line)
+                self.assertTrue(item.get("location"))
+
 
 class GitEvidenceTests(unittest.TestCase):
     def _load(self):

@@ -34,7 +34,7 @@ SPELLED_QTY = re.compile(
 SNAP_PREDICATE = re.compile(
     r"\b(?:active|missed|grew|declined|increased|decreased|was|is|"
     r"equals|were|improved|fell|rose|dropped|ranked|grown|fallen|"
-    r"equal)\b",
+    r"equal|lagged|exceeded|beat|versus|vs)\b",
     re.I,
 )
 SNAP_KPI = re.compile(
@@ -43,11 +43,9 @@ SNAP_KPI = re.compile(
     r"pipeline|nps|csat|revenue|sales|arr|mrr|headcount|backlog)\b",
     re.I,
 )
-PROVENANCE_NOUNS = frozenset({
-    "export", "extract", "dump", "feed", "pull", "snapshot", "warehouse",
-    "source", "crm", "salesforce", "snowflake", "postgres", "database",
-    "data", "file", "csv", "xlsx", "json", "parquet", "table", "sheet",
-    "workbook", "report", "log", "logs", "backup", "replica",
+SOURCE_OBJECT_NOUNS = frozenset({
+    "export", "extract", "file", "table", "dataset", "warehouse",
+    "database", "system", "snapshot",
 })
 TABLE_LOC_RE = re.compile(r"^table\d+$", re.I)
 READERS = {
@@ -203,8 +201,16 @@ def _source_path_label(text: str) -> bool:
         r"\.(json|jsonl|csv|xlsx|txt|md|parquet|log|sql|tsv)\b", compact, re.I))
 
 
+def _pure_source_identity(rest_no_dates: str) -> bool:
+    """True only with an explicit source-object noun or a file path."""
+    if _source_path_label(rest_no_dates):
+        return True
+    tokens = re.findall(r"[A-Za-z]+", rest_no_dates.lower())
+    return any(tok in SOURCE_OBJECT_NOUNS for tok in tokens)
+
+
 def source_snapshot_importance(shown: str) -> str | None:
-    """supporting only for a provenance noun phrase plus optional extraction date."""
+    """supporting only with positive proof of a pure source identity. Else material."""
     text = re.sub(r"\s+", " ", shown or "").strip()
     if not SOURCE_SNAP_HEAD.match(text):
         return None
@@ -219,16 +225,15 @@ def source_snapshot_importance(shown: str) -> str | None:
         return "material"
     if _source_path_label(rest_no_dates):
         return "supporting"
-    tokens = re.findall(r"[A-Za-z]+", rest_no_dates.lower())
-    kpis = SNAP_KPI.findall(rest_no_dates)
-    if kpis:
-        has_provenance = any(tok in PROVENANCE_NOUNS for tok in tokens)
-        extra = [str(item).lower() for item in kpis]
-        if not has_provenance:
+    if SNAP_KPI.search(rest_no_dates):
+        tokens = re.findall(r"[A-Za-z]+", rest_no_dates.lower())
+        extra = [str(item).lower() for item in SNAP_KPI.findall(rest_no_dates)]
+        has_object = any(tok in SOURCE_OBJECT_NOUNS for tok in tokens)
+        if not has_object or any(item not in {"revenue", "sales"} for item in extra):
             return "material"
-        if any(item not in {"revenue", "sales"} for item in extra):
-            return "material"
-    return "supporting"
+    if _pure_source_identity(rest_no_dates):
+        return "supporting"
+    return "material"
 
 
 def _bag_add(items: list, seen: set, kind: str, displayed: str, location: str,
