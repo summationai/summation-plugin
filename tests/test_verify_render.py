@@ -586,7 +586,7 @@ class RenderArtifactTests(unittest.TestCase):
             report = folder / "report.html"
             report.write_text(PLANTED.read_text())
             (folder / "live.json").write_text(
-                '{"on_hand": 10613, "as_of": "2026-08-23"}\n')
+                '{"units_now": 10613, "as_of": "2026-08-23"}\n')
             (folder / "note.json").write_text(
                 '{"note": "Both segments moved in the same direction."}\n')
             self.assertEqual(run_mod(html_arith, "html_arith.py", [
@@ -616,13 +616,14 @@ class RenderArtifactTests(unittest.TestCase):
                     "basis": "evidence",
                     "verdict": "changed_since_report",
                     "importance": "material",
-                    "report_quote": "Revenue is down 4.6% against the same week last year.",
+                    "report_quote": "10,481",
                     "evidence_file": "live.json",
-                    "evidence_json": [{"pointer": "/on_hand", "value": 10613}],
-                    "explanation": "Current on-hand is 10613 as of 2026-08-23.",
+                    "evidence_json": [{"pointer": "/units_now", "value": 10613}],
+                    "explanation": "Current units are 10613 as of 2026-08-23.",
                     "reconstruction_attempt": (
-                        "Queried inventory_history and the daily snapshot table; "
-                        "neither retains 2026-04-04 on-hand."
+                        "The source was re-queried with the week ending April 4 "
+                        "as the filter; the units source has no date column, so "
+                        "the April 4 value could not be rebuilt."
                     ),
                     "current_value": 10613,
                     "current_as_of": "2026-08-23",
