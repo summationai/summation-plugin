@@ -38,6 +38,8 @@ M4 = "The at-risk list is unchanged from the prior week."
 P1 = "Ranked from highest to lowest revenue."
 X1 = "Note: gross margin improved 3% week over week."
 T1 = "96%"
+PDF_SOURCE = "Source snapshot: CRM revenue export, 2026-07-05."
+MD_SOURCE = "Source snapshot: `evidence/project-status.json`."
 SPEAKER_NOTE = (
     "The headline must match 94 on-time deliveries out of 100 total."
 )
@@ -83,7 +85,10 @@ def grade(folder: pathlib.Path, report: pathlib.Path, *,
         shown = claim["quote"]
         item = by_shown[shown]
         claim["inventory_ids"] = [item["id"]]
-        claim.setdefault("importance", item.get("importance") or "material")
+        if claim.get("classification") == "supporting_provenance":
+            claim["importance"] = "supporting"
+        else:
+            claim.setdefault("importance", item.get("importance") or "material")
     (folder / "claims.json").write_text(json.dumps({"claims": claims}))
     (folder / "checks.json").write_text(json.dumps({"checks": checks}))
     ev = evidence_dir if evidence_dir is not None else folder
@@ -114,6 +119,19 @@ def grade(folder: pathlib.Path, report: pathlib.Path, *,
     (dest / "grade-artifact.json").write_text((out / "grade-artifact.json").read_text())
     (dest / "grade-artifact.html").write_text(page)
     return art, page
+
+
+def provenance_claim(cid: str, quote: str) -> dict:
+    return {
+        "id": cid,
+        "quote": quote,
+        "importance": "supporting",
+        "classification": "supporting_provenance",
+        "reason": (
+            "The line names only a source identity or extraction date. "
+            "It asserts no KPI, status, or other analytical result."
+        ),
+    }
 
 
 def confirmed_report(cid: str, claim_id: str, quote: str) -> dict:
@@ -213,6 +231,7 @@ class FormatGradeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
             claims = [{"id": f"L{i}", "quote": q} for i, q in enumerate(quotes, 1)]
+            claims.append(provenance_claim(f"L{len(quotes) + 1}", MD_SOURCE))
             checks = [
                 confirmed_report(f"C{i}", f"L{i}", q) for i, q in enumerate(quotes, 1)]
             art, page = grade(
@@ -232,6 +251,7 @@ class FormatGradeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
             claims = [{"id": f"L{i}", "quote": q} for i, (q, _) in enumerate(rows, 1)]
+            claims.append(provenance_claim(f"L{len(rows) + 1}", MD_SOURCE))
             checks = [row[1] for row in rows]
             art, page = grade(
                 folder, MD_PLANTED, claims=claims, checks=checks,
@@ -261,6 +281,7 @@ class FormatGradeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
             claims = [{"id": f"L{i}", "quote": q} for i, (q, _) in enumerate(rows, 1)]
+            claims.append(provenance_claim(f"L{len(rows) + 1}", MD_SOURCE))
             checks = [row[1] for row in rows]
             art, page = grade(
                 folder, MD_PLANTED, claims=claims, checks=checks,
@@ -294,11 +315,11 @@ class FormatGradeTests(unittest.TestCase):
             "Enterprise", "$520", "Mid-market", "$410", "SMB", "$305",
             "Startup", "$190", "Education", "$120",
             "The ranking is complete and follows the displayed revenue values.",
-            "Source snapshot: CRM revenue export, 2026-07-05.",
         ]
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
             claims = [{"id": f"L{i}", "quote": q} for i, q in enumerate(quotes, 1)]
+            claims.append(provenance_claim(f"L{len(quotes) + 1}", PDF_SOURCE))
             checks = [
                 confirmed_report(f"C{i}", f"L{i}", q) for i, q in enumerate(quotes, 1)]
             art, page = grade(
@@ -314,11 +335,11 @@ class FormatGradeTests(unittest.TestCase):
             "Enterprise", "$520", "SMB", "$305", "Mid-market", "$410",
             "Startup", "$190", "Education", "$120",
             "The ranking is presented as final for the quarter.",
-            "Source snapshot: CRM revenue export, 2026-07-05.",
         ]
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
             claims = [{"id": f"L{i}", "quote": q} for i, q in enumerate(quotes, 1)]
+            claims.append(provenance_claim(f"L{len(quotes) + 1}", PDF_SOURCE))
             checks = []
             for i, q in enumerate(quotes, 1):
                 if q == P1:
@@ -470,6 +491,8 @@ class FormatGradeTests(unittest.TestCase):
             with self.subTest(run_id=run_id), tempfile.TemporaryDirectory() as raw:
                 folder = pathlib.Path(raw)
                 claims = [{"id": f"L{i}", "quote": q} for i, q in enumerate(quotes, 1)]
+                if report == PDF_CLEAN:
+                    claims.append(provenance_claim(f"L{len(quotes) + 1}", PDF_SOURCE))
                 checks = [
                     {
                         "id": f"C{i}",
@@ -516,6 +539,8 @@ class FormatGradeTests(unittest.TestCase):
             with self.subTest(run_id=run_id), tempfile.TemporaryDirectory() as raw:
                 folder = pathlib.Path(raw)
                 claims = [{"id": f"L{i}", "quote": q} for i, q in enumerate(quotes, 1)]
+                if report == PDF_PLANTED:
+                    claims.append(provenance_claim(f"L{len(quotes) + 1}", PDF_SOURCE))
                 checks = []
                 for i, q in enumerate(quotes, 1):
                     if q == needle:
@@ -556,11 +581,11 @@ class FormatGradeTests(unittest.TestCase):
             "Enterprise", "$520", "Mid-market", "$410", "SMB", "$305",
             "Startup", "$190", "Education", "$120",
             "The ranking is complete and follows the displayed revenue values.",
-            "Source snapshot: CRM revenue export, 2026-07-05.",
         ]
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
             claims = [{"id": f"L{i}", "quote": q} for i, q in enumerate(quotes, 1)]
+            claims.append(provenance_claim(f"L{len(quotes) + 1}", PDF_SOURCE))
             checks = []
             for i, q in enumerate(quotes, 1):
                 if q == P1:
@@ -588,11 +613,11 @@ class FormatGradeTests(unittest.TestCase):
             "Enterprise", "$520", "SMB", "$305", "Mid-market", "$410",
             "Startup", "$190", "Education", "$120",
             "The ranking is presented as final for the quarter.",
-            "Source snapshot: CRM revenue export, 2026-07-05.",
         ]
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
             claims = [{"id": f"L{i}", "quote": q} for i, q in enumerate(quotes, 1)]
+            claims.append(provenance_claim(f"L{len(quotes) + 1}", PDF_SOURCE))
             checks = [
                 confirmed_report(f"C{i}", f"L{i}", q) for i, q in enumerate(quotes, 1)]
             art, page = grade(

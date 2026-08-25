@@ -22,35 +22,6 @@ COMPLETED = frozenset({
     "confirmed", "contradicted", "not_checkable", "changed_since_report", "error",
 })
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
-SOURCE_SNAP_HEAD = re.compile(r"(?i)^source snapshot\b")
-SPELLED_QTY = re.compile(
-    r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten|"
-    r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|"
-    r"eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|"
-    r"eighty|ninety|hundred|thousand|million|billion|dozen|half|"
-    r"both|several)\b",
-    re.I,
-)
-SNAP_PREDICATE = re.compile(
-    r"\b(?:active|missed|grew|declined|increased|decreased|was|is|"
-    r"equals|were|improved|fell|rose|dropped|ranked|grown|fallen|"
-    r"equal|lagged|exceeded|beat|versus|vs|stale|incomplete|missing|"
-    r"delayed|failed|current|corrupt|deprecated|unreliable|empty|"
-    r"partial|invalid|broken|outdated)\b",
-    re.I,
-)
-SOURCE_OBJECT_NOUNS = frozenset({
-    "export", "extract", "file", "table", "dataset", "warehouse",
-    "database", "system", "snapshot",
-})
-NEUTRAL_DESCRIPTORS = frozenset({
-    "revenue", "sales", "data", "order", "orders",
-})
-STATUS_ADJECTIVES = frozenset({
-    "corrupt", "deprecated", "unreliable", "empty", "stale", "incomplete",
-    "missing", "delayed", "failed", "partial", "invalid", "broken",
-    "outdated", "current", "active",
-})
 TABLE_LOC_RE = re.compile(r"^table\d+$", re.I)
 READERS = {
     ".html": "html",
@@ -196,76 +167,6 @@ def _html_items(path: pathlib.Path) -> list[dict]:
     return items
 
 
-def _unwrap_source_suffix(text: str) -> str:
-    compact = re.sub(r"\s+", " ", text or "").strip()
-    compact = compact.strip("`").strip()
-    compact = compact.rstrip(".,;:").strip()
-    compact = compact.strip("`").strip()
-    return compact
-
-
-def _entire_file_path(text: str) -> bool:
-    compact = _unwrap_source_suffix(text)
-    if not compact or " " in compact:
-        return False
-    return bool(re.fullmatch(
-        r"(?:[a-z][a-z0-9+.-]*://)?[\w./\\-]+\."
-        r"(json|jsonl|csv|xlsx|xls|txt|md|parquet|log|sql|tsv)",
-        compact, re.I))
-
-
-def _is_proper_name_or_acronym(token: str) -> bool:
-    if len(token) < 2 or not token[0].isalpha():
-        return False
-    if token.isupper() and token.isalpha():
-        return True
-    return token[0].isupper() and token[1:].isalnum()
-
-
-def _allowed_provenance_token(token: str) -> bool:
-    low = token.lower()
-    if low in STATUS_ADJECTIVES:
-        return False
-    if low in SOURCE_OBJECT_NOUNS or low in NEUTRAL_DESCRIPTORS:
-        return True
-    return _is_proper_name_or_acronym(token)
-
-
-def _pure_provenance_suffix(rest: str) -> bool:
-    """True only for a path/URI or a strict proper-name plus descriptor sequence."""
-    text = _unwrap_source_suffix(rest)
-    if not text:
-        return False
-    if _entire_file_path(text):
-        return True
-    date_at_end = re.search(r"(?:,|;|:)?\s*(\d{4}-\d{2}-\d{2})\s*$", text)
-    body = text
-    if date_at_end:
-        body = text[:date_at_end.start()].rstrip(" ,;:")
-        if DATE_RE.search(body):
-            return False
-    if re.search(r"[$£€%]", body) or re.search(r"\d", body):
-        return False
-    if SPELLED_QTY.search(body) or SNAP_PREDICATE.search(body):
-        return False
-    tokens = re.findall(r"[A-Za-z]+", body)
-    if not tokens or tokens[-1].lower() not in SOURCE_OBJECT_NOUNS:
-        return False
-    return all(_allowed_provenance_token(tok) for tok in tokens[:-1])
-
-
-def source_snapshot_importance(shown: str) -> str | None:
-    """supporting only when the entire suffix is a pure provenance identity."""
-    text = re.sub(r"\s+", " ", shown or "").strip()
-    if not SOURCE_SNAP_HEAD.match(text):
-        return None
-    rest = SOURCE_SNAP_HEAD.sub("", text, count=1)
-    rest = rest.lstrip(":- ").strip()
-    if _pure_provenance_suffix(rest):
-        return "supporting"
-    return "material"
-
-
 def _bag_add(items: list, seen: set, kind: str, displayed: str, location: str,
              importance: str = "material") -> None:
     shown = re.sub(r"\s+", " ", displayed).strip()
@@ -297,10 +198,6 @@ def _md_items(path: pathlib.Path) -> list[dict]:
         shown = re.sub(r"^[-*]\s+", "", line).strip()
         if not shown:
             continue
-        snap = source_snapshot_importance(shown)
-        if snap == "supporting":
-            _bag_add(items, seen, "md_source", shown, f"line{index}", "supporting")
-            continue
         _bag_add(items, seen, "md_line", shown, f"line{index}", "material")
     return items
 
@@ -331,10 +228,8 @@ def _pdf_items(path: pathlib.Path) -> tuple[list[dict], str, str | None]:
                 continue
             if re.fullmatch(r"\d{1,2}", shown):
                 continue
-            snap = source_snapshot_importance(shown)
-            importance = snap or "material"
-            kind = "pdf_source" if importance == "supporting" else "pdf_line"
-            _bag_add(items, seen, kind, shown, f"page{page_i}/line{line_i}", importance)
+            _bag_add(
+                items, seen, "pdf_line", shown, f"page{page_i}/line{line_i}", "material")
     visible = "\n".join(pages).strip()
     if not visible:
         return [], "", "no extractable PDF text"
@@ -388,14 +283,8 @@ def _xlsx_items(path: pathlib.Path) -> tuple[list[dict], str, str | None]:
                 numeric = isinstance(cell.value, (int, float)) and not isinstance(
                     cell.value, bool)
                 note = shown.lower().startswith("note:")
-                snap = source_snapshot_importance(shown)
-                if snap is not None:
-                    importance = snap
-                else:
-                    importance = "material" if numeric or note else "supporting"
+                importance = "material" if numeric or note else "supporting"
                 kind = "xlsx_note" if note else "xlsx_cell"
-                if snap == "supporting":
-                    kind = "xlsx_source"
                 _bag_add(
                     items, seen, kind, shown,
                     f"{sheet.title}/{cell.coordinate}", importance)

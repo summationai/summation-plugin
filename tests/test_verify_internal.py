@@ -39,14 +39,14 @@ T1 = "96%"
 
 @unittest.skipUnless(FIX.is_dir(), "alg-deploy fixtures are not present")
 class InternalCheckTests(unittest.TestCase):
-    def test_pdf_clean_confirms_rank_and_marks_source_supporting(self) -> None:
+    def test_pdf_clean_confirms_rank_and_inventories_source_line(self) -> None:
         path = FIX / "pdf-top5/clean/top-5-segments-clean.pdf"
         inv = extract_inventory(path)
         source = [
             item for item in inv["items"]
             if str(item.get("displayed") or "").lower().startswith("source snapshot")]
         self.assertTrue(source)
-        self.assertTrue(all(item.get("importance") == "supporting" for item in source))
+        self.assertTrue(all(item.get("importance") == "material" for item in source))
         outcomes = internal.check_inventory(inv)
         by_quote = {row["report_quote"]: row for row in outcomes}
         self.assertEqual(by_quote[P1]["verdict"], "confirmed")
@@ -99,125 +99,33 @@ class InternalCheckTests(unittest.TestCase):
 
 
 class SourceSnapshotInventoryTests(unittest.TestCase):
-    def test_analytical_source_snapshot_is_material(self) -> None:
-        line = "Source snapshot revenue was $10 million and declined 20%."
-        self.assertEqual(inventory.source_snapshot_importance(line), "material")
-        with tempfile.TemporaryDirectory() as raw:
-            path = pathlib.Path(raw) / "report.md"
-            path.write_text(line + "\n")
-            inv = inventory.inventory_for(path)
-            self.assertTrue(inv["items"])
-            material = [
-                item for item in inv["items"]
-                if item.get("importance") == "material"]
-            self.assertTrue(material)
-            self.assertTrue(any("$10 million" in item["displayed"] for item in material))
-            self.assertTrue(any(item.get("location") for item in material))
+    LINES = (
+        "Source snapshot: CRM revenue export, 2026-07-05",
+        "Source snapshot: warehouse stale",
+        "Source snapshot: dataset incomplete",
+        "Source snapshot: export missing rows",
+        "Source snapshot: active projects 12",
+        "Source snapshot: corrupt CRM database",
+        "Source snapshot: Funky warehouse",
+        "Source snapshot: conversion lagged target",
+    )
 
-    def test_pure_source_snapshot_label_is_supporting(self) -> None:
-        lines = (
-            "Source snapshot: CRM revenue export, 2026-07-05",
-            "Source snapshot: evidence/project-status.json",
-            "Source snapshot: `evidence/project-status.json`.",
-        )
-        for line in lines:
-            with self.subTest(line=line):
-                self.assertEqual(
-                    inventory.source_snapshot_importance(line), "supporting")
+    def test_inventories_all_source_snapshot_lines_as_material(self) -> None:
+        self.assertFalse(hasattr(inventory, "source_snapshot_importance"))
         with tempfile.TemporaryDirectory() as raw:
             path = pathlib.Path(raw) / "report.md"
-            path.write_text(lines[0] + "\n")
+            path.write_text("\n".join(self.LINES) + "\n")
             inv = inventory.inventory_for(path)
-            self.assertEqual(len(inv["items"]), 1)
-            self.assertEqual(inv["items"][0]["importance"], "supporting")
-            self.assertEqual(inv["items"][0]["displayed"], lines[0])
-
-    def test_source_snapshot_count_and_predicate_lines_are_material(self) -> None:
-        lines = (
-            "Source snapshot: active projects 12",
-            "Source snapshot: customer churn 7",
-            "Source snapshot: SLA missed for three customers",
-        )
-        for line in lines:
-            with self.subTest(line=line):
-                self.assertEqual(
-                    inventory.source_snapshot_importance(line), "material")
-        with tempfile.TemporaryDirectory() as raw:
-            path = pathlib.Path(raw) / "report.md"
-            path.write_text("\n".join(lines) + "\n")
-            inv = inventory.inventory_for(path)
-            shown = [item["displayed"] for item in inv["items"]
-                     if item.get("importance") == "material"]
-            for line in lines:
-                self.assertIn(line, shown)
-                item = next(row for row in inv["items"] if row["displayed"] == line)
+            by_shown = {item["displayed"]: item for item in inv["items"]}
+            ids = []
+            for line in self.LINES:
+                self.assertIn(line, by_shown)
+                item = by_shown[line]
+                self.assertEqual(item["importance"], "material")
+                self.assertTrue(item.get("id"))
                 self.assertTrue(item.get("location"))
-
-    def test_status_words_after_source_object_are_material(self) -> None:
-        lines = (
-            "Source snapshot: warehouse stale",
-            "Source snapshot: dataset incomplete",
-            "Source snapshot: export missing rows",
-        )
-        for line in lines:
-            with self.subTest(line=line):
-                self.assertEqual(
-                    inventory.source_snapshot_importance(line), "material")
-        with tempfile.TemporaryDirectory() as raw:
-            path = pathlib.Path(raw) / "report.md"
-            path.write_text("\n".join(lines) + "\n")
-            inv = inventory.inventory_for(path)
-            shown = [item["displayed"] for item in inv["items"]
-                     if item.get("importance") == "material"]
-            for line in lines:
-                self.assertIn(line, shown)
-                item = next(row for row in inv["items"] if row["displayed"] == line)
-                self.assertTrue(item.get("location"))
-
-    def test_status_adjectives_before_source_object_are_material(self) -> None:
-        lines = (
-            "Source snapshot: corrupt CRM database",
-            "Source snapshot: deprecated sales system",
-            "Source snapshot: unreliable warehouse",
-            "Source snapshot: empty orders table",
-            "Source snapshot: partial CRM export",
-            "Source snapshot: invalid dataset",
-            "Source snapshot: broken warehouse",
-            "Source snapshot: outdated Salesforce extract",
-            "Source snapshot: funky warehouse",
-        )
-        for line in lines:
-            with self.subTest(line=line):
-                self.assertEqual(
-                    inventory.source_snapshot_importance(line), "material")
-        with tempfile.TemporaryDirectory() as raw:
-            path = pathlib.Path(raw) / "report.md"
-            path.write_text("\n".join(lines) + "\n")
-            inv = inventory.inventory_for(path)
-            shown = [item["displayed"] for item in inv["items"]
-                     if item.get("importance") == "material"]
-            for line in lines:
-                self.assertIn(line, shown)
-
-    def test_unknown_source_snapshot_prose_is_material(self) -> None:
-        lines = (
-            "Source snapshot: conversion lagged target",
-            "Source snapshot: defects exceeded tolerance",
-        )
-        for line in lines:
-            with self.subTest(line=line):
-                self.assertEqual(
-                    inventory.source_snapshot_importance(line), "material")
-        with tempfile.TemporaryDirectory() as raw:
-            path = pathlib.Path(raw) / "report.md"
-            path.write_text("\n".join(lines) + "\n")
-            inv = inventory.inventory_for(path)
-            shown = [item["displayed"] for item in inv["items"]
-                     if item.get("importance") == "material"]
-            for line in lines:
-                self.assertIn(line, shown)
-                item = next(row for row in inv["items"] if row["displayed"] == line)
-                self.assertTrue(item.get("location"))
+                ids.append(item["id"])
+            self.assertEqual(len(ids), len(set(ids)))
 
 
 class GitEvidenceTests(unittest.TestCase):

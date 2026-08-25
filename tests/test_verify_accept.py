@@ -1222,6 +1222,192 @@ class AcceptTests(unittest.TestCase):
             art = json.loads((out / "grade-artifact.json").read_text())
             self.assertNotEqual(art["verdict"], "safe_to_share")
 
+    def test_supporting_provenance_accounts_source_snapshot(self) -> None:
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+        from test_verify_render import render, run_mod  # noqa: E402
+        quote = "Source snapshot: CRM revenue export, 2026-07-05"
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text(quote + "\n")
+            (folder / "findings.json").write_text(json.dumps({
+                "findings": [],
+                "inventory": {
+                    "reader": "md",
+                    "complete": True,
+                    "items": [{
+                        "id": "INV1",
+                        "kind": "md_line",
+                        "displayed": quote,
+                        "location": "line1",
+                        "importance": "material",
+                        "quote": quote,
+                    }],
+                    "reason": None,
+                },
+                "internal_outcomes": [],
+            }))
+            (folder / "claims.json").write_text(json.dumps({"claims": [{
+                "id": "L1",
+                "quote": quote,
+                "importance": "supporting",
+                "classification": "supporting_provenance",
+                "reason": (
+                    "The line names only the CRM revenue export and the "
+                    "extraction date. It asserts no analytical result."
+                ),
+                "inventory_ids": ["INV1"],
+            }]}))
+            (folder / "checks.json").write_text(json.dumps({"checks": []}))
+            self.assertEqual(run_accept(
+                "--report", str(folder / "report.md"),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--findings", str(folder / "findings.json"),
+                "--out", str(folder / "receipts.json"),
+            ), 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(payload["inventory"]["items"][0]["importance"], "supporting")
+            self.assertEqual(payload["inventory_missing"], [])
+            self.assertEqual(payload["claims"][0]["classification"], "supporting_provenance")
+            self.assertEqual(payload["claims"][0]["importance"], "supporting")
+            out = folder / "artifact"
+            self.assertEqual(run_mod(render, "render.py", [
+                "--findings", str(folder / "findings.json"),
+                "--layer2", str(folder / "receipts.json"),
+                "--out-dir", str(out),
+                "--run-id", "provenance-classified",
+            ]), 0)
+            art = json.loads((out / "grade-artifact.json").read_text())
+            self.assertEqual(art["verdict"], "safe_to_share")
+
+    def test_unclassified_source_snapshot_stays_material(self) -> None:
+        quote = "Source snapshot: CRM revenue export, 2026-07-05"
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text(quote + "\n")
+            (folder / "findings.json").write_text(json.dumps({
+                "findings": [],
+                "inventory": {
+                    "reader": "md",
+                    "complete": True,
+                    "items": [{
+                        "id": "INV1",
+                        "kind": "md_line",
+                        "displayed": quote,
+                        "location": "line1",
+                        "importance": "material",
+                        "quote": quote,
+                    }],
+                    "reason": None,
+                },
+            }))
+            (folder / "claims.json").write_text(json.dumps({"claims": []}))
+            (folder / "checks.json").write_text(json.dumps({"checks": []}))
+            self.assertEqual(run_accept(
+                "--report", str(folder / "report.md"),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--findings", str(folder / "findings.json"),
+                "--out", str(folder / "receipts.json"),
+            ), 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(payload["inventory"]["items"][0]["importance"], "material")
+            self.assertTrue(payload["inventory_missing"])
+            self.assertEqual(payload["inventory_missing"][0]["id"], "INV1")
+
+    def test_analytical_source_snapshot_as_material_claim(self) -> None:
+        quote = "Source snapshot: warehouse stale"
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text(quote + "\n")
+            (folder / "findings.json").write_text(json.dumps({
+                "findings": [],
+                "inventory": {
+                    "reader": "md",
+                    "complete": True,
+                    "items": [{
+                        "id": "INV1",
+                        "kind": "md_line",
+                        "displayed": quote,
+                        "location": "line1",
+                        "importance": "material",
+                        "quote": quote,
+                    }],
+                    "reason": None,
+                },
+            }))
+            (folder / "claims.json").write_text(json.dumps({"claims": [{
+                "id": "L1",
+                "quote": quote,
+                "importance": "material",
+                "classification": "material_claim",
+                "inventory_ids": ["INV1"],
+            }]}))
+            (folder / "checks.json").write_text(json.dumps({"checks": [{
+                "id": "C1",
+                "claim_id": "L1",
+                "type": "semantic",
+                "basis": "report",
+                "verdict": "not_checkable",
+                "importance": "material",
+                "report_quote": quote,
+                "explanation": "No evidence for warehouse freshness.",
+            }]}))
+            self.assertEqual(run_accept(
+                "--report", str(folder / "report.md"),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--findings", str(folder / "findings.json"),
+                "--out", str(folder / "receipts.json"),
+            ), 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            self.assertEqual(payload["claims"][0]["importance"], "material")
+            self.assertEqual(payload["claims"][0]["outcome"], "not_checkable")
+            self.assertEqual(payload["inventory"]["items"][0]["importance"], "material")
+
+    def test_supporting_provenance_rejects_inexact_quote(self) -> None:
+        quote = "Source snapshot: CRM revenue export, 2026-07-05"
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text(quote + "\nAlso warehouse stale.\n")
+            (folder / "findings.json").write_text(json.dumps({
+                "inventory": {
+                    "reader": "md",
+                    "complete": True,
+                    "items": [{
+                        "id": "INV1",
+                        "kind": "md_line",
+                        "displayed": quote,
+                        "location": "line1",
+                        "importance": "material",
+                        "quote": quote,
+                    }],
+                    "reason": None,
+                },
+            }))
+            (folder / "claims.json").write_text(json.dumps({"claims": [{
+                "id": "L1",
+                "quote": "CRM revenue export",
+                "importance": "supporting",
+                "classification": "supporting_provenance",
+                "reason": "Names a source.",
+                "inventory_ids": ["INV1"],
+            }]}))
+            (folder / "checks.json").write_text(json.dumps({"checks": []}))
+            self.assertEqual(run_accept(
+                "--report", str(folder / "report.md"),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--findings", str(folder / "findings.json"),
+                "--out", str(folder / "receipts.json"),
+            ), 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            self.assertTrue(payload["discarded_claims"])
+            self.assertIn(
+                "supporting_provenance quote is not the exact inventory text",
+                payload["discarded_claims"][0]["problems"])
+            self.assertEqual(payload["inventory"]["items"][0]["importance"], "material")
+
 
 if __name__ == "__main__":
     unittest.main()

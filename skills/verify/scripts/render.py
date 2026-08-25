@@ -94,7 +94,9 @@ def coverage_ok(raw: dict) -> bool:
                 1 for item in (inv.get("items") or [])
                 if item.get("importance") == "material")
         if n == 0:
-            return False
+            items = inv.get("items") or []
+            return bool(items) and all(
+                item.get("importance") == "supporting" for item in items)
         ext = cov.get("extractor_checkable_fraction")
         eng = cov.get("engine_checkable_fraction")
         return (
@@ -811,15 +813,19 @@ def ungraded_reason(raw: dict, layer2_named: bool, receipts: dict | list | None
         if row.get("outcome") in GROUNDED_OUTCOMES
     ]
     inv = payload.get("inventory") or raw.get("inventory") or {}
+    provenance = [
+        row for row in claims
+        if row.get("classification") == "supporting_provenance"
+        and row.get("importance") == "supporting"]
     if layer2_named:
         if semantic in UNFINISHED_SEMANTIC:
             return "semantic review did not complete"
-        if "claims" in payload and not grounded:
+        if "claims" in payload and not grounded and not provenance:
             return "no grounded material claims"
         checks = payload.get("checks") or payload.get("validated") or []
         if isinstance(receipts, list):
             checks = receipts
-        if not checks and not grounded:
+        if not checks and not grounded and not provenance:
             return "no grounded material claims"
         if inv.get("complete"):
             unfinished = [

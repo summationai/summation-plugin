@@ -31,6 +31,7 @@ REPORT_ONLY_TYPES = frozenset({"internal", "logic", "arithmetic", "units", "sele
 FALLBACK_VERDICTS = frozenset({
     "confirmed", "contradicted", "not_checkable", "changed_since_report",
 })
+CLAIM_CLASSIFICATIONS = frozenset({"material_claim", "supporting_provenance"})
 
 
 def load_known_verdicts(schema_path: pathlib.Path | None = None) -> frozenset:
@@ -581,11 +582,21 @@ def validate_claims(report: str, proposed: list) -> tuple[list, list]:
         cid = str(claim.get("id") or "").strip()
         quote = claim.get("quote", "")
         importance = claim.get("importance")
+        classification = claim.get("classification") or "material_claim"
+        reason = str(claim.get("reason") or "").strip()
         if not cid:
             problems.append("claim has no id")
         elif cid in seen:
             problems.append(f"claim id {cid!r} is duplicated")
-        if importance not in {"material", "supporting"}:
+        if classification not in CLAIM_CLASSIFICATIONS:
+            problems.append("claim classification is missing or unknown")
+        if classification == "supporting_provenance":
+            if importance not in {None, "supporting"}:
+                problems.append("supporting_provenance requires importance supporting")
+            importance = "supporting"
+            if not reason:
+                problems.append("supporting_provenance has no reason")
+        elif importance not in {"material", "supporting"}:
             problems.append("claim importance is missing or unknown")
         if not quote_in_text(str(quote), report):
             problems.append("claim quote not found in visible report text")
@@ -593,12 +604,19 @@ def validate_claims(report: str, proposed: list) -> tuple[list, list]:
             "id": cid,
             "quote": quote,
             "importance": importance if importance in {"material", "supporting"} else "material",
+            "classification": (
+                classification if classification in CLAIM_CLASSIFICATIONS
+                else "material_claim"),
         }
+        if reason:
+            row["reason"] = reason
         ids = claim_inventory_ids(claim)
         if ids:
             row["inventory_ids"] = ids
         elif "inventory_ids" in claim and claim.get("inventory_ids") not in (None, [], ""):
             problems.append("claim inventory_ids is not a list of ids")
+        if classification == "supporting_provenance" and len(ids) != 1:
+            problems.append("supporting_provenance requires exactly one inventory id")
         if problems:
             discarded.append({**row, "problems": problems})
         else:
@@ -981,10 +999,16 @@ def attach_claim_outcomes(claims: list, checks: list) -> list:
 def semantic_status(claims: list, checks: list, error: str | None = None) -> str:
     if error:
         return "failed"
-    if not checks:
-        return "not_run"
     material = [row for row in claims if row.get("importance") == "material"]
-    pool = material or claims
+    if not checks:
+        if material:
+            return "not_run"
+        if any(row.get("classification") == "supporting_provenance" for row in claims):
+            return "complete"
+        return "not_run"
+    pool = material or [
+        row for row in claims
+        if row.get("classification") != "supporting_provenance"]
     if not pool:
         return "complete"
     if all(row.get("outcome") not in (None, "not_reached") for row in pool):
@@ -1307,6 +1331,49 @@ def attach_internal_outcomes(validated: list, ledger: list,
     return kept, ledger, discarded
 
 
+def apply_host_classifications(ledger: list, discarded_claims: list,
+                               inventory: dict) -> list:
+    """Apply host supporting_provenance. Code does not guess meaning from words."""
+    by_id = {
+        str(item.get("id") or ""): item
+        for item in (inventory.get("items") or [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    used: set[str] = set()
+    kept = []
+    for claim in ledger:
+        if claim.get("classification") != "supporting_provenance":
+            kept.append(claim)
+            continue
+        problems = []
+        ids = claim_inventory_ids(claim)
+        if len(ids) != 1:
+            problems.append("supporting_provenance requires exactly one inventory id")
+        else:
+            iid = ids[0]
+            item = by_id.get(iid)
+            if item is None:
+                problems.append(f"inventory id {iid!r} is not in the inventory")
+            else:
+                shown = normalize(str(item.get("displayed") or item.get("quote") or ""))
+                quote = normalize(str(claim.get("quote") or ""))
+                if not quote or shown != quote:
+                    problems.append(
+                        "supporting_provenance quote is not the exact inventory text")
+                if iid in used:
+                    problems.append(
+                        f"inventory id {iid!r} already has supporting_provenance")
+                if not problems:
+                    used.add(iid)
+                    item["importance"] = "supporting"
+                    claim["importance"] = "supporting"
+        if problems:
+            discarded_claims.append({**claim, "problems": problems})
+        else:
+            kept.append(claim)
+    return kept
+
+
 def apply_inventory_importance(ledger: list, validated: list, inventory: dict) -> None:
     """Keep host importance from claiming a supporting inventory item as material."""
     by_id = {
@@ -1467,6 +1534,7 @@ def main() -> int:
     validated, ledger, internal_conflicts = attach_internal_outcomes(
         validated, ledger, internal_outcomes)
     discarded.extend(internal_conflicts)
+    ledger = apply_host_classifications(ledger, discarded_claims, inventory)
     apply_inventory_importance(ledger, validated, inventory)
     inventory_cover = cover(inventory, ledger)
     accepted_ids = {

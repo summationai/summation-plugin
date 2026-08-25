@@ -319,6 +319,11 @@
           "id": { "type": "string" },
           "quote": { "type": "string" },
           "importance": { "type": "string", "enum": ["material", "supporting"] },
+          "classification": {
+            "type": "string",
+            "enum": ["material_claim", "supporting_provenance"]
+          },
+          "reason": { "type": ["string", "null"] },
           "outcome": { "type": ["string", "null"] },
           "check_id": { "type": ["string", "null"] },
           "found_by": { "type": ["string", "null"] },
