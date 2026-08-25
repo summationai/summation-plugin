@@ -115,15 +115,42 @@ class SourceSnapshotInventoryTests(unittest.TestCase):
             self.assertTrue(any(item.get("location") for item in material))
 
     def test_pure_source_snapshot_label_is_supporting(self) -> None:
-        line = "Source snapshot: CRM revenue export, 2026-07-05"
-        self.assertEqual(inventory.source_snapshot_importance(line), "supporting")
+        lines = (
+            "Source snapshot: CRM revenue export, 2026-07-05",
+            "Source snapshot: `evidence/project-status.json`.",
+        )
+        for line in lines:
+            with self.subTest(line=line):
+                self.assertEqual(
+                    inventory.source_snapshot_importance(line), "supporting")
         with tempfile.TemporaryDirectory() as raw:
             path = pathlib.Path(raw) / "report.md"
-            path.write_text(line + "\n")
+            path.write_text(lines[0] + "\n")
             inv = inventory.inventory_for(path)
             self.assertEqual(len(inv["items"]), 1)
             self.assertEqual(inv["items"][0]["importance"], "supporting")
-            self.assertEqual(inv["items"][0]["displayed"], line)
+            self.assertEqual(inv["items"][0]["displayed"], lines[0])
+
+    def test_source_snapshot_count_and_predicate_lines_are_material(self) -> None:
+        lines = (
+            "Source snapshot: active projects 12",
+            "Source snapshot: customer churn 7",
+            "Source snapshot: SLA missed for three customers",
+        )
+        for line in lines:
+            with self.subTest(line=line):
+                self.assertEqual(
+                    inventory.source_snapshot_importance(line), "material")
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "report.md"
+            path.write_text("\n".join(lines) + "\n")
+            inv = inventory.inventory_for(path)
+            shown = [item["displayed"] for item in inv["items"]
+                     if item.get("importance") == "material"]
+            for line in lines:
+                self.assertIn(line, shown)
+                item = next(row for row in inv["items"] if row["displayed"] == line)
+                self.assertTrue(item.get("location"))
 
 
 class GitEvidenceTests(unittest.TestCase):

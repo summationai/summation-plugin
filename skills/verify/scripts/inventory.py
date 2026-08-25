@@ -23,16 +23,32 @@ COMPLETED = frozenset({
 })
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 SOURCE_SNAP_HEAD = re.compile(r"(?i)^source snapshot\b")
-ANALYTICAL_SNAP = re.compile(
-    r"\$|£|€|%|"
-    r"\bmillion\b|\bbillion\b|\bthousand\b|"
-    r"\bdeclined?\b|\bimproved?\b|\bincreased?\b|\bdecreased?\b|"
-    r"\bfell\b|\bfallen\b|\brose\b|\bgrew\b|\bgrown\b|\bdropped\b|"
-    r"\branked?\b|\bhighest\b|\blowest\b|"
-    r"\btop\s+\d+|"
-    r"\bpercent(?:age)?(?:\s+points?)?\b",
+SPELLED_QTY = re.compile(
+    r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|"
+    r"eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|"
+    r"eighty|ninety|hundred|thousand|million|billion|dozen|half|"
+    r"both|several)\b",
     re.I,
 )
+SNAP_PREDICATE = re.compile(
+    r"\b(?:active|missed|grew|declined|increased|decreased|was|is|"
+    r"equals|were|improved|fell|rose|dropped|ranked|grown|fallen|"
+    r"equal)\b",
+    re.I,
+)
+SNAP_KPI = re.compile(
+    r"\b(?:projects?|churn|customers?|sla|units?|orders?|inventory|"
+    r"margins?|profits?|counts?|totals?|kpis?|metrics?|bookings?|"
+    r"pipeline|nps|csat|revenue|sales|arr|mrr|headcount|backlog)\b",
+    re.I,
+)
+PROVENANCE_NOUNS = frozenset({
+    "export", "extract", "dump", "feed", "pull", "snapshot", "warehouse",
+    "source", "crm", "salesforce", "snowflake", "postgres", "database",
+    "data", "file", "csv", "xlsx", "json", "parquet", "table", "sheet",
+    "workbook", "report", "log", "logs", "backup", "replica",
+})
 TABLE_LOC_RE = re.compile(r"^table\d+$", re.I)
 READERS = {
     ".html": "html",
@@ -178,22 +194,39 @@ def _html_items(path: pathlib.Path) -> list[dict]:
     return items
 
 
+def _source_path_label(text: str) -> bool:
+    compact = text.strip().strip("`.").strip()
+    compact = compact.strip("`")
+    if "/" in compact or "\\" in compact:
+        return True
+    return bool(re.search(
+        r"\.(json|jsonl|csv|xlsx|txt|md|parquet|log|sql|tsv)\b", compact, re.I))
+
+
 def source_snapshot_importance(shown: str) -> str | None:
-    """supporting for a pure provenance label. material when the line asserts a KPI."""
+    """supporting only for a provenance noun phrase plus optional extraction date."""
     text = re.sub(r"\s+", " ", shown or "").strip()
     if not SOURCE_SNAP_HEAD.match(text):
         return None
     rest = SOURCE_SNAP_HEAD.sub("", text, count=1)
     rest = rest.lstrip(":- ").strip()
-    rest = DATE_RE.sub(" ", rest)
-    if ANALYTICAL_SNAP.search(rest):
+    rest_no_dates = DATE_RE.sub(" ", rest)
+    if re.search(r"[$£€%]", rest_no_dates):
         return "material"
-    for token in re.findall(r"\$?\d[\d,]*(?:\.\d+)?%?", rest):
-        if "$" in token or "%" in token:
+    if re.search(r"\d", rest_no_dates):
+        return "material"
+    if SPELLED_QTY.search(rest_no_dates) or SNAP_PREDICATE.search(rest_no_dates):
+        return "material"
+    if _source_path_label(rest_no_dates):
+        return "supporting"
+    tokens = re.findall(r"[A-Za-z]+", rest_no_dates.lower())
+    kpis = SNAP_KPI.findall(rest_no_dates)
+    if kpis:
+        has_provenance = any(tok in PROVENANCE_NOUNS for tok in tokens)
+        extra = [str(item).lower() for item in kpis]
+        if not has_provenance:
             return "material"
-        if re.fullmatch(r"\d{1,2}", token):
-            continue
-        if parse_number(token) is not None:
+        if any(item not in {"revenue", "sales"} for item in extra):
             return "material"
     return "supporting"
 

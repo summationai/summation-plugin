@@ -1112,6 +1112,116 @@ class AcceptTests(unittest.TestCase):
             self.assertTrue(all(
                 row.get("verdict") == "contradicted" for row in kept_l1))
 
+    def test_internal_confirm_does_not_cross_inventory_ids_by_quote(self) -> None:
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+        from test_verify_render import render, run_mod  # noqa: E402
+        quote1 = "Revenue $100"
+        quote2 = "Forecast says Revenue $100 but requires external audit"
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            (folder / "report.md").write_text(f"{quote1}\n{quote2}\n")
+            (folder / "findings.json").write_text(json.dumps({
+                "findings": [],
+                "inventory": {
+                    "reader": "md",
+                    "complete": True,
+                    "items": [
+                        {
+                            "id": "INV1",
+                            "kind": "md_line",
+                            "displayed": quote1,
+                            "location": "line1",
+                            "importance": "material",
+                            "quote": quote1,
+                        },
+                        {
+                            "id": "INV2",
+                            "kind": "md_line",
+                            "displayed": quote2,
+                            "location": "line2",
+                            "importance": "material",
+                            "quote": quote2,
+                        },
+                    ],
+                    "reason": None,
+                },
+                "internal_outcomes": [{
+                    "check_id": "ari_ratio_consistency",
+                    "family": "internal_arithmetic",
+                    "type": "arithmetic",
+                    "verdict": "confirmed",
+                    "basis": "report",
+                    "importance": "material",
+                    "inventory_ids": ["INV1"],
+                    "report_quote": quote1,
+                    "location": "line1",
+                    "explanation": "Displayed revenue matches the report.",
+                    "found_by": "internal",
+                }],
+            }))
+            (folder / "claims.json").write_text(json.dumps({
+                "claims": [
+                    {
+                        "id": "L1",
+                        "quote": quote1,
+                        "importance": "material",
+                        "inventory_ids": ["INV1"],
+                    },
+                    {
+                        "id": "L2",
+                        "quote": quote2,
+                        "importance": "material",
+                        "inventory_ids": ["INV2"],
+                    },
+                ],
+            }))
+            (folder / "checks.json").write_text(json.dumps({"checks": [
+                {
+                    "id": "C1",
+                    "claim_id": "L1",
+                    "type": "semantic",
+                    "basis": "report",
+                    "verdict": "not_checkable",
+                    "importance": "material",
+                    "report_quote": quote1,
+                    "explanation": "No external source was supplied.",
+                },
+                {
+                    "id": "C2",
+                    "claim_id": "L2",
+                    "type": "semantic",
+                    "basis": "evidence",
+                    "verdict": "not_checkable",
+                    "importance": "material",
+                    "report_quote": quote2,
+                    "explanation": "Forecast requires an external audit.",
+                },
+            ]}))
+            self.assertEqual(run_accept(
+                "--report", str(folder / "report.md"),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--findings", str(folder / "findings.json"),
+                "--out", str(folder / "receipts.json"),
+            ), 0)
+            payload = json.loads((folder / "receipts.json").read_text())
+            by_id = {row["id"]: row for row in payload["claims"]}
+            self.assertEqual(by_id["L1"]["outcome"], "confirmed")
+            self.assertEqual(by_id["L2"]["outcome"], "not_checkable")
+            self.assertFalse(any(
+                accept.is_deterministic_conflict(row)
+                and row.get("claim_id") == "L2"
+                for row in payload["discarded"]))
+            out = folder / "artifact"
+            self.assertEqual(run_mod(render, "render.py", [
+                "--findings", str(folder / "findings.json"),
+                "--layer2", str(folder / "receipts.json"),
+                "--out-dir", str(out),
+                "--run-id", "inv-quote-overlap",
+            ]), 0)
+            art = json.loads((out / "grade-artifact.json").read_text())
+            self.assertNotEqual(art["verdict"], "safe_to_share")
+
 
 if __name__ == "__main__":
     unittest.main()

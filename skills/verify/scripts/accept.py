@@ -1130,23 +1130,16 @@ def load_internal_outcomes(path: pathlib.Path | None) -> list:
 
 
 def _claims_for_internal(ledger: list, outcome: dict) -> list:
-    ids = set()
-    raw_ids = outcome.get("inventory_ids") or []
-    if isinstance(raw_ids, str):
-        raw_ids = [raw_ids]
-    for value in raw_ids:
-        item = str(value or "").strip()
-        if item:
-            ids.add(item)
-    quote = str(outcome.get("report_quote") or "")
+    """Match only on exact inventory-id intersection. No quote fallback."""
+    ids = set(_outcome_inventory_ids(outcome))
+    if not ids:
+        return []
     found = []
     for claim in ledger:
         claim_ids = set(claim_inventory_ids(claim))
-        if ids and claim_ids & ids:
-            found.append(claim)
+        if not claim_ids:
             continue
-        shown = str(claim.get("quote") or "")
-        if quote and (quote_in_text(quote, shown) or quote_in_text(shown, quote)):
+        if claim_ids & ids:
             found.append(claim)
     return found
 
@@ -1204,29 +1197,18 @@ def is_deterministic_conflict(row: dict) -> bool:
     )
 
 
-def _proven_internal(row: dict, claim: dict | None, by_iid: dict,
-                     outcomes: list) -> tuple[str | None, dict] | None:
+def _proven_internal(row: dict, claim: dict | None,
+                     by_iid: dict) -> tuple[str | None, dict] | None:
     ids = set(claim_inventory_ids(row))
     if claim is not None:
         ids.update(claim_inventory_ids(claim))
+    if not ids:
+        return None
     hits = [(iid, by_iid[iid]) for iid in ids if iid in by_iid]
-    if hits:
-        hits.sort(key=lambda item: 0 if item[1].get("verdict") == "contradicted" else 1)
-        return hits[0]
-    pool = [claim] if claim is not None else []
-    for outcome in outcomes:
-        if str(outcome.get("verdict") or "") not in DETERMINISTIC_VERDICTS:
-            continue
-        if pool and _claims_for_internal(pool, outcome):
-            iids = _outcome_inventory_ids(outcome)
-            return (iids[0] if iids else None, outcome)
-        quote = str(outcome.get("report_quote") or "")
-        shown = str((claim or {}).get("quote") or row.get("report_quote") or "")
-        if quote and shown and (
-                quote_in_text(quote, shown) or quote_in_text(shown, quote)):
-            iids = _outcome_inventory_ids(outcome)
-            return (iids[0] if iids else None, outcome)
-    return None
+    if not hits:
+        return None
+    hits.sort(key=lambda item: 0 if item[1].get("verdict") == "contradicted" else 1)
+    return hits[0]
 
 
 def attach_internal_outcomes(validated: list, ledger: list,
@@ -1250,7 +1232,7 @@ def attach_internal_outcomes(validated: list, ledger: list,
     kept: list = []
     for row in validated:
         claim = claims_by_id.get(str(row.get("claim_id") or ""))
-        hit = _proven_internal(row, claim, by_iid, outcomes)
+        hit = _proven_internal(row, claim, by_iid)
         if hit is None:
             kept.append(row)
             continue
