@@ -219,7 +219,7 @@ def _public_layer2(layer2: list[dict] | None) -> list[dict]:
                          if verdict == "contradicted" else None),
             "report_quote": str(f.get("report_quote") or ""),
             "report_quote_2": f.get("report_quote_2"),
-            "explanation": str(f.get("explanation") or ""),
+            "explanation": public_explanation(f),
             "claim_id": f.get("claim_id"),
             "location": f.get("location"),
             "metric_label": f.get("metric_label"),
@@ -721,6 +721,28 @@ def customer_verdict(verdict: str) -> str:
     return public_verdict(verdict)
 
 
+def public_explanation(check: dict) -> str:
+    """Mechanical shareable explanation. Never copy host-authored prose."""
+    verdict = str(check.get("verdict") or "")
+    quote = str(check.get("report_quote") or "").strip()
+    named = f'The report claim "{quote}"' if quote else "The report claim"
+    if verdict == "confirmed":
+        return f"{named} is confirmed."
+    if verdict == "contradicted":
+        return f"{named} is contradicted."
+    if verdict == "not_checkable":
+        return f"{named} could not be checked."
+    if verdict == "changed_since_report":
+        if quote:
+            return f'Today\'s value differs from the report claim "{quote}".'
+        return "Today's value differs from the report claim."
+    if verdict == "error":
+        return f"{named} is wrong."
+    if verdict:
+        return f"{named} has verdict {verdict}."
+    return f"{named} was graded."
+
+
 def _finding_quantity(finding: dict):
     detail = finding.get("detail") or finding.get("evidence") or {}
     if isinstance(detail, dict) and "stated" in detail:
@@ -871,7 +893,7 @@ def where_from(location) -> str:
 
 
 def evidence_value_line(check: dict) -> str:
-    return html.escape(str(check.get("explanation") or "checked"))
+    return html.escape(public_explanation(check))
 
 
 def receipt_block(report_says: str, evidence_html: str, report_label: str = "Report says",
@@ -1184,8 +1206,7 @@ def html_of(art: dict, raw: dict | None = None,
             f"<h3>{card_title(check, 'error')}</h3>"
             f"{location_line(check)}"
             + receipt_block(curly(check.get("report_quote") or ""), evidence_value_line(check))
-            + (f"<p>{html.escape(check.get('explanation') or '')}</p>"
-               if check.get("explanation") else "")
+            + f"<p>{html.escape(public_explanation(check))}</p>"
             + '<div class="machine">Checked by a program: the report quote and the evidence value do not match.</div>'
             "</div>"
         )
@@ -1195,8 +1216,7 @@ def html_of(art: dict, raw: dict | None = None,
             f'<span class="tag">{html.escape(str(check.get("verdict") or "ERROR").upper())}</span>'
             f"<h3>{html.escape(check.get('report_quote') or 'Finding')}</h3>"
             f"{location_line(check)}"
-            + (f"<p>{html.escape(check.get('explanation') or '')}</p>"
-               if check.get("explanation") else "")
+            + f"<p>{html.escape(public_explanation(check))}</p>"
             + f'<div class="machine">Checked by a program: {html.escape(str(check.get("verdict")))}.</div>'
             "</div>"
         )
@@ -1217,14 +1237,9 @@ def html_of(art: dict, raw: dict | None = None,
         if as_of:
             machine = "Checked by a program: the report value was compared with the live query result."
             ev_label = "Source says"
-            date_bit = pretty_date(check.get("current_as_of") or report_date or iso_date)
-            explain = (
-                f"This value is checked as of {html.escape(date_bit)}, not as of today."
-            )
         else:
             machine = "Checked by a program: the report quote and the evidence value match."
             ev_label = "Evidence says"
-            explain = check.get("explanation") or ""
         confirm_cards.append(
             '<div class="card ok" data-kind="confirmed">'
             '<span class="tag">CONFIRMED</span>'
@@ -1235,7 +1250,7 @@ def html_of(art: dict, raw: dict | None = None,
                 evidence_value_line(check),
                 evidence_label=ev_label,
             )
-            + (f"<p>{explain if as_of else html.escape(str(explain))}</p>" if explain else "")
+            + f"<p>{html.escape(public_explanation(check))}</p>"
             + f'<div class="machine">{machine}</div>'
             "</div>"
         )
@@ -1244,8 +1259,7 @@ def html_of(art: dict, raw: dict | None = None,
         n_hidden = len(hidden_confirmed)
         confirm_html += (
             f'<p class="sectionlede" style="margin-top:12px">The other {spell_count(n_hidden)} '
-            f"confirmed {'claim' if n_hidden == 1 else 'claims'} are listed under technical detail, "
-            "with their receipts.</p>"
+            f"confirmed {'claim' if n_hidden == 1 else 'claims'} are listed under technical detail.</p>"
         )
     sections.append(
         '<section data-section="confirmed">'
@@ -1261,7 +1275,6 @@ def html_of(art: dict, raw: dict | None = None,
             found = _re.search(r"\$?-?\d[\d,]*(?:\.\d+)?%?", quote)
             report_val = figure(found.group(0)) if found else quote
             report_label = f"Report, {html.escape(report_date)}" if report_date else "Report"
-            explain = str(check.get("explanation") or "")
             csr_cards.append(
                 '<div class="card chg" data-kind="today-differs">'
                 '<span class="tag">TODAY DIFFERS</span>'
@@ -1271,10 +1284,9 @@ def html_of(art: dict, raw: dict | None = None,
                 f'<div class="box"><div class="bl">{report_label}</div>'
                 f'<div class="bv">{html.escape(report_val)}</div></div>'
                 "</div>"
-                + (f"<p>{html.escape(explain)}</p>" if explain else "")
+                + f"<p>{html.escape(public_explanation(check))}</p>"
                 + '<div class="machine">Checked by a program: the report value was compared with a later value.</div>'
                 + f'<div class="q" hidden>{html.escape(check.get("report_quote") or "")}</div>'
-                + f'<div class="q" hidden>{html.escape(check.get("explanation") or "")}</div>'
                 "</div>"
             )
         sections.append(
@@ -1286,11 +1298,10 @@ def html_of(art: dict, raw: dict | None = None,
 
     nc_items = []
     for check in not_checkable:
-        reason = check.get("explanation") or "No evidence file covers this claim."
         nc_items.append(
             "<li><span class=\"w\"><strong>"
             f"{curly(check.get('report_quote') or 'Claim')}</strong> "
-            f"{html.escape(str(reason))}</span></li>"
+            f"{html.escape(public_explanation(check))}</span></li>"
         )
     for row in unreached:
         nc_items.append(
@@ -1341,7 +1352,7 @@ def html_of(art: dict, raw: dict | None = None,
         live_text = "Ran."
     else:
         live_text = "Did not run."
-    ev_text = "Private receipts stay in receipts.json."
+    ev_text = "Checked against the evidence supplied with the report."
     checked_n = n_err + n_ok + n_csr
     claims_text = (
         f"Every headline figure, table total, and named metric counts as a claim; "
@@ -1386,15 +1397,13 @@ def html_of(art: dict, raw: dict | None = None,
     tech_list = (
         "<p>The other confirmed claims:</p><ul>" + "".join(tech_bits) + "</ul>"
         if hidden_confirmed else
-        ("<p>Confirmed receipts:</p><ul>" + "".join(tech_bits) + "</ul>" if tech_bits else "")
+        ("<p>Confirmed claims:</p><ul>" + "".join(tech_bits) + "</ul>" if tech_bits else "")
     )
     technical = (
         "<details><summary>Technical detail</summary>"
-        "<p>Every result above carries a receipt in the private run record. "
-        "A claim with no accepted check is reported under "
+        "<p>A claim with no accepted check is listed under "
         "&ldquo;What we could not check, and why.&rdquo;</p>"
         f"{tech_list}"
-        "<p>Full check-by-check receipts: <code>receipts.json</code> in the run folder next to the report.</p>"
         "</details>"
     )
 

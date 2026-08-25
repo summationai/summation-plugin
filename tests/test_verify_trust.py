@@ -14,7 +14,7 @@ SENTINEL = "SECRET_EVIDENCE_TOKEN"
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.insert(0, str(SCRIPTS))
-from test_verify_render import run_mod, accept, render, html_arith  # noqa: E402
+from test_verify_render import PLANTED, run_mod, accept, render, html_arith  # noqa: E402
 import inventory  # noqa: E402
 
 PROMISE_WORDS = (
@@ -574,8 +574,7 @@ class TrustCorrectionTests(unittest.TestCase):
                 art = json.loads((out / "grade-artifact.json").read_text())
                 self.assertEqual(art["verdict"], expected)
                 page = (out / "grade-artifact.html").read_text()
-                if expected == "safe_to_share":
-                    self.assertNotIn("<b>Next:</b>", page)
+                self.assertNotIn("<b>Next:</b>", page)
                 blob = (
                     (out / "grade-artifact.json").read_text() + page
                 ).lower()
@@ -584,6 +583,139 @@ class TrustCorrectionTests(unittest.TestCase):
                 self.assertNotIn(MALICIOUS_SUMMARY.lower(), blob)
                 self.assertNotIn(MALICIOUS_ACTION.lower(), blob)
                 self.assertNotIn("presentation", art)
+
+    def test_run_shaped_host_prose_stays_private(self) -> None:
+        internal_path = "/var/summation/INTERNAL_PATH/report.html"
+        pointer = "/units_now"
+        leaks = (
+            "q3.json", "live-units.json", "receipts.json",
+            internal_path, pointer, SENTINEL,
+        )
+        leak = " ".join(leaks)
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            report = folder / "report.html"
+            report.write_text(PLANTED.read_text())
+            (folder / "q3.json").write_text(
+                json.dumps({"revenue_yoy": 0.098, "units": 10481, SENTINEL: SENTINEL})
+                + "\n")
+            (folder / "live-units.json").write_text(
+                json.dumps({"units_now": 10613, "queried_at": "2026-08-23"}) + "\n")
+            self.assertEqual(run_mod(html_arith, "html_arith.py", [
+                "--report", str(report),
+                "--out", str(folder / "findings.json"),
+            ]), 0)
+            findings = json.loads((folder / "findings.json").read_text())
+            claims = []
+            checks = []
+            for index, item in enumerate(findings["inventory"]["items"], 1):
+                shown = item["displayed"]
+                cid = f"L{index}"
+                claims.append({
+                    "id": cid,
+                    "quote": shown,
+                    "importance": "material",
+                    "inventory_ids": [item["id"]],
+                })
+                row = {
+                    "id": f"C{index}",
+                    "claim_id": cid,
+                    "type": "semantic",
+                    "importance": "material",
+                    "report_quote": shown,
+                    "explanation": leak,
+                }
+                if shown == "10,481":
+                    row.update({
+                        "basis": "evidence",
+                        "verdict": "confirmed",
+                        "evidence_file": "q3.json",
+                        "evidence_json": [{"pointer": "/units", "value": 10481}],
+                    })
+                elif shown == "4.6%":
+                    row.update({
+                        "basis": "evidence",
+                        "verdict": "contradicted",
+                        "severity": "high",
+                        "evidence_file": "q3.json",
+                        "evidence_json": [{"pointer": "/revenue_yoy", "value": 0.098}],
+                    })
+                else:
+                    row.update({
+                        "basis": "report",
+                        "verdict": "not_checkable",
+                    })
+                checks.append(row)
+            (folder / "claims.json").write_text(json.dumps({"claims": claims}))
+            (folder / "checks.json").write_text(json.dumps({
+                "checks": checks,
+                "presentation": {
+                    "summary": leak,
+                    "check_ids": [checks[0]["id"]],
+                    "actions": [{
+                        "id": "A1",
+                        "text": leak,
+                        "report_quote": "10,481",
+                        "check_ids": [checks[0]["id"]],
+                    }],
+                    "limits": [{
+                        "id": "L1",
+                        "text": leak,
+                        "report_quote": "10,481",
+                        "check_ids": [checks[0]["id"]],
+                    }],
+                },
+            }))
+            findings["source"]["path"] = internal_path
+            (folder / "findings.json").write_text(json.dumps(findings))
+            self.assertEqual(run_mod(accept, "accept.py", [
+                "--report", str(report),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--findings", str(folder / "findings.json"),
+                "--evidence-dir", str(folder),
+                "--out", str(folder / "receipts.json"),
+            ]), 0)
+            receipts_text = (folder / "receipts.json").read_text()
+            for item in leaks:
+                self.assertIn(item, receipts_text, item)
+            (folder / "source.json").write_text(json.dumps({
+                "status": "complete",
+                "error": None,
+                "provider": "sum-api",
+                "profile": leak,
+                "source_identity": {"path": internal_path},
+                "suggested_source": leak,
+                "generated_at": "2026-08-25T00:00:00Z",
+                "tables": ["q3.json", "live-units.json"],
+                "confirmed": 1,
+                "contradicted": 0,
+                "not_run": 0,
+                "checks": [{"id": "SRC1", "pointer": pointer, "secret": SENTINEL}],
+            }))
+            out = folder / "artifact"
+            self.assertEqual(run_mod(render, "render.py", [
+                "--findings", str(folder / "findings.json"),
+                "--layer2", str(folder / "receipts.json"),
+                "--source", str(folder / "source.json"),
+                "--out-dir", str(out),
+                "--run-id", "privacy-run",
+            ]), 0)
+            art_path = out / "grade-artifact.json"
+            html_path = out / "grade-artifact.html"
+            public = art_path.read_text() + html_path.read_text()
+            for item in leaks:
+                self.assertNotIn(item, public, item)
+            art = json.loads(art_path.read_text())
+            self.assertEqual(art["verdict"], "fix_first")
+            for row in art.get("evidence_checks") or []:
+                self.assertEqual(row.get("explanation"), render.public_explanation(row))
+                self.assertNotIn("q3.json", row.get("explanation") or "")
+            page = html_path.read_text()
+            self.assertIn("9,000", page)
+            self.assertIn("FIX FIRST", page)
+            self.assertIn("<b>Next:</b>", page)
+            self.assertNotIn("receipts.json", page)
 
     def test_shareable_artifact_has_no_schedule_promise(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

@@ -1,6 +1,7 @@
 """Fail-closed artifact for the verify skill."""
 from __future__ import annotations
 
+import html
 import importlib.util
 import json
 import pathlib
@@ -388,15 +389,20 @@ class HtmlParityTests(unittest.TestCase):
                     f"{row['verdict']} quote missing from HTML",
                 )
                 self.assertIn(
+                    html.escape(render.public_explanation(row)), page,
+                    f"{row['verdict']} mechanical explanation missing from HTML",
+                )
+                self.assertNotIn(
                     row["explanation"], page,
-                    f"{row['verdict']} explanation missing from HTML",
+                    f"{row['verdict']} host explanation leaked into HTML",
                 )
 
     def test_unhandled_verdict_still_renders_a_card(self) -> None:
         row = _check("unmodeled_verdict")
         page = render.html_of(_minimal_art([row]))
         self.assertIn(row["report_quote"], page)
-        self.assertIn(row["explanation"], page)
+        self.assertIn(html.escape(render.public_explanation(row)), page)
+        self.assertNotIn(row["explanation"], page)
         self.assertIn("unmodeled_verdict", page)
 
     def test_html_has_exactly_one_next_block(self) -> None:
@@ -758,8 +764,8 @@ class RenderArtifactTests(unittest.TestCase):
             self.assertIn("Today&rsquo;s value differs", page)
             self.assertNotIn("changed since", page.lower())
             self.assertNotIn("differs from source", page.lower())
-            self.assertIn("10613", page)
-            self.assertIn("2026-08-23", page)
+            self.assertNotIn("10613", page)
+            self.assertIn("10,481", page)
             self.assertEqual(page.count('class="next"') + page.count("class='next'"), 1)
             self.assertGreaterEqual(art["evidence_coverage"]["document_claims_total"], 1)
             assert_page_structure(self, page, expect_errors=True, expect_csr=True)
