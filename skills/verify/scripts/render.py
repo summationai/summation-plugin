@@ -431,7 +431,7 @@ def ledger_verdict(raw: dict) -> str:
     return "safe_to_share"
 
 
-def _serialize_verification(raw: dict) -> dict:
+def _serialize_verification(raw: dict, *, sources: list[dict]) -> dict:
     supplied = raw.get("verification")
     if not isinstance(supplied, dict) or set(supplied) != {
         "document", "semantic", "live_source",
@@ -448,7 +448,15 @@ def _serialize_verification(raw: dict) -> dict:
         if detail is not None:
             raise SystemExit(
                 f"render: verification.{name}.detail cannot enter public output")
-        out[name] = {"status": row["status"], "detail": None}
+        if name != "live_source":
+            out[name] = {"status": row["status"], "detail": None}
+    out["live_source"] = {
+        "status": (
+            "complete" if any(row["kind"] == "live_tool" for row in sources)
+            else "not_run"
+        ),
+        "detail": None,
+    }
     return out
 
 
@@ -483,12 +491,7 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
     if verdict not in ROOT_VERDICTS:
         raise SystemExit("render: material ledger produced an invalid verdict")
     cov = coverage(raw)
-    verification = _serialize_verification(raw)
-    has_live_source = any(row["kind"] == "live_tool" for row in retained_sources)
-    if has_live_source and verification["live_source"]["status"] != "complete":
-        raise SystemExit("render: live_tool source requires exact complete live_source status")
-    if not has_live_source and verification["live_source"]["status"] == "complete":
-        raise SystemExit("render: static sources cannot declare complete live_source status")
+    verification = _serialize_verification(raw, sources=retained_sources)
     artifact = {
         "schema_version": SCHEMA_VERSION,
         "run_id": str(run_id),

@@ -235,6 +235,19 @@ def _ledger_problems(artifact: dict) -> list[str]:
     for name, row in (artifact.get("verification") or {}).items():
         if isinstance(row, dict) and row.get("detail") is not None:
             problems.append(f"verification.{name}.detail entered public output")
+    expected_live_status = (
+        "complete" if any(
+            isinstance(row, dict) and row.get("kind") == "live_tool"
+            for row in artifact.get("sources") or []
+        ) else "not_run"
+    )
+    if (artifact.get("verification") or {}).get("live_source") != {
+        "status": expected_live_status,
+        "detail": None,
+    }:
+        problems.append(
+            "verification.live_source does not match retained source metadata"
+        )
     return problems
 
 
@@ -429,6 +442,12 @@ def mutate_static_evidence_to_live(artifact: dict) -> dict:
 def mutate_inject_verification_detail(artifact: dict) -> dict:
     out = _mutate(artifact)
     out["verification"]["document"]["detail"] = "Machine-authored detail."
+    return out
+
+
+def mutate_static_source_claims_live_complete(artifact: dict) -> dict:
+    out = _mutate(artifact)
+    out["verification"]["live_source"] = {"status": "complete", "detail": None}
     return out
 
 

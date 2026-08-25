@@ -425,19 +425,45 @@ class SchemaAndSerializationTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "bad schema_version"):
             render.validate_artifact(legacy)
 
-    def test_verification_statuses_are_exact_and_public_detail_is_rejected(self) -> None:
+    def test_supplied_file_mechanically_emits_live_source_not_run(self) -> None:
         raw = raw_for([accepted_check(1)])
-        expected = copy.deepcopy(raw["verification"])
+        raw["verification"]["live_source"]["status"] = "failed"
         art = render.artifact_from_findings(
-            raw, run_id="verification", generated_at="2026-08-25T13:10:00Z",
+            raw, run_id="supplied", generated_at="2026-08-25T13:10:00Z",
             layer2=[accepted_check(1)],
         )
-        self.assertEqual(art["verification"], expected)
-        raw["verification"] = {
-            "document": {"status": "complete", "detail": "Agent supplied document status."},
-            "semantic": {"status": "complete", "detail": "Agent supplied semantic status."},
-            "live_source": {"status": "not_run", "detail": None},
-        }
+        self.assertEqual(
+            art["verification"]["live_source"],
+            {"status": "not_run", "detail": None},
+        )
+
+    def test_live_tool_mechanically_emits_live_source_complete(self) -> None:
+        source = retained_source(kind="live_tool")
+        raw = raw_for([accepted_check(1)], sources=[source])
+        raw["verification"]["live_source"]["status"] = "not_run"
+        art = render.artifact_from_findings(
+            raw, run_id="live", generated_at="2026-08-25T13:10:00Z",
+            layer2=[accepted_check(1)],
+        )
+        self.assertEqual(
+            art["verification"]["live_source"],
+            {"status": "complete", "detail": None},
+        )
+
+    def test_static_source_cannot_make_live_source_complete(self) -> None:
+        raw = raw_for([accepted_check(1)], sources=[retained_source()])
+        raw["verification"]["live_source"]["status"] = "complete"
+        art = render.artifact_from_findings(
+            raw, run_id="static", generated_at="2026-08-25T13:10:00Z",
+            layer2=[accepted_check(1)],
+        )
+        self.assertEqual(art["verification"]["live_source"]["status"], "not_run")
+
+    def test_verification_detail_cannot_enter_public_output(self) -> None:
+        raw = raw_for([accepted_check(1)])
+        raw["verification"]["live_source"]["detail"] = (
+            "A customer-facing sentence about source execution."
+        )
         with self.assertRaises(SystemExit):
             render.artifact_from_findings(
                 raw, run_id="verification", generated_at="2026-08-25T13:10:00Z",

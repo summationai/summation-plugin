@@ -370,6 +370,44 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "required": ["sources"],
+        "properties": {
+          "sources": {
+            "contains": {
+              "type": "object",
+              "required": ["kind"],
+              "properties": {"kind": {"const": "live_tool"}}
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "verification": {
+            "properties": {
+              "live_source": {
+                "properties": {"status": {"const": "complete"}}
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "verification": {
+            "properties": {
+              "live_source": {
+                "properties": {"status": {"const": "not_run"}}
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "publicOperand": {
       "type": "object",

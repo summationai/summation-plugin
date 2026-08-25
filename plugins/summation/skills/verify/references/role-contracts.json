@@ -47,6 +47,14 @@
       ]
     }
   },
+  "mechanical_outputs": {
+    "verification.live_source": {
+      "input": "accepted sources[].kind",
+      "live_tool_present": {"status": "complete", "detail": null},
+      "otherwise": {"status": "not_run", "detail": null},
+      "host_authored": false
+    }
+  },
   "routes": {
     "native_subagents": {
       "primary": true,

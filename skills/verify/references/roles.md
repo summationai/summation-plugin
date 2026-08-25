@@ -31,6 +31,8 @@ The claim input is the coordinator's unchanged claim-taker output, including `pu
 
 Save every tool result before use. A live result records the exact retrieval time, tool, and safe arguments. A supplied file has no live retrieval metadata. Do not turn an internal candidate or arithmetic-use marker into a confirmation.
 
+The evidence verifier authors retained source records, verdicts, labels, and receipts. It does not author `verification.live_source`: accepted source metadata drives that field mechanically. At least one validated `live_tool` source emits `complete`; when no validated `live_tool` source is retained, it emits `not_run`; public detail remains null.
+
 ## Host support
 
 Use native subagents as the primary path when the host supports them. The coordinator remains the only writer of merged run files. If native subagents are unavailable, perform claim-taking and evidence verification sequentially with the same input schema and the same output schema. Both routes use the identical stage contracts in [role-contracts.json](role-contracts.json); only the execution topology changes.

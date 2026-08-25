@@ -117,6 +117,17 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(native["stages"], sequential["stages"])
         self.assertEqual(native["input_contracts"], sequential["input_contracts"])
         self.assertEqual(native["output_contracts"], sequential["output_contracts"])
+        live_status = contract["mechanical_outputs"]["verification.live_source"]
+        self.assertEqual(live_status["input"], "accepted sources[].kind")
+        self.assertEqual(
+            live_status["live_tool_present"],
+            {"status": "complete", "detail": None},
+        )
+        self.assertEqual(
+            live_status["otherwise"],
+            {"status": "not_run", "detail": None},
+        )
+        self.assertFalse(live_status["host_authored"])
 
     def test_connected_path_is_consent_then_addison_once(self) -> None:
         text = skill("verify")

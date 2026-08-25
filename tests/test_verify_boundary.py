@@ -94,14 +94,20 @@ def evidence_check() -> dict:
     }
 
 
-def public_artifact(checks: list[dict]) -> dict:
+def public_artifact(checks: list[dict], *, source_kind: str = "supplied_file") -> dict:
     source = {
         "id": "project-status",
-        "kind": "supplied_file",
+        "kind": source_kind,
         "label": "Project status snapshot",
         "evidence_file": "project-status.json",
         "result_sha256": "a" * 64,
     }
+    if source_kind == "live_tool":
+        source["retrieval"] = {
+            "retrieved_at": "2026-08-25T13:10:00Z",
+            "tool": "sum-api query",
+            "arguments": {"query_name": "project status by week"},
+        }
     claims = [{
         "id": str(check["claim_id"]),
         "quote": str(check["public_receipt"]["report_operand"]["value"]),
@@ -846,17 +852,14 @@ class RendererBoundaryTests(unittest.TestCase):
         self.assertIn("supplied_file", static_page)
         self.assertNotIn("Actual live query", static_page)
 
-        live_art = json.loads(json.dumps(static_art))
-        live_art["sources"][0]["kind"] = "live_tool"
-        live_art["sources"][0]["retrieval"] = {
-            "retrieved_at": "2026-08-25T13:10:00Z",
-            "tool": "sum-api query",
-            "arguments": {"query_name": "project status by week"},
-        }
-        live_art["evidence_coverage"]["provenance_groups"][0]["kind"] = "live_tool"
+        live_art = public_artifact([check], source_kind="live_tool")
         live_page = render.html_of(live_art)
         self.assertIn("live_tool", live_page)
         self.assertNotIn("Supplied recorded evidence", live_page)
+        self.assertEqual(
+            live_art["verification"]["live_source"],
+            {"status": "complete", "detail": None},
+        )
 
     def test_rank_receipt_renders_agent_ordered_values_in_order(self) -> None:
         values = [

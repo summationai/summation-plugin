@@ -121,6 +121,9 @@ class JsonMutationTests(unittest.TestCase):
     def test_verification_detail_cannot_enter_public_output(self) -> None:
         self.assert_mutation_fails(audit.mutate_inject_verification_detail)
 
+    def test_static_source_cannot_claim_live_complete(self) -> None:
+        self.assert_mutation_fails(audit.mutate_static_source_claims_live_complete)
+
     def test_found_by_and_verification_mode_fields_fail_schema(self) -> None:
         for field in ("found_by", "verification_mode"):
             artifact, page = valid_artifact_pair()
