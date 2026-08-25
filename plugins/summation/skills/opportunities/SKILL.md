@@ -51,7 +51,7 @@ Numbered list. Each item:
 
 1. **Theme** — one short phrase (from scan label or catalog).  
 2. **Why it fits** — tie to a redacted sample or a real table (not a wall of chat).  
-3. **Next step** — one skill/action: `query`, `report`, `validate`, `connect`, `catalog`, `schedule`, `start`.
+3. **Next step** — one skill/action: `query`, `report`, `verify`, `connect`, `catalog`, `schedule`, `start`.
 
 Map themes roughly:
 
@@ -60,7 +60,7 @@ Map themes roughly:
 | Metrics / KPIs / “why did it move” | `query` (analyst / `ask_analyst` for narrative) or ranked SQL with `ORDER BY` |
 | SQL / warehouse | `catalog` then `query`; `connect` if no source |
 | CSV / files | import / `connect` then catalog |
-| Board / status / narrative | `report` → offer `validate` |
+| Board / status / narrative | `report` → offer `verify` |
 | Recurring / every Monday | `report` then `schedule` |
 | Data quality / pipelines | `catalog` + spot-check `query` |
 | Connect / explore source | `connect` / `start` |

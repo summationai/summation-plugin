@@ -1,13 +1,13 @@
 ---
 name: verify
-description: Grade a report file the user already has (HTML, PDF, xlsx, pptx, Markdown). Use when they drop in a report, ask if it is safe to share, want errors in a recap, or run /summation:verify. No Summation login required.
+description: Grade a report file the user already has (HTML, PDF, xlsx, pptx, Markdown), or a report that already lives in Summation. Use when they drop in a file, name a Summation report, ask if it is safe to share, want errors in a recap, or run /summation:verify.
 ---
 
 # Summation Verify
 
 Grade a file on disk. You conduct. Local scripts compute. Do not call `claude -p`. Do not clone `alg-deploy`. Do not ask them to sign in to Summation first.
 
-If they name a report that already lives in Summation (no disk file), run the `validate` skill instead.
+If they named a report that already lives in Summation and there is no disk file, go to **Connected path**.
 
 ## First two minutes
 
@@ -163,7 +163,7 @@ Then run `accept.py`. If it discards rows, fix only those quotes once and run `a
 
 If you could not obtain the report text, say that in the conversation and stop. Do not run `render.py`. Do not write an artifact.
 
-Open `artifact/grade-artifact.html`. Read `verdict` from `grade-artifact.json`. Say that in plain language. Do not add findings the file does not contain. Do not hand-write HTML. If the page names a next step, repeat that step. Do not offer a schedule, upload, or sign-in.
+Open `artifact/grade-artifact.html`. Read `verdict` from `grade-artifact.json`. Say that in plain language. Do not add findings the file does not contain. Do not hand-write HTML. If the page names a next step, repeat that step. If they want this in Summation, go to **Connected path**. Do not start that path during the local grade.
 
 ## Laws
 
@@ -172,3 +172,17 @@ Open `artifact/grade-artifact.html`. Read `verdict` from `grade-artifact.json`. 
 - No letter grade. No “Layer 1” / “Layer 2”. No internal bug ids.
 - Accept the file they have. If you cannot obtain the report text, say so in the conversation and stop. Do not render a page. Do not refuse PDF, xlsx, or pptx because of the format.
 - Zero Summation login for the local grade.
+
+## Connected path
+
+Use this after the local grade, or when they named a report that already lives in Summation and there is no disk file. This continues in the project chat with Addison. It is not the local `grade-artifact.html`.
+
+Do this path once. Do not invoke the `validate` alias.
+
+1. Itemized consent first. Name each file you would upload, or the Summation report they named. Wait for an explicit yes on those items. Stop if they decline.
+2. Authentication begins only after that consent. If they are not signed in, run the `signin` skill now.
+3. If they consented to local files, upload only those files with the existing file-upload MCP tools: `request_file_upload`, `upload_file`, `finalize_file_upload`.
+4. Continue in the project chat with Addison. Addison authors playbooks and verifies project reports through its existing skills.
+5. If they ask for a cadence, use the existing Workflow tools (the `schedule` skill).
+
+Never soften flags Addison returns. If that verification failed, the report is not safe to share.
