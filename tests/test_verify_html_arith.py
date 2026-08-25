@@ -75,6 +75,7 @@ class HtmlArithTests(unittest.TestCase):
             self.assertEqual(code, 0)
             doc = json.loads(out.read_text())
             self.assertTrue(doc["agentic_only"])
+            self.assertFalse(doc["agentic_scan_completed"])
             self.assertEqual(doc["findings"], [])
             self.assertEqual(doc["source"]["format"], "pdf")
 

@@ -2,7 +2,8 @@
 """Deterministic HTML table footing. No summation-flow. No network.
 
 Writes a findings.json that render.py can consume. Non-HTML files get an
-agentic_only stub so the host agent plus accept.py still produce an artifact.
+agentic_only stub. render.py writes no shareable page until receipts.json
+records a completed host review.
 """
 from __future__ import annotations
 
@@ -183,7 +184,7 @@ def findings_doc(report: pathlib.Path, findings: list[dict], *, html: bool,
         "findings": findings,
         "findings_truncated": False,
         "agentic_only": not html,
-        "agentic_scan_completed": True,
+        "agentic_scan_completed": bool(html),
         "extraction_method": None if html else "host-agent visible text",
         "verification": {
             "document": {

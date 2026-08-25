@@ -20,7 +20,7 @@ import sys
 _SCRIPTS = pathlib.Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
-from inventory import cover, inventory_for  # noqa: E402
+from inventory import claim_inventory_ids, cover, inventory_for  # noqa: E402
 
 EVIDENCE_SUFFIXES = frozenset({
     ".json", ".jsonl", ".txt", ".sql", ".csv", ".yaml", ".yml", ".md", ".html",
@@ -561,6 +561,11 @@ def validate_claims(report: str, proposed: list) -> tuple[list, list]:
             "quote": quote,
             "importance": importance if importance in {"material", "supporting"} else "material",
         }
+        ids = claim_inventory_ids(claim)
+        if ids:
+            row["inventory_ids"] = ids
+        elif "inventory_ids" in claim and claim.get("inventory_ids") not in (None, [], ""):
+            problems.append("claim inventory_ids is not a list of ids")
         if problems:
             discarded.append({**row, "problems": problems})
         else:

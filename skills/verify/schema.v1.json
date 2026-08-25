@@ -322,7 +322,8 @@
           "outcome": { "type": ["string", "null"] },
           "check_id": { "type": ["string", "null"] },
           "found_by": { "type": ["string", "null"] },
-          "location": { "type": ["string", "null"] }
+          "location": { "type": ["string", "null"] },
+          "inventory_ids": { "type": "array", "items": { "type": "string" } }
         }
       }
     },

@@ -18,6 +18,14 @@ SHAREABLE_CHECK_KEYS = (
     "report_quote", "report_quote_2", "explanation", "claim_id",
     "location", "metric_label",
 )
+CLAIM_PUBLIC_KEYS = (
+    "id", "quote", "importance", "outcome", "check_id", "found_by",
+    "location", "inventory_ids",
+)
+GROUNDED_OUTCOMES = frozenset({
+    "confirmed", "contradicted", "not_checkable", "changed_since_report", "error",
+})
+UNFINISHED_SEMANTIC = frozenset({"not_run", "failed", "skipped"})
 REQUIRED = (
     "schema_version",
     "run_id",
@@ -254,7 +262,6 @@ def _evidence_coverage(raw: dict, checks: list[dict]) -> dict:
     external = [check for check in checks if check.get("basis") == "evidence"]
     internal = [check for check in checks if check.get("basis") == "report"]
     review = raw.get("evidence_review") or {}
-    provenance_groups = list(review.get("provenance_groups") or [])
     return {
         "document_claims_total": claim_count(raw),
         "document_claims_reached": int(
@@ -283,9 +290,8 @@ def _evidence_coverage(raw: dict, checks: list[dict]) -> dict:
         "receipt_failures": int(review.get("receipt_failures") or 0),
         "evidence_files_supplied": 0,
         "evidence_files_cited": [],
-        "provenance_groups": provenance_groups,
-        "source_independence": (
-            "grouped_by_declared_provenance" if provenance_groups else "not_assessed"),
+        "provenance_groups": [],
+        "source_independence": "not_assessed",
     }
 
 
@@ -321,22 +327,16 @@ def _public_guidance(guidance: dict | None) -> tuple[dict | None, list[dict], li
 
 
 def _public_source_result(source: dict | None) -> dict | None:
-    if not source:
-        return None
-    return {
-        "status": str(source.get("status") or "complete"),
-        "error": source.get("error"),
-        "provider": str(source.get("provider") or "sum-api"),
-        "profile": str(source.get("profile") or ""),
-        "source_identity": source.get("source_identity"),
-        "suggested_source": source.get("suggested_source"),
-        "generated_at": source.get("generated_at"),
-        "tables": [str(table) for table in source.get("tables") or []],
-        "confirmed": int(source.get("confirmed") or 0),
-        "contradicted": int(source.get("contradicted") or 0),
-        "not_run": int(source.get("not_run") or 0),
-        "checks": list(source.get("checks") or []),
-    }
+    """Shareable JSON never copies a live-source payload."""
+    return None
+
+
+def _public_claim(row: dict) -> dict:
+    out = {}
+    for key in CLAIM_PUBLIC_KEYS:
+        if key in row:
+            out[key] = row[key]
+    return out
 
 
 def _verification_public(raw: dict, source: dict | None,
@@ -508,15 +508,13 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
         if check.get("verdict") == "contradicted"
     ]
     evidence_coverage = _evidence_coverage(raw, evidence_checks)
-    decision, actions, decision_limits = _public_guidance(guidance)
-    source_result = _public_source_result(source)
     score = None
     if "tier_d_per_100_claims" in headline:
         score = {
             "kind": "tier_d_per_100_claims",
             "value": headline["tier_d_per_100_claims"],
         }
-    verdict = _combined_verdict(verdict_of(raw), evidence_checks, source_result)
+    verdict = _combined_verdict(verdict_of(raw), list(layer2 or []), source)
     semantic_status = (((raw.get("verification") or {}).get("semantic") or {})
                        .get("status"))
     if semantic_status in {"failed", "not_run", "skipped"} and verdict in {
@@ -529,16 +527,16 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
         "run_id": run_id,
         "generated_at": generated_at,
         "source": source_public(raw),
-        "source_result": source_result,
+        "source_result": None,
         "verdict": verdict,
         "score": score,
         "findings": findings,
         "evidence_checks": evidence_checks,
         "evidence_findings": evidence_findings,
         "evidence_coverage": evidence_coverage,
-        "decision": decision,
-        "actions": actions,
-        "decision_limits": decision_limits,
+        "decision": None,
+        "actions": [],
+        "decision_limits": [],
         "diagnostics": diagnostics,
         "checks": {
             "registered": int(cov.get("checks_registered") or 0),
@@ -550,12 +548,12 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
                 "Individual check rows are not copied."
             ),
         },
-        "verification": _verification_public(raw, source_result, evidence_checks),
+        "verification": _verification_public(raw, source, list(layer2 or [])),
         "limitations": limitations_of(raw),
-        "offer": {"text": _offer(findings, evidence_checks, source_result, verdict, raw),
+        "offer": {"text": _offer(findings, evidence_checks, source, verdict, raw),
                   "accepted": None},
-        "claims": list(raw.get("claims") or []),
-        "presentation": raw.get("presentation"),
+        "claims": [_public_claim(row) for row in (raw.get("claims") or [])
+                   if isinstance(row, dict)],
     }
     validate_artifact(art)
     return art
@@ -730,6 +728,36 @@ def _finding_quantity(finding: dict):
             return Decimal(str(detail["stated"]))
         except (InvalidOperation, ValueError):
             return None
+    return None
+
+
+def ungraded_reason(raw: dict, layer2_named: bool, receipts: dict | list | None
+                    ) -> str | None:
+    """Refuse a shareable page when the host review did not finish."""
+    payload = receipts if isinstance(receipts, dict) else {}
+    semantic = payload.get("semantic_status")
+    if semantic is None:
+        semantic = ((raw.get("verification") or {}).get("semantic") or {}).get(
+            "status")
+    claims = list(payload.get("claims") or raw.get("claims") or [])
+    material = [row for row in claims if row.get("importance") == "material"]
+    grounded = [
+        row for row in material
+        if row.get("outcome") in GROUNDED_OUTCOMES
+    ]
+    if layer2_named:
+        if semantic in UNFINISHED_SEMANTIC:
+            return "semantic review did not complete"
+        if "claims" in payload and not grounded:
+            return "no grounded material claims"
+        checks = payload.get("checks") or payload.get("validated") or []
+        if isinstance(receipts, list):
+            checks = receipts
+        if not checks and not grounded:
+            return "no grounded material claims"
+    if raw.get("agentic_only") and not raw.get("agentic_scan_completed"):
+        if semantic not in {"complete", "partial"}:
+            return "host review did not complete"
     return None
 
 
@@ -1071,34 +1099,27 @@ def html_of(art: dict, raw: dict | None = None,
             h1 = "No errors found. Part of the assessment did not complete."
         next_text = ""
 
-    accepted_ids = {str(c.get("id") or "") for c in checks if c.get("id")}
-    pres = art.get("presentation") or {}
-    pres_ids = [str(i) for i in (pres.get("check_ids") or []) if str(i)]
-    summary = str(pres.get("summary") or "").strip()
-    if summary and pres_ids and all(i in accepted_ids for i in pres_ids):
-        verdict_p = html.escape(summary)
-    else:
-        clauses = [f"The report makes {spell_count(ledger)} {'claim' if ledger == 1 else 'claims'}."]
-        if n_err:
-            clauses.append(
-                f"{spell_count(n_err).capitalize()} "
-                f"{'is' if n_err == 1 else 'are'} wrong."
-            )
-        if n_ok:
-            clauses.append(
-                f"{spell_count(n_ok).capitalize()} "
-                f"{'is' if n_ok == 1 else 'are'} confirmed correct."
-            )
-        if n_csr:
-            clauses.append(
-                f"For {spell_count(n_csr)}, today&rsquo;s value differs and the "
-                "report-date value is not checkable."
-            )
-        if n_nc:
-            clauses.append(
-                f"{spell_count(n_nc).capitalize()} could not be checked."
-            )
-        verdict_p = " ".join(clauses)
+    clauses = [f"The report makes {spell_count(ledger)} {'claim' if ledger == 1 else 'claims'}."]
+    if n_err:
+        clauses.append(
+            f"{spell_count(n_err).capitalize()} "
+            f"{'is' if n_err == 1 else 'are'} wrong."
+        )
+    if n_ok:
+        clauses.append(
+            f"{spell_count(n_ok).capitalize()} "
+            f"{'is' if n_ok == 1 else 'are'} confirmed correct."
+        )
+    if n_csr:
+        clauses.append(
+            f"For {spell_count(n_csr)}, today&rsquo;s value differs and the "
+            "report-date value is not checkable."
+        )
+    if n_nc:
+        clauses.append(
+            f"{spell_count(n_nc).capitalize()} could not be checked."
+        )
+    verdict_p = " ".join(clauses)
 
     file_line = f"Report examined: <code>{html.escape(str(filename))}</code>"
     if period:
@@ -1452,8 +1473,8 @@ def attach_receipts_ledger(raw: dict, receipts: dict) -> None:
                 f"{reached_n} of {ledger_n} ledger claims have an accepted outcome."
             ),
         }
-    if receipts.get("presentation"):
-        raw["presentation"] = receipts["presentation"]
+    if status in {"complete", "partial"}:
+        raw["agentic_scan_completed"] = True
     src = raw.setdefault("source", {})
     if receipts.get("report_period"):
         src["period_label"] = receipts["report_period"]
@@ -1487,6 +1508,7 @@ def main() -> int:
     raw = json.loads(args.findings.read_text())
     layer2 = []
     guidance = {"decision": None, "actions": [], "limits": []}
+    l2raw = None
     if args.layer2 is not None:
         l2raw = json.loads(args.layer2.read_text())
         if isinstance(l2raw, list):
@@ -1498,11 +1520,6 @@ def main() -> int:
                 or l2raw.get("findings")
                 or []
             )
-            guidance = {
-                "decision": l2raw.get("decision"),
-                "actions": l2raw.get("actions") or [],
-                "limits": l2raw.get("limits") or [],
-            }
             attach_receipts_ledger(raw, l2raw)
             missing = list(l2raw.get("inventory_missing") or [])
             inv = l2raw.get("inventory") or {}
@@ -1522,30 +1539,10 @@ def main() -> int:
                     file=sys.stderr,
                 )
                 return 2
-            pres = l2raw.get("presentation")
-            if pres:
-                quote = ""
-                if pres.get("actions"):
-                    quote = str(pres["actions"][0].get("report_quote") or "")
-                elif l2raw.get("claims"):
-                    quote = str(l2raw["claims"][0].get("quote") or "")
-                if pres.get("summary"):
-                    guidance["decision"] = {
-                        "outcome": "not_checkable",
-                        "text": pres["summary"],
-                        "report_quote": quote,
-                        "explanation": "Agent summary of the assessment.",
-                        "supporting_check_ids": [],
-                        "key_points": [],
-                        "recommended_action_ids": [
-                            str(item.get("id") or "") for item in pres.get("actions") or []],
-                        "key_limit_ids": [
-                            str(item.get("id") or "") for item in pres.get("limits") or []],
-                    }
-                if pres.get("actions"):
-                    guidance["actions"] = pres["actions"]
-                if pres.get("limits"):
-                    guidance["limits"] = pres["limits"]
+    reason = ungraded_reason(raw, args.layer2 is not None, l2raw)
+    if reason:
+        print(f"render: {reason}. No shareable artifact written.", file=sys.stderr)
+        return 2
     ledger_raw = None
     if args.ledger and args.ledger.is_file():
         ledger_raw = json.loads(args.ledger.read_text())

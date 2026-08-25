@@ -86,19 +86,37 @@ def pad_inventory(folder: pathlib.Path, report: pathlib.Path | None = None) -> N
             checks_doc = {}
     else:
         checks, wrap, checks_doc = [], True, {}
-    n = 0
+    referenced = set()
+    for claim in claims:
+        referenced.update(invmod.claim_inventory_ids(claim))
     checked = {str(row.get("claim_id") or "") for row in checks}
+    n = 0
     for item in items:
         if item.get("importance") != "material":
             continue
+        iid = str(item.get("id") or "")
         shown = str(item.get("displayed") or "")
-        hit = next((claim for claim in claims if invmod.item_matches_claim(item, claim)), None)
+        if not iid:
+            continue
+        hit = next(
+            (claim for claim in claims
+             if iid in invmod.claim_inventory_ids(claim)),
+            None,
+        )
         if hit is not None and str(hit.get("id") or "") in checked:
             continue
         n += 1
-        cid = str(hit.get("id") if hit else f"P{n}")
         if hit is None:
-            claims.append({"id": cid, "quote": shown, "importance": "material"})
+            cid = f"P{n}"
+            claims.append({
+                "id": cid,
+                "quote": shown,
+                "importance": "material",
+                "inventory_ids": [iid],
+            })
+            referenced.add(iid)
+        else:
+            cid = str(hit.get("id") or f"P{n}")
         checks.append({
             "id": f"PC{n}",
             "claim_id": cid,
@@ -841,7 +859,12 @@ class RenderArtifactTests(unittest.TestCase):
                 shown = item["displayed"]
                 cid = f"L{index}"
                 key = f"v{index}"
-                claims.append({"id": cid, "quote": shown, "importance": "material"})
+                claims.append({
+                    "id": cid,
+                    "quote": shown,
+                    "importance": "material",
+                    "inventory_ids": [item["id"]],
+                })
                 ev[key] = shown
                 checks.append({
                     "id": f"C{index}",

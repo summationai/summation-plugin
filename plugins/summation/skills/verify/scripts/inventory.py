@@ -21,6 +21,7 @@ COMPLETED = frozenset({
     "confirmed", "contradicted", "not_checkable", "changed_since_report", "error",
 })
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+TABLE_LOC_RE = re.compile(r"^table\d+$", re.I)
 READERS = {
     ".html": "html",
     ".htm": "html",
@@ -59,15 +60,56 @@ def _visible_text(html: str) -> str:
     return re.sub(r"\s+", " ", "".join(parser.parts))
 
 
-def _material_token(tok) -> bool:
-    shown = str(tok.value_displayed or "")
-    if tok.currency_code or tok.unit in {"percent", "currency"}:
+def _glued_to_identifier(text: str, tok) -> bool:
+    start = int(getattr(tok, "start", 0) or 0)
+    end = int(getattr(tok, "end", 0) or 0)
+    while start < end and text[start].isspace():
+        start += 1
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    prev = text[start - 1] if start else ""
+    nxt = text[end] if end < len(text) else ""
+    if prev.isalnum() or prev == "_":
         return True
-    if tok.scale not in {"ones", "unknown"}:
-        return True
-    if "," in shown:
+    if nxt.isalnum() or nxt == "_":
         return True
     return False
+
+
+def _structural_numbering(text: str, tok) -> bool:
+    """True for list/section markers such as '1. Title' or '(2)'."""
+    shown = str(tok.value_displayed or "").strip()
+    if re.fullmatch(r"\(?\d{1,3}\)", shown):
+        return True
+    start = int(getattr(tok, "start", 0) or 0)
+    end = int(getattr(tok, "end", 0) or 0)
+    nxt = text[end] if end < len(text) else ""
+    unit = getattr(tok, "unit", None)
+    if nxt != "." or unit not in {"unknown", None, ""}:
+        return False
+    if getattr(tok, "currency_code", None):
+        return False
+    if not shown.isdigit() or len(shown) > 3:
+        return False
+    prev = text[start - 1] if start else ""
+    after = text[end + 1: end + 2]
+    if prev and not prev.isspace():
+        return False
+    return bool(after.isupper())
+
+
+def _material_token(tok, text: str = "") -> bool:
+    """Keep load-bearing numbers. Drop dates, timestamps, and structural numbering."""
+    shown = str(tok.value_displayed or "").strip()
+    if not shown:
+        return False
+    if DATE_RE.search(shown):
+        return False
+    if text and _glued_to_identifier(text, tok):
+        return False
+    if text and _structural_numbering(text, tok):
+        return False
+    return True
 
 
 def _html_items(path: pathlib.Path) -> list[dict]:
@@ -118,8 +160,8 @@ def _html_items(path: pathlib.Path) -> list[dict]:
             continue
         if DATE_RE.search(shown):
             continue
-        if _material_token(tok):
-            add("prose_number", shown, "visible-text", "material")
+        if _material_token(tok, visible):
+            add("prose_number", shown, f"visible-text@{tok.start}", "material")
             captured.add(shown)
     return items
 
@@ -158,47 +200,97 @@ def item_matches_claim(item: dict, claim: dict) -> bool:
     return False
 
 
+def claim_inventory_ids(claim: dict) -> list[str]:
+    raw = claim.get("inventory_ids")
+    if isinstance(raw, str):
+        return [raw.strip()] if raw.strip() else []
+    if isinstance(raw, list):
+        out = []
+        seen = set()
+        for value in raw:
+            item = str(value or "").strip()
+            if item and item not in seen:
+                seen.add(item)
+                out.append(item)
+        return out
+    return []
+
+
+def _row_label(item: dict) -> str:
+    loc = str(item.get("location") or "")
+    parts = loc.split("/")
+    if len(parts) >= 2 and TABLE_LOC_RE.fullmatch(parts[0] or ""):
+        return parts[1]
+    return ""
+
+
+def _quote_names_location(claim: dict, item: dict) -> bool:
+    quote = str(claim.get("quote") or "")
+    label = _row_label(item)
+    if label and label in quote:
+        return True
+    loc = str(item.get("location") or "")
+    return bool(loc) and loc in quote
+
+
 def cover(inventory: dict, claims: list) -> dict:
-    """Map material inventory items to claims and completed outcomes."""
+    """Map material inventory items to claims by explicit inventory_ids.
+
+    Each material item is consumed at most once. A claim that lists two items
+    with the same displayed value covers both only when the quote names both
+    locations.
+    """
     items = [
         item for item in (inventory.get("items") or [])
         if item.get("importance") == "material"
     ]
+    by_id = {str(item.get("id") or ""): item for item in items if item.get("id")}
+    consumed: dict[str, dict] = {}
     missing = []
     accounted = 0
     completed = 0
     mapping = []
-    for item in items:
-        hit = None
-        for claim in claims:
-            if item_matches_claim(item, claim):
-                hit = claim
-                break
-        if hit is None:
-            missing.append({
-                "id": item.get("id"),
-                "displayed": item.get("displayed"),
-                "location": item.get("location"),
-            })
-            continue
-        accounted += 1
-        outcome = hit.get("outcome")
-        done = outcome in COMPLETED
-        if done:
-            completed += 1
-        else:
-            missing.append({
-                "id": item.get("id"),
-                "displayed": item.get("displayed"),
-                "location": item.get("location"),
-                "claim_id": hit.get("id"),
+    for claim in claims:
+        seen_shown: list[str] = []
+        for iid in claim_inventory_ids(claim):
+            if iid in consumed:
+                continue
+            item = by_id.get(iid)
+            if item is None:
+                continue
+            if not item_matches_claim(item, claim):
+                continue
+            shown = str(item.get("displayed") or "")
+            if shown in seen_shown and not _quote_names_location(claim, item):
+                continue
+            consumed[iid] = claim
+            seen_shown.append(shown)
+            accounted += 1
+            outcome = claim.get("outcome")
+            done = outcome in COMPLETED
+            if done:
+                completed += 1
+            else:
+                missing.append({
+                    "id": item.get("id"),
+                    "displayed": item.get("displayed"),
+                    "location": item.get("location"),
+                    "claim_id": claim.get("id"),
+                    "outcome": outcome,
+                })
+            mapping.append({
+                "inventory_id": item.get("id"),
+                "claim_id": claim.get("id"),
                 "outcome": outcome,
             })
-        mapping.append({
-            "inventory_id": item.get("id"),
-            "claim_id": hit.get("id"),
-            "outcome": outcome,
-        })
+    for item in items:
+        iid = str(item.get("id") or "")
+        if iid and iid not in consumed:
+            missing.append({
+                "id": item.get("id"),
+                "displayed": item.get("displayed"),
+                "location": item.get("location"),
+            })
     n = len(items)
     return {
         "material": n,

@@ -10,7 +10,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "verify" / "scripts"
 CLEAN = ROOT / "tests" / "fixtures" / "verify" / "weekly-sales-snapshot-clean.html"
-SENTINEL = "SECRET_EVIDENCE_TOKEN_9f3a"
+SENTINEL = "SECRET_EVIDENCE_TOKEN"
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.insert(0, str(SCRIPTS))
@@ -20,6 +20,29 @@ import inventory  # noqa: E402
 PROMISE_WORDS = (
     "on a schedule", "workflow", "live-query", "live source query",
     "upload this", "put this on a schedule",
+)
+BARE_HTML = """<!doctype html>
+<html><body>
+<p>Revenue is $100.</p>
+<p>On hand: 42 units.</p>
+</body></html>
+"""
+DUP_HTML = """<!doctype html>
+<html><body>
+<table>
+<tr><th>Name</th><th>Value</th></tr>
+<tr><td>Alpha</td><td>1,000</td></tr>
+<tr><td>Beta</td><td>1,000</td></tr>
+<tr><td>Total</td><td>2,000</td></tr>
+</table>
+</body></html>
+"""
+MALICIOUS_SUMMARY = (
+    "Summation can put this on a schedule and run a live-query workflow. "
+    "Connect and upload this."
+)
+MALICIOUS_ACTION = (
+    "Put this on a schedule. Start a workflow. Run a live-query. Upload this."
 )
 
 
@@ -39,6 +62,7 @@ def _cover_clean(folder: pathlib.Path, *, omit: str | None = None) -> None:
             "id": cid,
             "quote": shown,
             "importance": "material",
+            "inventory_ids": [item["id"]],
         })
         key = f"v{index}"
         evidence[key] = shown
@@ -147,25 +171,262 @@ class TrustCorrectionTests(unittest.TestCase):
             self.assertNotEqual(
                 render.customer_verdict("unable_to_grade"), "share_with_caveats")
 
+    def test_bare_number_and_unit_word_are_inventoried(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            report = folder / "report.html"
+            report.write_text(BARE_HTML)
+            items = inventory.inventory_for(report)["items"]
+            shown = {item["displayed"] for item in items}
+            self.assertIn("$100", shown)
+            self.assertIn("42 units", shown)
+            self.assertGreaterEqual(len(shown), 2)
+            ids = {item["displayed"]: item["id"] for item in items}
+            self.assertNotEqual(ids["$100"], ids["42 units"])
+
+    def test_omit_revenue_or_units_writes_no_artifact(self) -> None:
+        for omit in ("$100", "42 units"):
+            with self.subTest(omit=omit), tempfile.TemporaryDirectory() as raw:
+                folder = pathlib.Path(raw)
+                report = folder / "report.html"
+                report.write_text(BARE_HTML)
+                keep = "42 units" if omit == "$100" else "$100"
+                keep_id = "INV2" if keep == "42 units" else "INV1"
+                (folder / "ev.json").write_text(json.dumps({"v": keep}))
+                (folder / "claims.json").write_text(json.dumps({
+                    "claims": [{
+                        "id": "L1",
+                        "quote": keep,
+                        "importance": "material",
+                        "inventory_ids": [keep_id],
+                    }],
+                }))
+                (folder / "checks.json").write_text(json.dumps({"checks": [{
+                    "id": "C1",
+                    "claim_id": "L1",
+                    "type": "semantic",
+                    "basis": "evidence",
+                    "verdict": "confirmed",
+                    "importance": "material",
+                    "report_quote": keep,
+                    "evidence_file": "ev.json",
+                    "evidence_json": [{"pointer": "/v", "value": keep}],
+                    "explanation": f"The evidence matches {keep}.",
+                }]}))
+                self.assertEqual(run_mod(html_arith, "html_arith.py", [
+                    "--report", str(report),
+                    "--out", str(folder / "findings.json"),
+                ]), 0)
+                findings = json.loads((folder / "findings.json").read_text())
+                shown = {
+                    item["displayed"]
+                    for item in findings["inventory"]["items"]
+                }
+                self.assertIn("$100", shown)
+                self.assertIn("42 units", shown)
+                self.assertEqual(run_mod(accept, "accept.py", [
+                    "--report", str(report),
+                    "--claims", str(folder / "claims.json"),
+                    "--checks", str(folder / "checks.json"),
+                    "--findings", str(folder / "findings.json"),
+                    "--evidence-dir", str(folder),
+                    "--out", str(folder / "receipts.json"),
+                ]), 0)
+                receipts = json.loads((folder / "receipts.json").read_text())
+                missing_shown = {
+                    row.get("displayed") for row in receipts["inventory_missing"]
+                }
+                self.assertIn(omit, missing_shown)
+                out = folder / "artifact"
+                code = run_mod(render, "render.py", [
+                    "--findings", str(folder / "findings.json"),
+                    "--layer2", str(folder / "receipts.json"),
+                    "--out-dir", str(out),
+                ])
+                self.assertEqual(code, 2)
+                self.assertFalse((out / "grade-artifact.html").is_file())
+                self.assertFalse((out / "grade-artifact.json").is_file())
+
+    def test_duplicate_thousand_one_claim_leaves_named_id_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            report = folder / "report.html"
+            report.write_text(DUP_HTML)
+            (folder / "ev.json").write_text(json.dumps({
+                "thousand": "1,000", "total": "2,000",
+            }))
+            (folder / "claims.json").write_text(json.dumps({
+                "claims": [
+                    {
+                        "id": "L1",
+                        "quote": "1,000",
+                        "importance": "material",
+                        "inventory_ids": ["INV1"],
+                    },
+                    {
+                        "id": "L2",
+                        "quote": "2,000",
+                        "importance": "material",
+                        "inventory_ids": ["INV3"],
+                    },
+                ],
+            }))
+            (folder / "checks.json").write_text(json.dumps({"checks": [
+                {
+                    "id": "C1",
+                    "claim_id": "L1",
+                    "type": "semantic",
+                    "basis": "evidence",
+                    "verdict": "confirmed",
+                    "importance": "material",
+                    "report_quote": "1,000",
+                    "evidence_file": "ev.json",
+                    "evidence_json": [{"pointer": "/thousand", "value": "1,000"}],
+                    "explanation": "Alpha matches.",
+                },
+                {
+                    "id": "C2",
+                    "claim_id": "L2",
+                    "type": "semantic",
+                    "basis": "evidence",
+                    "verdict": "confirmed",
+                    "importance": "material",
+                    "report_quote": "2,000",
+                    "evidence_file": "ev.json",
+                    "evidence_json": [{"pointer": "/total", "value": "2,000"}],
+                    "explanation": "Total matches.",
+                },
+            ]}))
+            self.assertEqual(run_mod(html_arith, "html_arith.py", [
+                "--report", str(report),
+                "--out", str(folder / "findings.json"),
+            ]), 0)
+            items = json.loads(
+                (folder / "findings.json").read_text())["inventory"]["items"]
+            by_loc = {item["location"]: item for item in items}
+            self.assertIn("table1/Alpha/Value", by_loc)
+            self.assertIn("table1/Beta/Value", by_loc)
+            self.assertIn("table1/Total/Value", by_loc)
+            self.assertEqual(by_loc["table1/Alpha/Value"]["displayed"], "1,000")
+            self.assertEqual(by_loc["table1/Beta/Value"]["displayed"], "1,000")
+            self.assertEqual(run_mod(accept, "accept.py", [
+                "--report", str(report),
+                "--claims", str(folder / "claims.json"),
+                "--checks", str(folder / "checks.json"),
+                "--findings", str(folder / "findings.json"),
+                "--evidence-dir", str(folder),
+                "--out", str(folder / "receipts.json"),
+            ]), 0)
+            receipts = json.loads((folder / "receipts.json").read_text())
+            missing_ids = {row.get("id") for row in receipts["inventory_missing"]}
+            self.assertIn(by_loc["table1/Beta/Value"]["id"], missing_ids)
+            out = folder / "artifact"
+            code = run_mod(render, "render.py", [
+                "--findings", str(folder / "findings.json"),
+                "--layer2", str(folder / "receipts.json"),
+                "--out-dir", str(out),
+            ])
+            self.assertEqual(code, 2)
+            self.assertFalse((out / "grade-artifact.html").is_file())
+            self.assertFalse((out / "grade-artifact.json").is_file())
+
+    def test_unreadable_pdf_without_receipts_writes_no_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            report = folder / "board.pdf"
+            report.write_bytes(b"%PDF-fake")
+            self.assertEqual(run_mod(html_arith, "html_arith.py", [
+                "--report", str(report),
+                "--out", str(folder / "findings.json"),
+            ]), 0)
+            findings = json.loads((folder / "findings.json").read_text())
+            self.assertTrue(findings["agentic_only"])
+            self.assertFalse(findings["agentic_scan_completed"])
+            out = folder / "artifact"
+            code = run_mod(render, "render.py", [
+                "--findings", str(folder / "findings.json"),
+                "--out-dir", str(out),
+            ])
+            self.assertEqual(code, 2)
+            self.assertFalse((out / "grade-artifact.html").is_file())
+            self.assertFalse((out / "grade-artifact.json").is_file())
+            code = run_mod(render, "render.py", [
+                "--findings", str(folder / "findings.json"),
+                "--layer2", str(folder / "receipts.json"),
+                "--out-dir", str(out),
+            ])
+            self.assertEqual(code, 2)
+            self.assertFalse((out / "grade-artifact.html").is_file())
+            self.assertFalse((out / "grade-artifact.json").is_file())
+
     def test_confidential_sentinel_stays_private(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
-            _cover_clean(folder)
-            ev = json.loads((folder / "ev.json").read_text())
-            ev["secret"] = SENTINEL
-            (folder / "ev.json").write_text(json.dumps(ev) + "\n")
-            checks = json.loads((folder / "checks.json").read_text())
-            checks["checks"][0]["evidence_quote"] = SENTINEL
-            checks["checks"][0]["evidence_file"] = "ev.json"
-            checks["checks"][0]["evidence_json"].append(
-                {"pointer": "/secret", "value": SENTINEL})
-            (folder / "checks.json").write_text(json.dumps(checks))
+            report = folder / "report.html"
+            report.write_text(BARE_HTML)
+            ev_name = f"{SENTINEL}.json"
+            (folder / ev_name).write_text(json.dumps({
+                SENTINEL: SENTINEL,
+                "revenue": "$100",
+                "units": "42 units",
+            }) + "\n")
+            (folder / "claims.json").write_text(json.dumps({
+                "claims": [
+                    {
+                        "id": "L1",
+                        "quote": "$100",
+                        "importance": "material",
+                        "inventory_ids": ["INV1"],
+                    },
+                    {
+                        "id": "L2",
+                        "quote": "42 units",
+                        "importance": "material",
+                        "inventory_ids": ["INV2"],
+                    },
+                ],
+            }))
+            (folder / "checks.json").write_text(json.dumps({"checks": [
+                {
+                    "id": "C1",
+                    "claim_id": "L1",
+                    "type": "semantic",
+                    "basis": "evidence",
+                    "verdict": "confirmed",
+                    "importance": "material",
+                    "report_quote": "$100",
+                    "evidence_file": ev_name,
+                    "evidence_quote": SENTINEL,
+                    "evidence_json": [
+                        {"pointer": "/revenue", "value": "$100"},
+                        {"pointer": f"/{SENTINEL}", "value": SENTINEL},
+                    ],
+                    "explanation": "Revenue matches.",
+                    "reconstruction_attempt": SENTINEL,
+                },
+                {
+                    "id": "C2",
+                    "claim_id": "L2",
+                    "type": "semantic",
+                    "basis": "evidence",
+                    "verdict": "confirmed",
+                    "importance": "material",
+                    "report_quote": "42 units",
+                    "evidence_file": ev_name,
+                    "evidence_quote": SENTINEL,
+                    "evidence_json": [{"pointer": "/units", "value": "42 units"}],
+                    "explanation": "Units match.",
+                },
+            ]}))
             self.assertEqual(run_mod(html_arith, "html_arith.py", [
-                "--report", str(folder / "report.html"),
+                "--report", str(report),
                 "--out", str(folder / "findings.json"),
             ]), 0)
+            findings = json.loads((folder / "findings.json").read_text())
+            findings["source"]["path"] = f"/secret/{SENTINEL}/report.html"
+            (folder / "findings.json").write_text(json.dumps(findings))
             self.assertEqual(run_mod(accept, "accept.py", [
-                "--report", str(folder / "report.html"),
+                "--report", str(report),
                 "--claims", str(folder / "claims.json"),
                 "--checks", str(folder / "checks.json"),
                 "--findings", str(folder / "findings.json"),
@@ -174,14 +435,155 @@ class TrustCorrectionTests(unittest.TestCase):
             ]), 0)
             receipts_text = (folder / "receipts.json").read_text()
             self.assertIn(SENTINEL, receipts_text)
+            source_doc = {
+                "status": "complete",
+                "error": None,
+                "provider": "sum-api",
+                "profile": SENTINEL,
+                "source_identity": {"name": SENTINEL},
+                "suggested_source": SENTINEL,
+                "generated_at": "2026-08-24T00:00:00Z",
+                "tables": [SENTINEL],
+                "confirmed": 1,
+                "contradicted": 0,
+                "not_run": 0,
+                "checks": [{"id": "SRC1", "verdict": "confirmed",
+                            "secret": SENTINEL}],
+            }
+            (folder / "source.json").write_text(json.dumps(source_doc))
             out = folder / "artifact"
             self.assertEqual(run_mod(render, "render.py", [
                 "--findings", str(folder / "findings.json"),
                 "--layer2", str(folder / "receipts.json"),
+                "--source", str(folder / "source.json"),
                 "--out-dir", str(out),
             ]), 0)
-            self.assertNotIn(SENTINEL, (out / "grade-artifact.json").read_text())
-            self.assertNotIn(SENTINEL, (out / "grade-artifact.html").read_text())
+            public = (
+                (out / "grade-artifact.json").read_text()
+                + (out / "grade-artifact.html").read_text()
+            )
+            self.assertNotIn(SENTINEL, public)
+            art = json.loads((out / "grade-artifact.json").read_text())
+            self.assertIsNone(art.get("source_result"))
+            self.assertNotIn("presentation", art)
+            for row in art.get("evidence_checks") or []:
+                self.assertNotIn("evidence_file", row)
+                self.assertNotIn("evidence_quote", row)
+                self.assertNotIn("evidence_json", row)
+                self.assertNotIn("reconstruction_attempt", row)
+
+    def test_malicious_presentation_absent_from_safe_and_caveated(self) -> None:
+        cases = (
+            ("safe", "confirmed", "safe_to_share"),
+            ("caveats", "not_checkable", "share_with_caveats"),
+        )
+        for label, units_verdict, expected in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as raw:
+                folder = pathlib.Path(raw)
+                report = folder / "report.html"
+                report.write_text(BARE_HTML)
+                (folder / "ev.json").write_text(json.dumps({
+                    "revenue": "$100", "units": "42 units",
+                }))
+                (folder / "claims.json").write_text(json.dumps({
+                    "claims": [
+                        {
+                            "id": "L1",
+                            "quote": "$100",
+                            "importance": "material",
+                            "inventory_ids": ["INV1"],
+                        },
+                        {
+                            "id": "L2",
+                            "quote": "42 units",
+                            "importance": "material",
+                            "inventory_ids": ["INV2"],
+                        },
+                    ],
+                }))
+                units_check = {
+                    "id": "C2",
+                    "claim_id": "L2",
+                    "type": "semantic",
+                    "basis": "report" if units_verdict == "not_checkable"
+                    else "evidence",
+                    "verdict": units_verdict,
+                    "importance": "material",
+                    "report_quote": "42 units",
+                    "explanation": "Units could not be checked."
+                    if units_verdict == "not_checkable" else "Units match.",
+                }
+                if units_verdict == "confirmed":
+                    units_check["evidence_file"] = "ev.json"
+                    units_check["evidence_json"] = [
+                        {"pointer": "/units", "value": "42 units"}]
+                (folder / "checks.json").write_text(json.dumps({
+                    "checks": [
+                        {
+                            "id": "C1",
+                            "claim_id": "L1",
+                            "type": "semantic",
+                            "basis": "evidence",
+                            "verdict": "confirmed",
+                            "importance": "material",
+                            "report_quote": "$100",
+                            "evidence_file": "ev.json",
+                            "evidence_json": [{"pointer": "/revenue", "value": "$100"}],
+                            "explanation": "Revenue matches.",
+                        },
+                        units_check,
+                    ],
+                    "presentation": {
+                        "summary": MALICIOUS_SUMMARY,
+                        "check_ids": ["C1"],
+                        "actions": [{
+                            "id": "A1",
+                            "text": MALICIOUS_ACTION,
+                            "report_quote": "Revenue is $100.",
+                            "check_ids": ["C1"],
+                        }],
+                        "limits": [{
+                            "id": "L1",
+                            "text": MALICIOUS_ACTION,
+                            "report_quote": "Revenue is $100.",
+                            "check_ids": ["C1"],
+                        }],
+                    },
+                }))
+                self.assertEqual(run_mod(html_arith, "html_arith.py", [
+                    "--report", str(report),
+                    "--out", str(folder / "findings.json"),
+                ]), 0)
+                self.assertEqual(run_mod(accept, "accept.py", [
+                    "--report", str(report),
+                    "--claims", str(folder / "claims.json"),
+                    "--checks", str(folder / "checks.json"),
+                    "--findings", str(folder / "findings.json"),
+                    "--evidence-dir", str(folder),
+                    "--out", str(folder / "receipts.json"),
+                ]), 0)
+                receipts = json.loads((folder / "receipts.json").read_text())
+                self.assertEqual(receipts["inventory_missing"], [])
+                out = folder / "artifact"
+                self.assertEqual(run_mod(render, "render.py", [
+                    "--findings", str(folder / "findings.json"),
+                    "--layer2", str(folder / "receipts.json"),
+                    "--out-dir", str(out),
+                    "--run-id", f"pres-{label}",
+                ]), 0)
+                art = json.loads((out / "grade-artifact.json").read_text())
+                self.assertEqual(art["verdict"], expected)
+                page = (out / "grade-artifact.html").read_text()
+                if expected == "safe_to_share":
+                    self.assertNotIn("<b>Next:</b>", page)
+                blob = (
+                    (out / "grade-artifact.json").read_text() + page
+                ).lower()
+                for word in PROMISE_WORDS:
+                    self.assertNotIn(word, blob, word)
+                self.assertNotIn(MALICIOUS_SUMMARY.lower(), blob)
+                self.assertNotIn(MALICIOUS_ACTION.lower(), blob)
+                self.assertNotIn("presentation", art)
 
     def test_shareable_artifact_has_no_schedule_promise(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
