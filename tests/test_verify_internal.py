@@ -117,6 +117,7 @@ class SourceSnapshotInventoryTests(unittest.TestCase):
     def test_pure_source_snapshot_label_is_supporting(self) -> None:
         lines = (
             "Source snapshot: CRM revenue export, 2026-07-05",
+            "Source snapshot: evidence/project-status.json",
             "Source snapshot: `evidence/project-status.json`.",
         )
         for line in lines:
@@ -136,6 +137,27 @@ class SourceSnapshotInventoryTests(unittest.TestCase):
             "Source snapshot: active projects 12",
             "Source snapshot: customer churn 7",
             "Source snapshot: SLA missed for three customers",
+        )
+        for line in lines:
+            with self.subTest(line=line):
+                self.assertEqual(
+                    inventory.source_snapshot_importance(line), "material")
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "report.md"
+            path.write_text("\n".join(lines) + "\n")
+            inv = inventory.inventory_for(path)
+            shown = [item["displayed"] for item in inv["items"]
+                     if item.get("importance") == "material"]
+            for line in lines:
+                self.assertIn(line, shown)
+                item = next(row for row in inv["items"] if row["displayed"] == line)
+                self.assertTrue(item.get("location"))
+
+    def test_status_words_after_source_object_are_material(self) -> None:
+        lines = (
+            "Source snapshot: warehouse stale",
+            "Source snapshot: dataset incomplete",
+            "Source snapshot: export missing rows",
         )
         for line in lines:
             with self.subTest(line=line):

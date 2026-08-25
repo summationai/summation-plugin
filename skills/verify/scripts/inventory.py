@@ -34,13 +34,8 @@ SPELLED_QTY = re.compile(
 SNAP_PREDICATE = re.compile(
     r"\b(?:active|missed|grew|declined|increased|decreased|was|is|"
     r"equals|were|improved|fell|rose|dropped|ranked|grown|fallen|"
-    r"equal|lagged|exceeded|beat|versus|vs)\b",
-    re.I,
-)
-SNAP_KPI = re.compile(
-    r"\b(?:projects?|churn|customers?|sla|units?|orders?|inventory|"
-    r"margins?|profits?|counts?|totals?|kpis?|metrics?|bookings?|"
-    r"pipeline|nps|csat|revenue|sales|arr|mrr|headcount|backlog)\b",
+    r"equal|lagged|exceeded|beat|versus|vs|stale|incomplete|missing|"
+    r"delayed|failed|current)\b",
     re.I,
 )
 SOURCE_OBJECT_NOUNS = frozenset({
@@ -192,46 +187,54 @@ def _html_items(path: pathlib.Path) -> list[dict]:
     return items
 
 
-def _source_path_label(text: str) -> bool:
-    compact = text.strip().strip("`.").strip()
-    compact = compact.strip("`")
-    if "/" in compact or "\\" in compact:
-        return True
-    return bool(re.search(
-        r"\.(json|jsonl|csv|xlsx|txt|md|parquet|log|sql|tsv)\b", compact, re.I))
+def _unwrap_source_suffix(text: str) -> str:
+    compact = re.sub(r"\s+", " ", text or "").strip()
+    compact = compact.strip("`").strip()
+    compact = compact.rstrip(".,;:").strip()
+    compact = compact.strip("`").strip()
+    return compact
 
 
-def _pure_source_identity(rest_no_dates: str) -> bool:
-    """True only with an explicit source-object noun or a file path."""
-    if _source_path_label(rest_no_dates):
+def _entire_file_path(text: str) -> bool:
+    compact = _unwrap_source_suffix(text)
+    if not compact or " " in compact:
+        return False
+    return bool(re.fullmatch(
+        r"[\w./\\-]+\.(json|jsonl|csv|xlsx|xls|txt|md|parquet|log|sql|tsv)",
+        compact, re.I))
+
+
+def _pure_provenance_suffix(rest: str) -> bool:
+    """True only when the whole suffix is a source name/path plus optional date."""
+    text = _unwrap_source_suffix(rest)
+    if not text:
+        return False
+    if _entire_file_path(text):
         return True
-    tokens = re.findall(r"[A-Za-z]+", rest_no_dates.lower())
-    return any(tok in SOURCE_OBJECT_NOUNS for tok in tokens)
+    date_at_end = re.search(r"(?:,|;|:)?\s*(\d{4}-\d{2}-\d{2})\s*$", text)
+    body = text
+    if date_at_end:
+        body = text[:date_at_end.start()].rstrip(" ,;:")
+        if DATE_RE.search(body):
+            return False
+    if re.search(r"[$£€%]", body) or re.search(r"\d", body):
+        return False
+    if SPELLED_QTY.search(body) or SNAP_PREDICATE.search(body):
+        return False
+    tokens = re.findall(r"[A-Za-z]+", body.lower())
+    if not tokens or tokens[-1] not in SOURCE_OBJECT_NOUNS:
+        return False
+    return True
 
 
 def source_snapshot_importance(shown: str) -> str | None:
-    """supporting only with positive proof of a pure source identity. Else material."""
+    """supporting only when the entire suffix is a pure provenance identity."""
     text = re.sub(r"\s+", " ", shown or "").strip()
     if not SOURCE_SNAP_HEAD.match(text):
         return None
     rest = SOURCE_SNAP_HEAD.sub("", text, count=1)
     rest = rest.lstrip(":- ").strip()
-    rest_no_dates = DATE_RE.sub(" ", rest)
-    if re.search(r"[$£€%]", rest_no_dates):
-        return "material"
-    if re.search(r"\d", rest_no_dates):
-        return "material"
-    if SPELLED_QTY.search(rest_no_dates) or SNAP_PREDICATE.search(rest_no_dates):
-        return "material"
-    if _source_path_label(rest_no_dates):
-        return "supporting"
-    if SNAP_KPI.search(rest_no_dates):
-        tokens = re.findall(r"[A-Za-z]+", rest_no_dates.lower())
-        extra = [str(item).lower() for item in SNAP_KPI.findall(rest_no_dates)]
-        has_object = any(tok in SOURCE_OBJECT_NOUNS for tok in tokens)
-        if not has_object or any(item not in {"revenue", "sales"} for item in extra):
-            return "material"
-    if _pure_source_identity(rest_no_dates):
+    if _pure_provenance_suffix(rest):
         return "supporting"
     return "material"
 
