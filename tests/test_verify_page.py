@@ -59,6 +59,72 @@ class PageUtilityTests(unittest.TestCase):
             self.assertIn("word-break:normal", html)
             self.assertIn("overflow-wrap:break-word", html)
             self.assertIn(".receipt-math td.v{white-space:normal", html)
+            math_value = html.split(".receipt-math td.v{", 1)[1].split("}", 1)[0]
+            self.assertIn("white-space:normal", math_value)
+            self.assertNotIn("nowrap", math_value)
+
+    def test_page_wraps_long_report_value_in_receipt_math(self) -> None:
+        long_value = (
+            "Metric 26; Synthetics 20; Query 19; Log 15; RUM 3; "
+            "Error-tracking 1; Total 84"
+        )
+        grade = {
+            "summary": "The type table total is 84.",
+            "report_period": "Week of August 17, 2026",
+            "cards": [{
+                "id": "C-TYPE",
+                "label": "Type table total",
+                "quote": long_value,
+                "verdict": "confirmed",
+                "explanation": "The six type rows sum to 84.",
+                "location": "Type table",
+                "report_value": long_value,
+                "operands": [
+                    {"label": "Metric alert", "value": "26", "location": "Type table"},
+                    {"label": "Synthetics alert", "value": "20", "location": "Type table"},
+                    {"label": "Query alert", "value": "19", "location": "Type table"},
+                    {"label": "Log alert", "value": "15", "location": "Type table"},
+                    {"label": "RUM alert", "value": "3", "location": "Type table"},
+                    {"label": "Error-tracking alert", "value": "1", "location": "Type table"},
+                ],
+                "calculation": {
+                    "expression": "26 + 20 + 19 + 15 + 3 + 1",
+                    "result": "84",
+                },
+            }],
+            "next": [{
+                "kind": "review_before_share",
+                "text": "Share the type table. The rows sum to 84.",
+                "quote": long_value,
+                "card_ids": ["C-TYPE"],
+            }],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            visible = tmp_path / "report-visible.txt"
+            findings = tmp_path / "findings.json"
+            grade_path = tmp_path / "grade.json"
+            out_dir = tmp_path / "artifact"
+            self.assertEqual(_run([
+                sys.executable, str(EXTRACT),
+                "--report", str(REPORT),
+                "--visible", str(visible),
+                "--out", str(findings),
+            ]).returncode, 0)
+            grade_path.write_text(json.dumps(grade) + "\n")
+            proc = _run([
+                sys.executable, str(PAGE),
+                "--findings", str(findings),
+                "--grade", str(grade_path),
+                "--out-dir", str(out_dir),
+            ])
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            html = (out_dir / "grade-artifact.html").read_text()
+            self.assertIn(long_value, html)
+            self.assertIn('td class="v">%s</td>' % long_value, html)
+            math_value = html.split(".receipt-math td.v{", 1)[1].split("}", 1)[0]
+            self.assertIn("white-space:normal", math_value)
+            self.assertNotIn("nowrap", math_value)
 
     def test_page_rejects_false_arithmetic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
