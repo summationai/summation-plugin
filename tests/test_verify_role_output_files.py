@@ -22,6 +22,7 @@ NEEDLE_NO_DISK_SEARCH = "Do not search the disk."
 NEEDLE_NO_ACCEPT_UNTIL_ROLE_FILE = (
     "Do not read `accept.py` or `role-contracts.json` until at least one file exists in `run/role-outputs/`"
 )
+NEEDLE_CLAIM_TAKER_INPUTS = "run `write_claim_taker_inputs.py`"
 
 
 class RoleOutputFileInstructionTests(unittest.TestCase):
@@ -36,6 +37,7 @@ class RoleOutputFileInstructionTests(unittest.TestCase):
         self.assertIn(NEEDLE_EXTRACT_FIRST, first)
         self.assertIn(NEEDLE_NO_DISK_SEARCH, first)
         self.assertIn(NEEDLE_NO_ACCEPT_UNTIL_ROLE_FILE, first)
+        self.assertIn(NEEDLE_CLAIM_TAKER_INPUTS, first)
         self.assertNotIn("nine-stage private", first)
 
     def test_shipped_roles_require_write_file_then_stop(self) -> None:
