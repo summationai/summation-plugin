@@ -203,6 +203,7 @@ class ContractCutoverTests(unittest.TestCase):
         blob = str(artifact)
         for forbidden in (
             "report_quote_2", "evidence_json", "date_receipt",
+            "population_alignment",
             "found_by", "verification_mode", "used_for_internal_arithmetic",
         ):
             self.assertNotIn(forbidden, blob)

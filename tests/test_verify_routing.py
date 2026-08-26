@@ -181,9 +181,39 @@ class RoutingTests(unittest.TestCase):
             "presentation", final_merge["output"]["required"])
         self.assertEqual(
             final_merge["output"]["action_required"],
-            ["id", "text", "report_quote", "check_ids"],
+            ["id", "kind", "text", "report_quote", "check_ids"],
+        )
+        self.assertEqual(
+            final_merge["output"]["presentation_required"],
+            ["summary", "check_ids", "actions", "limits"],
+        )
+        self.assertEqual(
+            final_merge["output"]["check_ids_meaning"],
+            "summary_grounding_ids; confirmed ids in this list are host-selected visible confirmations",
+        )
+        population = contract["evidence_verifier"]["output"]["population_alignment"]
+        self.assertEqual(
+            population["statuses"], ["same_population", "unreconciled"])
+        self.assertIn("links", population["same_population_required"])
+        self.assertIn(
+            "reconciliation_action", population["unreconciled_required"])
+        blindness = contract["independent_semantic_authorship"]
+        for forbidden in (
+            "claim_classifications", "verdicts", "severities", "check_ids",
+            "public_labels", "operands", "calculations", "expected_counts",
+            "score", "next_action", "prior_grade_artifact",
+        ):
+            self.assertIn(forbidden, blindness["initial_prompt_forbidden"])
+            self.assertIn(forbidden, blindness["repair_prompt_forbidden"])
+        self.assertEqual(
+            blindness["repair_prompt_allowed"],
+            ["original_role_input", "prior_role_output", "mechanical_repair_reasons"],
         )
         self.assertIn("a cited `presentation.actions` row", roles)
+        self.assertIn("No answer key", roles)
+        self.assertIn("prior grade artifact", roles)
+        self.assertIn("population_alignment", roles)
+        self.assertIn("host-selected visible confirmations", roles)
         live_status = contract["mechanical_outputs"]["verification.live_source"]
         self.assertEqual(live_status["input"], "accepted sources[].kind")
         self.assertEqual(

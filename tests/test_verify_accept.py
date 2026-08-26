@@ -101,6 +101,38 @@ def evidence_check(*, verdict: str = "confirmed") -> dict:
     }
 
 
+def same_population_alignment() -> dict:
+    return {
+        "status": "same_population",
+        "reason": (
+            "The retained source names the same report week as the dated report."
+        ),
+        "links": [{
+            "dimension": "report_period",
+            "report_quote": "KPI summary as of 2026-04-04.",
+            "source_receipt": {
+                "pointer": "/period", "value": "2026-04-04",
+            },
+        }],
+    }
+
+
+def unreconciled_alignment() -> dict:
+    return {
+        "status": "unreconciled",
+        "reason": (
+            "The supplied metric has no report period or scope that links it to "
+            "the dated report population."
+        ),
+        "missing_dimensions": ["report_period", "scope"],
+        "conflict_receipts": [{"pointer": "/on_time", "value": 94}],
+        "reconciliation_action": (
+            "Reconcile the supplied metric period and scope with the report before "
+            "changing either value."
+        ),
+    }
+
+
 def not_checkable_check() -> dict:
     return {
         "id": "C1",
@@ -234,6 +266,98 @@ class SourceAndClaimTests(unittest.TestCase):
                 sources=sources, claim_labels={"L1": CLAIM_LABEL})
             self.assertEqual(kept, [])
             self.assertIn("check severity is unknown", dropped[0]["problems"])
+
+    def test_dated_evidence_contradiction_requires_grounded_same_population(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            evidence = folder / "status.json"
+            evidence.write_text('{"on_time": 92, "total": 100}\n')
+            sources, source_problems = accept.validate_sources(
+                folder, [source_for(evidence)], folder / "report.md")
+            self.assertEqual(source_problems, [])
+            check = evidence_check(verdict="contradicted")
+            check["evidence_json"][0]["value"] = 92
+            check["public_receipt"]["decisive_operands"][0]["value"] = 92
+            check["public_receipt"]["calculation"] = {
+                "expression": "92 / 100 * 100", "result": "92%",
+            }
+            check["public_receipt"]["explanation"] = (
+                "The retained delivery total calculates to a different rate than the report."
+            )
+            kept, dropped = accept.validate_receipts(
+                REPORT, folder, [check], {"L1"}, folder / "report.md",
+                sources=sources, claim_labels={"L1": CLAIM_LABEL},
+                report_date="2026-04-04", report_period="Week ending 2026-04-04",
+            )
+            self.assertEqual(kept, [])
+            self.assertIn(
+                "dated evidence contradiction requires population_alignment",
+                dropped[0]["problems"],
+            )
+
+    def test_same_population_alignment_resolves_only_exact_agent_receipts(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            evidence = folder / "status.json"
+            evidence.write_text(
+                '{"period":"2026-04-04","on_time":92,"total":100}\n')
+            sources, source_problems = accept.validate_sources(
+                folder, [source_for(evidence)], folder / "report.md")
+            self.assertEqual(source_problems, [])
+            check = evidence_check(verdict="contradicted")
+            check["evidence_json"][0]["value"] = 92
+            check["public_receipt"]["decisive_operands"][0]["value"] = 92
+            check["public_receipt"]["calculation"] = {
+                "expression": "92 / 100 * 100", "result": "92%",
+            }
+            check["public_receipt"]["explanation"] = (
+                "The retained delivery total calculates to a different rate than the report."
+            )
+            check["population_alignment"] = same_population_alignment()
+            kept, dropped = accept.validate_receipts(
+                REPORT, folder, [check], {"L1"}, folder / "report.md",
+                sources=sources, claim_labels={"L1": CLAIM_LABEL},
+                report_date="2026-04-04", report_period="Week ending 2026-04-04",
+            )
+            self.assertEqual(dropped, [])
+            self.assertEqual(
+                kept[0]["population_alignment"]["links"][0]["source_receipt"],
+                {"pointer": "/period", "value": "2026-04-04"},
+            )
+
+            check["population_alignment"]["links"][0]["source_receipt"]["pointer"] = "/missing"
+            kept, dropped = accept.validate_receipts(
+                REPORT, folder, [check], {"L1"}, folder / "report.md",
+                sources=sources, claim_labels={"L1": CLAIM_LABEL},
+                report_date="2026-04-04", report_period="Week ending 2026-04-04",
+            )
+            self.assertEqual(kept, [])
+            self.assertIn(
+                "population_alignment.links[0].source_receipt did not match the retained source",
+                dropped[0]["problems"],
+            )
+
+    def test_unreconciled_population_cannot_be_a_contradiction(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            evidence = folder / "status.json"
+            evidence.write_text('{"on_time":92,"total":100}\n')
+            sources, _ = accept.validate_sources(
+                folder, [source_for(evidence)], folder / "report.md")
+            check = evidence_check(verdict="contradicted")
+            check["evidence_json"][0]["value"] = 92
+            check["public_receipt"]["decisive_operands"][0]["value"] = 92
+            check["population_alignment"] = unreconciled_alignment()
+            kept, dropped = accept.validate_receipts(
+                REPORT, folder, [check], {"L1"}, folder / "report.md",
+                sources=sources, claim_labels={"L1": CLAIM_LABEL},
+                report_date="2026-04-04", report_period="Week ending 2026-04-04",
+            )
+            self.assertEqual(kept, [])
+            self.assertIn(
+                "unreconciled population cannot have verdict 'contradicted'; use not_checkable",
+                dropped[0]["problems"],
+            )
 
     def test_source_digest_kind_and_retrieval_are_exact(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -859,13 +983,18 @@ class PresentationTests(unittest.TestCase):
     def test_customer_presentation_requires_an_exact_host_action(self) -> None:
         action = {
             "id": "A1",
+            "kind": "review_before_share",
             "text": "Review the delivery receipt before sharing the report.",
             "report_quote": "On-time delivery was 94%.",
             "check_ids": ["C1"],
         }
         accepted, problems = accept.validate_presentation(
-            {"presentation": {"summary": "", "actions": [action], "limits": []}},
-            REPORT, {"C1"},
+            {"presentation": {
+                "summary": "The accepted receipt supports the report value before sharing.",
+                "check_ids": ["C1"],
+                "actions": [action], "limits": [],
+            }},
+            REPORT, {"C1"}, accepted_checks=[evidence_check()],
         )
         self.assertEqual(problems, [])
         self.assertEqual(accepted["actions"], [action])
@@ -890,6 +1019,7 @@ class PresentationTests(unittest.TestCase):
         )
         check = {
             "id": "C-TOTAL",
+            "verdict": "contradicted",
             "correction_notice": {
                 "statement": statement,
                 "report_value": "$359,490.34",
@@ -899,25 +1029,143 @@ class PresentationTests(unittest.TestCase):
         }
         action = {
             "id": "A1",
+            "kind": "correct_report",
             "text": statement + " Recheck the report before sharing it.",
             "report_quote": "On-time delivery was 94%.",
             "check_ids": ["C-TOTAL"],
         }
         accepted, problems = accept.validate_presentation(
-            {"presentation": {"summary": "", "actions": [action], "limits": []}},
+            {"presentation": {
+                "summary": "The accepted contradiction requires a report correction before sharing.",
+                "check_ids": ["C-TOTAL"],
+                "actions": [action], "limits": [],
+            }},
             REPORT, {"C-TOTAL"}, accepted_checks=[check],
         )
         self.assertEqual(problems, [])
         self.assertEqual(accepted["actions"], [action])
         action["text"] = "Correct the displayed total before sharing the report."
         _accepted, problems = accept.validate_presentation(
-            {"presentation": {"summary": "", "actions": [action], "limits": []}},
+            {"presentation": {
+                "summary": "The accepted contradiction requires a report correction before sharing.",
+                "check_ids": ["C-TOTAL"],
+                "actions": [action], "limits": [],
+            }},
             REPORT, {"C-TOTAL"}, accepted_checks=[check],
         )
         self.assertEqual(problems, [
             "presentation.actions does not include the exact correction statement "
             "for check 'C-TOTAL'",
         ])
+
+    def test_visible_confirmations_are_selected_by_host_ids_not_severity(self) -> None:
+        high = evidence_check()
+        high["id"] = "C-HIGH"
+        high["claim_id"] = "L-HIGH"
+        high["severity"] = "high"
+        low = evidence_check()
+        low["id"] = "C-LOW"
+        low["claim_id"] = "L-LOW"
+        low["severity"] = "low"
+        action = {
+            "id": "A1", "kind": "review_before_share",
+            "text": "Review the accepted receipts before sharing the report.",
+            "report_quote": "On-time delivery was 94%.",
+            "check_ids": ["C-HIGH"],
+        }
+        accepted, problems = accept.validate_presentation(
+            {"presentation": {
+                "summary": "The selected confirmation supplies decision-relevant checking context.",
+                "check_ids": ["C-LOW"],
+                "actions": [action], "limits": [],
+            }},
+            REPORT, {"C-HIGH", "C-LOW"}, accepted_checks=[high, low],
+        )
+        self.assertEqual(problems, [])
+        self.assertEqual(accepted["check_ids"], ["C-LOW"])
+
+        error = evidence_check(verdict="contradicted")
+        error["id"] = "C-ERR"
+        error["claim_id"] = "L-ERR"
+        _accepted, problems = accept.validate_presentation(
+            {"presentation": {
+                "summary": "The accepted results require review before this report is shared.",
+                "check_ids": ["C-ERR"],
+                "actions": [action], "limits": [],
+            }},
+            REPORT, {"C-HIGH", "C-LOW", "C-ERR"},
+            accepted_checks=[high, low, error],
+        )
+        self.assertIn(
+            "presentation must select at least one visible confirmed check",
+            problems,
+        )
+
+    def test_unreconciled_conflict_requires_exact_reconciliation_action(self) -> None:
+        check = not_checkable_check()
+        check["basis"] = "evidence"
+        check["public_receipt"]["source_id"] = "status-snapshot"
+        check["population_alignment"] = unreconciled_alignment()
+        action = {
+            "id": "A1", "kind": "correct_report",
+            "text": "Replace the report value with the supplied value.",
+            "report_quote": "On-time delivery was 94%.",
+            "check_ids": ["C1"],
+        }
+        _accepted, problems = accept.validate_presentation(
+            {"presentation": {
+                "summary": "The source conflict must be reconciled before either value changes.",
+                "check_ids": ["C1"],
+                "actions": [action], "limits": [],
+            }},
+            REPORT, {"C1"}, accepted_checks=[check],
+        )
+        self.assertIn(
+            "presentation.actions[0] cannot use correct_report for an unreconciled population",
+            problems,
+        )
+        self.assertIn(
+            "presentation.actions has no reconcile_before_change action for check 'C1'",
+            problems,
+        )
+
+        action.update({
+            "kind": "reconcile_before_change",
+            "text": unreconciled_alignment()["reconciliation_action"],
+        })
+        accepted, problems = accept.validate_presentation(
+            {"presentation": {
+                "summary": "The source conflict must be reconciled before either value changes.",
+                "check_ids": ["C1"],
+                "actions": [action], "limits": [],
+            }},
+            REPORT, {"C1"}, accepted_checks=[check],
+        )
+        self.assertEqual(problems, [])
+        self.assertEqual(accepted["actions"][0]["kind"], "reconcile_before_change")
+
+    def test_concise_verdict_summary_is_required_and_grounded_to_accepted_ids(self) -> None:
+        action = {
+            "id": "A1", "kind": "review_before_share",
+            "text": "Review the accepted receipt before sharing the report.",
+            "report_quote": "On-time delivery was 94%.", "check_ids": ["C1"],
+        }
+        for summary, ids, expected in (
+            ("", ["C1"], "presentation.summary is missing or not substantive"),
+            ("This summary has enough words but cites no accepted check.", [],
+             "presentation.summary has no check ids"),
+            ("This summary cites an outcome that was not accepted.", ["UNKNOWN"],
+             "presentation.summary references unknown check id 'UNKNOWN'"),
+        ):
+            with self.subTest(summary=summary):
+                _accepted, problems = accept.validate_presentation(
+                    {"presentation": {
+                        "summary": summary, "check_ids": ids,
+                        "actions": [action], "limits": [],
+                    }},
+                    REPORT, {"C1"}, accepted_checks=[evidence_check()],
+                )
+                self.assertIn(expected, problems)
 
 
 class CliTests(unittest.TestCase):

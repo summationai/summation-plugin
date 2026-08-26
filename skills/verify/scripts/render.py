@@ -19,6 +19,9 @@ ROOT_VERDICTS = frozenset({
     "safe_to_share", "share_with_caveats", "fix_first", "unable_to_grade",
 })
 SOURCE_KINDS = frozenset({"supplied_file", "live_tool"})
+ACTION_KINDS = frozenset({
+    "correct_report", "reconcile_before_change", "review_before_share",
+})
 ROOT_STATIC_HEADLINES = {
     "safe_to_share": "Safe to share",
     "share_with_caveats": "Share with caveats",
@@ -163,7 +166,9 @@ def _publishable_text(value, *, label: bool = False) -> bool:
         or any(name.lower() in text.lower() for name in PRIVATE_NAMES)
     ):
         return False
-    return not (label and _VAGUE.fullmatch(text))
+    if label and _VAGUE.fullmatch(text):
+        return False
+    return True
 
 
 def _substantive(value) -> bool:
@@ -387,12 +392,15 @@ def _public_actions(guidance: dict | None, *, check_ids: set[str]) -> list[dict]
         if not isinstance(raw, dict):
             raise SystemExit("render: accepted presentation action is not an object")
         action_id = str(raw.get("id") or "")
+        kind = str(raw.get("kind") or "")
         text = str(raw.get("text") or "")
         report_quote = str(raw.get("report_quote") or "")
         cited = raw.get("check_ids")
         if not re.fullmatch(r"A[0-9]+", action_id) or action_id in seen:
             raise SystemExit("render: accepted presentation action id is invalid or duplicated")
-        if not _publishable_text(text) or not _publishable_text(report_quote):
+        if kind not in ACTION_KINDS:
+            raise SystemExit("render: accepted presentation action kind is invalid")
+        if not _substantive(text) or not _publishable_text(report_quote):
             raise SystemExit("render: accepted presentation action text is not publishable")
         if (
             not isinstance(cited, list)
@@ -403,6 +411,42 @@ def _public_actions(guidance: dict | None, *, check_ids: set[str]) -> list[dict]
         out.append({"id": action_id, "text": text, "report_quote": report_quote})
         seen.add(action_id)
     return out
+
+
+def _public_presentation(guidance: dict | None, *, checks: dict[str, dict]
+                         ) -> tuple[dict, list[dict]]:
+    """Copy the host summary and its exact accepted-check grounding."""
+    if not isinstance(guidance, dict):
+        raise SystemExit("render: accepted presentation is required")
+    summary = str(guidance.get("summary") or "").strip()
+    if not _substantive(summary):
+        raise SystemExit("render: accepted presentation summary is not publishable")
+    raw_ids = guidance.get("check_ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise SystemExit("render: accepted presentation summary has no check ids")
+    selected = [str(value or "").strip() for value in raw_ids]
+    if (
+        any(not value or value not in checks for value in selected)
+        or len(selected) != len(set(selected))
+    ):
+        raise SystemExit("render: accepted presentation check ids are invalid")
+    confirmed = {
+        check_id for check_id, row in checks.items()
+        if row.get("verdict") == "confirmed"
+    }
+    if confirmed and not (confirmed & set(selected)):
+        raise SystemExit(
+            "render: accepted presentation has no visible confirmed check ids")
+    actions = _public_actions(guidance, check_ids=set(checks))
+    limits = guidance.get("limits")
+    if not isinstance(limits, list):
+        raise SystemExit("render: accepted presentation limits are not a list")
+    return {
+        "summary": summary,
+        "check_ids": selected,
+        "actions": [],
+        "limits": [],
+    }, actions
 
 
 def source_public(raw: dict) -> dict:
@@ -553,7 +597,7 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
     material_public_checks = [
         row for row in public_checks if row.get("importance") == "material"]
     by_id = {row["id"]: row for row in material_public_checks}
-    actions = _public_actions(guidance, check_ids=set(by_id))
+    presentation, actions = _public_presentation(guidance, checks=by_id)
     if chosen != set(by_id):
         raise SystemExit("render: material claim and accepted check ids do not reconcile")
     for claim in material_claims:
@@ -607,6 +651,7 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
             if row.get("classification") != "structural_context"
         ],
         "sources": retained_sources,
+        "presentation": presentation,
     }
     validate_artifact(artifact)
     return artifact
@@ -650,29 +695,49 @@ def _card_html(check: dict, claim: dict, sources: dict[str, dict], *,
     report_operand = receipt["report_operand"]
     disposition = _fixed_label(
         DISPOSITION_LABELS, str(check["verdict"]), "disposition")
-    operands = [
-        '<div class="operand receipt-row" data-operand-role="report">'
-        f'<strong class="operand-label">{html.escape(report_operand["label"])}</strong>'
-        f'<span class="value">{html.escape(_display(report_operand["value"]))}</span>'
-        f'<span class="location">{html.escape(report_operand["location"])}</span>'
-        "</div>"
-    ]
-    for row in receipt.get("decisive_operands") or []:
-        operands.append(
-            '<div class="operand receipt-row" data-operand-role="decisive">'
-            f'<strong class="operand-label">{html.escape(row["label"])}</strong>'
-            f'<span class="value">{html.escape(_display(row["value"]))}</span>'
-            f'<span class="location">{html.escape(row["location"])}</span>'
-            "</div>"
-        )
+    decisive = receipt.get("decisive_operands") or []
+    operands: list[str] = []
     calculation = ""
     if receipt.get("calculation"):
         expression = html.escape(receipt["calculation"]["expression"])
         result = html.escape(_display(receipt["calculation"]["result"]))
+        math_rows = "".join(
+            '<tr data-operand-role="decisive"><td>'
+            f'<strong>{html.escape(row["label"])}</strong>'
+            f'<span class="math-location">{html.escape(row["location"])}</span>'
+            f'</td><td class="v">{html.escape(_display(row["value"]))}</td></tr>'
+            for row in decisive
+        )
         calculation = (
-            '<div class="calculation"><span class="receipt-key">Calculation</span>'
+            '<div class="calculation">'
+            '<table class="receipt-math num"><tbody>'
+            f'{math_rows}'
+            '<tr class="sum"><td>Calculated result</td>'
+            f'<td class="v">{result}</td></tr>'
+            '<tr class="report"><td>Report shows'
+            f'<span class="math-location">{html.escape(report_operand["label"])} · '
+            f'{html.escape(report_operand["location"])}</span></td>'
+            f'<td class="v">{html.escape(_display(report_operand["value"]))}</td></tr>'
+            '</tbody></table>'
+            '<span class="receipt-key expression-key">Calculation expression</span>'
             f'<span class="calculation-line">{expression} = {result}</span></div>'
         )
+    else:
+        operands.append(
+            '<div class="operand receipt-row" data-operand-role="report">'
+            f'<strong class="operand-label">{html.escape(report_operand["label"])}</strong>'
+            f'<span class="value">{html.escape(_display(report_operand["value"]))}</span>'
+            f'<span class="location">{html.escape(report_operand["location"])}</span>'
+            "</div>"
+        )
+        for row in decisive:
+            operands.append(
+                '<div class="operand receipt-row" data-operand-role="decisive">'
+                f'<strong class="operand-label">{html.escape(row["label"])}</strong>'
+                f'<span class="value">{html.escape(_display(row["value"]))}</span>'
+                f'<span class="location">{html.escape(row["location"])}</span>'
+                "</div>"
+            )
     reconstruction = ""
     if receipt.get("reconstruction_attempt"):
         reconstruction = (
@@ -743,6 +808,29 @@ def _outcome_section(verdict: str, cards: list[str], *,
     )
 
 
+def _not_checkable_section(rows: list[tuple[dict, dict]]) -> str:
+    if not rows:
+        return ""
+    items = "".join(
+        '<li class="not-checkable-item"><span class="compact-claim">'
+        f'<strong>{html.escape(claim["quote"])}</strong>'
+        f'<span>{html.escape(check["public_receipt"]["explanation"])}</span>'
+        '</span></li>'
+        for check, claim in rows
+    )
+    count = len(rows)
+    noun = "outcome" if count == 1 else "outcomes"
+    label = _fixed_label(DISPOSITION_LABELS, "not_checkable", "disposition")
+    return (
+        '<section class="outcome-section compact-outcomes" '
+        'data-outcome-section="not_checkable">'
+        f'<h2>{html.escape(label)}</h2>'
+        f'<p class="sectionlede">{count} {html.escape(label.lower())} {noun}; complete receipts '
+        'are available under Technical detail.</p>'
+        f'<ul class="plain">{items}</ul></section>'
+    )
+
+
 def html_of(artifact: dict) -> str:
     """Lay accepted public fields into the locked customer hierarchy."""
     validate_artifact(artifact)
@@ -754,17 +842,28 @@ def html_of(artifact: dict) -> str:
     }
     prominent: dict[str, list[str]] = {key: [] for key in DISPOSITIONS}
     technical_confirmed: list[str] = []
+    technical_not_checkable: list[str] = []
+    compact_not_checkable: list[tuple[dict, dict]] = []
+    presentation = artifact.get("presentation")
+    if not isinstance(presentation, dict):
+        raise SystemExit("render: accepted presentation is missing")
+    summary_ids = presentation.get("check_ids")
+    if not isinstance(summary_ids, list):
+        raise SystemExit("render: accepted presentation check ids are missing")
+    visible_confirmed = {str(value) for value in summary_ids}
     for check in artifact["evidence_checks"]:
         claim = claims_by_check.get(str(check["id"]))
         if claim is None:
             continue
         is_technical = (
-            check["verdict"] == "confirmed"
-            and check.get("severity") not in {"high", "medium"}
-        )
+            check["verdict"] == "confirmed" and check["id"] not in visible_confirmed
+        ) or check["verdict"] == "not_checkable"
         placement = "technical" if is_technical else "prominent"
         card = _card_html(check, claim, sources, prominence=placement)
-        if is_technical:
+        if check["verdict"] == "not_checkable":
+            technical_not_checkable.append(card)
+            compact_not_checkable.append((check, claim))
+        elif is_technical:
             technical_confirmed.append(card)
         else:
             prominent[check["verdict"]].append(card)
@@ -790,9 +889,9 @@ def html_of(artifact: dict) -> str:
             technical_confirmed=len(technical_confirmed),
         )
         for verdict in (
-            "contradicted", "confirmed", "changed_since_report", "not_checkable"
+            "contradicted", "confirmed", "changed_since_report"
         )
-    )
+    ) + _not_checkable_section(compact_not_checkable)
     source = artifact["source"]
     filename = str(source["path"])
     generated = _display_date(artifact["generated_at"], field="generated_at")
@@ -816,9 +915,10 @@ def html_of(artifact: dict) -> str:
     )
     live_ran = artifact["verification"]["live_source"]["status"] == "complete"
     live_text = "Ran" if live_ran else "Did not run"
+    deferred_cards = [*technical_confirmed, *technical_not_checkable]
     technical_cards = (
-        '<div class="technical-cards">' + "".join(technical_confirmed) + "</div>"
-        if technical_confirmed else '<div class="technical-cards"></div>'
+        '<div class="technical-cards">' + "".join(deferred_cards) + "</div>"
+        if deferred_cards else '<div class="technical-cards"></div>'
     )
     cited = len({
         str((row.get("public_receipt") or {}).get("source_id") or "")
@@ -846,6 +946,7 @@ header{display:flex;justify-content:space-between;align-items:baseline;gap:16px;
 .verdict{padding:40px 0 8px}.chip{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.06em;padding:4px 10px;border-radius:4px;margin-bottom:14px}
 .chip.fix{background:var(--red-soft);color:var(--red);border:1px solid #ecc8c3}.chip.safe{background:var(--green-soft);color:var(--green);border:1px solid #c6e2d2}.chip.warn{background:var(--amber-soft);color:var(--amber);border:1px solid #ecd9b8}.chip.neutral{background:var(--gray-soft);color:var(--gray);border:1px solid var(--line)}
 h1{font-size:31px;line-height:1.15;letter-spacing:-.015em;font-weight:700;max-width:30ch;text-wrap:balance}.verdict p{margin-top:12px;font-size:16px;color:var(--ink-2);max-width:62ch;text-wrap:pretty}
+.verdict .verdict-summary{color:var(--ink);font-weight:500}.verdict .count-summary{font-size:14px}
 .file{font-size:13px;color:var(--ink-3);margin-top:16px;display:flex;gap:6px 14px;flex-wrap:wrap}.file code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel);padding:2px 6px;border-radius:4px;color:var(--ink-2);overflow-wrap:anywhere}
 .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:30px 0 0;background:#fff}
 .stat{padding:16px 18px 14px;border-left:1px solid var(--line)}.stat:first-child{border-left:none}.stat .n{font-size:26px;font-weight:700;letter-spacing:-.02em}.stat .l{font-size:13px;font-weight:600;margin-top:2px}.stat .s{font-size:12px;color:var(--ink-3);margin-top:2px;text-wrap:balance}.stat.red .l{color:var(--red)}.stat.green .l{color:var(--green)}.stat.amber .l{color:var(--amber)}.stat.gray .l{color:var(--gray)}
@@ -857,12 +958,13 @@ section{margin-top:44px}h2{font-size:18px;letter-spacing:-.01em;margin-bottom:6p
 .material-card h3{font-size:16px;text-wrap:balance}.where{font-size:13px;color:var(--ink-3);margin-top:2px;overflow-wrap:anywhere;word-break:break-word}.claim-quote{font-size:14px;color:var(--ink-2);margin-top:12px;padding-left:12px;border-left:2px solid var(--line);white-space:normal;overflow-wrap:anywhere}
 .receipt{margin-top:16px;border-top:1px dashed var(--line);padding-top:12px}.receipt h4{font-size:13px;margin-bottom:8px}.operand{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.65fr) minmax(0,1.5fr);gap:8px 14px;padding:7px 0;font-size:13px;align-items:start}.operand+.operand{border-top:1px solid var(--line)}.operand-label{font-weight:600}.value{font-variant-numeric:tabular-nums;font-weight:600}.location{color:var(--ink-3);overflow-wrap:anywhere;word-break:break-word;white-space:normal}
 .receipt-key{display:block;color:var(--ink-3);font-size:12px;font-weight:600}.calculation,.receipt-explanation,.reconstruction-attempt,.card-source{margin-top:12px;font-size:13px}.calculation-line{display:block;margin-top:3px;font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.receipt-explanation p,.reconstruction-attempt p{margin-top:3px;color:var(--ink-2);max-width:62ch}.card-source{display:flex;gap:5px 10px;align-items:baseline;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px}.card-source .receipt-key{width:100%}.card-source code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel);padding:1px 5px;border-radius:3px;overflow-wrap:anywhere}.source-time{color:var(--ink-3)}
+.receipt-math{width:100%;max-width:460px;border-collapse:collapse;font-size:13px}.receipt-math td{padding:7px 0;vertical-align:top}.receipt-math td.v{text-align:right;padding-left:20px;font-weight:600;white-space:nowrap}.receipt-math tr+tr td{border-top:1px solid var(--line)}.receipt-math tr.sum td{font-weight:700}.receipt-math tr.report td{color:var(--red);font-weight:700}.material-card[data-disposition="confirmed"] .receipt-math tr.report td{color:var(--green)}.math-location{display:block;color:var(--ink-3);font-size:12px;font-weight:400;overflow-wrap:anywhere}.expression-key{margin-top:10px}.plain{list-style:none}.not-checkable-item{padding:12px 0;border-bottom:1px solid var(--line);font-size:14px}.not-checkable-item:last-child{border-bottom:none}.compact-claim{display:block;max-width:66ch}.compact-claim strong{display:block;color:var(--ink)}.compact-claim span{display:block;margin-top:3px;color:var(--ink-2)}
 .scope{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 26px;margin-top:8px;font-size:13px}.scope div{color:var(--ink-3);text-wrap:pretty}.scope b{display:block;color:var(--ink);font-weight:600;font-size:13.5px}
 .next{margin-top:34px;background:var(--panel);border-radius:8px;padding:16px 20px;font-size:14px;color:var(--ink-2)}.next b{color:var(--ink)}
 details{margin-top:26px;font-size:13px;color:var(--ink-3)}details summary{cursor:pointer;font-weight:600;color:var(--ink-2)}.technical-cards{margin-top:14px}.technical-cards:empty{display:none}
 footer{margin-top:52px;border-top:1px solid var(--line);padding-top:18px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink-3)}
 @media(max-width:40rem){body{padding:0 16px 48px}.verdict{padding-top:30px}h1{font-size:27px}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.stat{border-top:1px solid var(--line)}.stat:nth-child(-n+2){border-top:none}.stat:nth-child(3){border-left:none}.material-card{padding:18px 16px}.operand{grid-template-columns:minmax(0,1fr);gap:2px}.operand .value{margin-top:2px}.operand .location{margin-top:2px}.scope{grid-template-columns:minmax(0,1fr)}}
-@media print{body{padding:0;background:#fff}.material-card,.stats{break-inside:avoid;page-break-inside:avoid}.next{border:1px solid var(--line)}details.technical-detail>summary{display:none}details.technical-detail:not([open])>.technical-cards{display:block!important}footer{margin-top:28px}}
+@media print{body{padding:0;background:#fff}.material-card,.stats{break-inside:avoid;page-break-inside:avoid}.technical-scope,.scope,.operand,.receipt-row,.receipt-math tr,.calculation,.receipt-explanation,.card-source{break-inside:avoid;page-break-inside:avoid}.next{border:1px solid var(--line)}details.technical-detail>summary{display:block;list-style:none;font-size:18px;color:var(--ink);margin-bottom:12px}details.technical-detail>summary::-webkit-details-marker{display:none}details.technical-detail:not([open])>.technical-cards{display:block!important}footer{margin-top:28px}}
 """
     return (
         '<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
@@ -876,7 +978,8 @@ footer{margin-top:52px;border-top:1px solid var(--line);padding-top:18px;display
         f'<span class="chip {html.escape(root_tone)}">'
         f'{html.escape(root_chip_label)}</span>'
         f'<h1>{html.escape(root_label)}</h1>'
-        f'<p>{html.escape(count_sentence)}</p>'
+        f'<p class="verdict-summary">{html.escape(presentation["summary"])}</p>'
+        f'<p class="count-summary">{html.escape(count_sentence)}</p>'
         '<div class="file">'
         f'<span>Report examined: <code>{html.escape(filename)}</code></span>'
         f'<span>Period: {html.escape(period)}</span>'

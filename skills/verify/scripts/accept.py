@@ -81,6 +81,12 @@ _DAY_MONTH_DATE = re.compile(
 )
 VISIBLE_REPORT_SUFFIXES = frozenset({".html", ".md", ".txt", ".csv"})
 SOURCE_KINDS = frozenset({"supplied_file", "live_tool"})
+ACTION_KINDS = frozenset({
+    "correct_report", "reconcile_before_change", "review_before_share",
+})
+POPULATION_DIMENSIONS = frozenset({
+    "report_period", "as_of_date", "scope", "population_key",
+})
 PRIVATE_NAMES = frozenset({
     "findings.json", "receipts.json", "checks.json", "claims.json",
     "grade-artifact.json", "report-visible.txt", "ledger.json",
@@ -494,6 +500,149 @@ def validate_date_receipt(evidence: pathlib.Path | None, raw,
     if not explicit_value_in_quote(declared, quote):
         return None, ["current_as_of does not match evidence date"]
     return {"quote": quote}, []
+
+
+def validate_exact_source_receipt(evidence: pathlib.Path | None, raw,
+                                  label: str) -> tuple[dict | None, list[str]]:
+    """Resolve one host-selected source pointer or exact normalized quote."""
+    if evidence is None:
+        return None, [f"{label} has no retained source file"]
+    if not isinstance(raw, dict) or not raw:
+        return None, [f"{label} is missing or invalid"]
+    unknown = sorted(set(raw) - {"pointer", "value", "quote"})
+    if unknown:
+        return None, [f"{label} has unknown field {unknown[0]!r}"]
+    pointer = str(raw.get("pointer") or "").strip()
+    quote = str(raw.get("quote") or "").strip()
+    if bool(pointer) == bool(quote):
+        return None, [f"{label} must contain exactly one pointer or quote"]
+    if pointer:
+        if "value" not in raw:
+            return None, [f"{label} pointer requires an explicit value"]
+        matched, canonical = json_pointer_receipt(
+            evidence, [{"pointer": pointer, "value": raw.get("value")}])
+        if not matched or not canonical:
+            return None, [f"{label} did not match the retained source"]
+        return canonical[0], []
+    if "value" in raw:
+        return None, [f"{label} quote must not declare a separate value"]
+    if not quote_in_text(quote, load_text(evidence)):
+        return None, [f"{label} did not match the retained source"]
+    return {"quote": quote}, []
+
+
+def validate_population_alignment(finding: dict, report: str,
+                                  evidence: pathlib.Path | None, *,
+                                  report_date: str | None = None,
+                                  report_period: str | None = None
+                                  ) -> tuple[dict | None, list[str]]:
+    """Validate host-declared population judgment through exact receipts only."""
+    raw = finding.get("population_alignment")
+    basis = str(finding.get("basis") or "")
+    verdict = str(finding.get("verdict") or "")
+    dated = bool(str(report_date or "").strip() or str(report_period or "").strip())
+    if raw is None:
+        if basis == "evidence" and verdict == "contradicted" and dated:
+            return None, ["dated evidence contradiction requires population_alignment"]
+        return None, []
+    if basis != "evidence":
+        return None, ["population_alignment is allowed only for evidence-basis checks"]
+    if not isinstance(raw, dict):
+        return None, ["population_alignment is not an object"]
+    status = str(raw.get("status") or "").strip()
+    reason = str(raw.get("reason") or "").strip()
+    problems: list[str] = []
+    if not _substantive_explanation(reason):
+        problems.append("population_alignment.reason is missing or not substantive")
+    if status == "same_population":
+        unknown = sorted(set(raw) - {"status", "reason", "links"})
+        if unknown:
+            problems.append(
+                f"population_alignment has unknown field {unknown[0]!r}")
+        links = raw.get("links")
+        if not isinstance(links, list) or not links:
+            problems.append("population_alignment.links is missing or empty")
+            links = []
+        canonical_links: list[dict] = []
+        for index, link in enumerate(links):
+            label = f"population_alignment.links[{index}]"
+            if not isinstance(link, dict):
+                problems.append(f"{label} is not an object")
+                continue
+            unknown_link = sorted(
+                set(link) - {"dimension", "report_quote", "source_receipt"})
+            if unknown_link:
+                problems.append(
+                    f"{label} has unknown field {unknown_link[0]!r}")
+            dimension = str(link.get("dimension") or "").strip()
+            report_quote = str(link.get("report_quote") or "").strip()
+            if dimension not in POPULATION_DIMENSIONS:
+                problems.append(f"{label}.dimension is missing or unknown")
+            if not quote_in_text(report_quote, report):
+                problems.append(f"{label}.report_quote not found in visible report text")
+            source_receipt, receipt_problems = validate_exact_source_receipt(
+                evidence, link.get("source_receipt"), f"{label}.source_receipt")
+            problems.extend(receipt_problems)
+            clean = {
+                "dimension": dimension,
+                "report_quote": report_quote,
+                "source_receipt": source_receipt,
+            }
+            canonical_links.append(clean)
+        canonical = {
+            "status": status, "reason": reason, "links": canonical_links,
+        }
+    elif status == "unreconciled":
+        unknown = sorted(set(raw) - {
+            "status", "reason", "missing_dimensions", "conflict_receipts",
+            "reconciliation_action",
+        })
+        if unknown:
+            problems.append(
+                f"population_alignment has unknown field {unknown[0]!r}")
+        dimensions = raw.get("missing_dimensions")
+        if not isinstance(dimensions, list) or not dimensions:
+            problems.append(
+                "population_alignment.missing_dimensions is missing or empty")
+            dimensions = []
+        clean_dimensions = [str(value or "").strip() for value in dimensions]
+        if len(clean_dimensions) != len(set(clean_dimensions)):
+            problems.append("population_alignment.missing_dimensions is duplicated")
+        for index, dimension in enumerate(clean_dimensions):
+            if dimension not in POPULATION_DIMENSIONS:
+                problems.append(
+                    f"population_alignment.missing_dimensions[{index}] is unknown")
+        receipts = raw.get("conflict_receipts")
+        if not isinstance(receipts, list) or not receipts:
+            problems.append(
+                "population_alignment.conflict_receipts is missing or empty")
+            receipts = []
+        canonical_receipts: list[dict] = []
+        for index, receipt in enumerate(receipts):
+            canonical_receipt, receipt_problems = validate_exact_source_receipt(
+                evidence, receipt,
+                f"population_alignment.conflict_receipts[{index}]")
+            problems.extend(receipt_problems)
+            if canonical_receipt is not None:
+                canonical_receipts.append(canonical_receipt)
+        reconciliation = str(raw.get("reconciliation_action") or "").strip()
+        if not _substantive_explanation(reconciliation):
+            problems.append(
+                "population_alignment.reconciliation_action is missing or not substantive")
+        if verdict != "not_checkable":
+            problems.append(
+                f"unreconciled population cannot have verdict {verdict!r}; "
+                "use not_checkable")
+        canonical = {
+            "status": status,
+            "reason": reason,
+            "missing_dimensions": clean_dimensions,
+            "conflict_receipts": canonical_receipts,
+            "reconciliation_action": reconciliation,
+        }
+    else:
+        return None, ["population_alignment.status is missing or unknown"]
+    return canonical, problems
 
 
 def _substantive_explanation(value) -> bool:
@@ -1423,7 +1572,8 @@ def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
                       report_path: pathlib.Path | None = None, *,
                       sources: list[dict] | None = None,
                       claim_labels: dict[str, str] | None = None,
-                      report_date: str | None = None) -> tuple[list, list]:
+                      report_date: str | None = None,
+                      report_period: str | None = None) -> tuple[list, list]:
     """Ground agent-authored checks; never invent their public semantics."""
     validated: list[dict] = []
     discarded: list[dict] = []
@@ -1496,7 +1646,7 @@ def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
         ).strip()
         source = source_map.get(source_id)
         evidence = None
-        if basis == "evidence" and verdict in EVIDENCE_RECEIPT_VERDICTS:
+        if basis == "evidence":
             if source is not None:
                 evidence, path_problem = evidence_path(
                     sandbox, source.get("evidence_file"), report_path)
@@ -1508,6 +1658,7 @@ def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
                         "evidence_mode": source.get("kind"),
                         "evidence_file": source.get("evidence_file"),
                     })
+        if basis == "evidence" and verdict in EVIDENCE_RECEIPT_VERDICTS:
             json_receipts = finding.get("evidence_json")
             evidence_quote = str(finding.get("evidence_quote") or "").strip()
             if json_receipts not in (None, []) and not isinstance(json_receipts, list):
@@ -1542,6 +1693,13 @@ def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
             finding.get("evidence_json") or finding.get("evidence_quote")
         ):
             problems.append("report-basis check must not declare evidence receipts")
+
+        population_alignment, population_problems = validate_population_alignment(
+            finding, report, evidence,
+            report_date=report_date, report_period=report_period)
+        problems.extend(population_problems)
+        if population_alignment is not None:
+            receipt_updates["population_alignment"] = population_alignment
 
         if verdict == "changed_since_report":
             reconstruction = str(finding.get("reconstruction_attempt") or "").strip()
@@ -1747,18 +1905,36 @@ def validate_presentation(doc, report: str,
     if not isinstance(pres, dict):
         return None, ["presentation is not an object"]
     accepted = accepted_ids or set()
+    check_rows = [
+        row for row in (accepted_checks or []) if isinstance(row, dict)]
+    checks_by_id = {
+        str(row.get("id") or "").strip(): row for row in check_rows
+        if str(row.get("id") or "").strip()
+    }
+    if accepted_checks is None:
+        problems.append("presentation accepted check ledger is missing")
     summary = pres.get("summary")
     if summary is not None and not isinstance(summary, str):
         problems.append("presentation.summary is not a string")
         summary = None
     summary_text = str(summary or "").strip()
     summary_ids = _check_ids_of(pres)
-    if summary_text:
-        id_problem = _ids_problem(summary_ids, accepted, "presentation.summary")
-        if id_problem:
-            problems.append(id_problem)
-            summary_text = ""
-            summary_ids = []
+    if not _substantive_explanation(summary_text):
+        problems.append("presentation.summary is missing or not substantive")
+    elif len(re.findall(r"[A-Za-z0-9%$]+", summary_text)) > 45:
+        problems.append("presentation.summary is not concise")
+    id_problem = _ids_problem(summary_ids, accepted, "presentation.summary")
+    if id_problem:
+        problems.append(id_problem)
+    if len(summary_ids) != len(set(summary_ids)):
+        problems.append("presentation.summary check ids are duplicated")
+    confirmed_ids = {
+        check_id for check_id, row in checks_by_id.items()
+        if row.get("verdict") == "confirmed"
+    }
+    if confirmed_ids and not (confirmed_ids & set(summary_ids)):
+        problems.append(
+            "presentation must select at least one visible confirmed check")
     actions = pres.get("actions") or []
     limits = pres.get("limits") or []
     cleaned_actions = []
@@ -1792,12 +1968,61 @@ def validate_presentation(doc, report: str,
             if id_problem:
                 problems.append(id_problem)
                 continue
-            bucket.append({
+            if len(ids) != len(set(ids)):
+                problems.append(f"{label} check ids are duplicated")
+                continue
+            if not _substantive_explanation(text):
+                problems.append(f"{label}.text is not substantive or public-safe")
+                continue
+            cleaned = {
                 "id": item_id or f"{name[:1].upper()}{index + 1}",
                 "text": text,
                 "report_quote": quote,
                 "check_ids": ids,
-            })
+            }
+            if name == "actions":
+                kind = str(item.get("kind") or "").strip()
+                if kind not in ACTION_KINDS:
+                    problems.append(f"{label}.kind is missing or unknown")
+                    continue
+                cited_checks = [checks_by_id[item_id] for item_id in ids]
+                unreconciled = [
+                    row for row in cited_checks
+                    if (row.get("population_alignment") or {}).get("status")
+                    == "unreconciled"
+                ]
+                if kind == "correct_report":
+                    if unreconciled:
+                        problems.append(
+                            f"{label} cannot use correct_report for an "
+                            "unreconciled population")
+                    if any(row.get("verdict") != "contradicted" for row in cited_checks):
+                        problems.append(
+                            f"{label} correct_report is not supported only by "
+                            "accepted contradictions")
+                elif kind == "reconcile_before_change":
+                    if not unreconciled or len(unreconciled) != len(cited_checks):
+                        problems.append(
+                            f"{label} reconcile_before_change must cite only "
+                            "unreconciled checks")
+                    for row in unreconciled:
+                        statement = str(
+                            (row.get("population_alignment") or {}).get(
+                                "reconciliation_action") or ""
+                        ).strip()
+                        if statement and not _public_literal_in(statement, text):
+                            problems.append(
+                                f"{label} does not include the exact reconciliation "
+                                f"action for check {row.get('id')!r}")
+                elif any(
+                    row.get("verdict") == "contradicted" or row in unreconciled
+                    for row in cited_checks
+                ):
+                    problems.append(
+                        f"{label} review_before_share cannot stand in for a "
+                        "correction or reconciliation action")
+                cleaned["kind"] = kind
+            bucket.append(cleaned)
     if not cleaned_actions:
         problems.append("presentation.actions has no accepted action")
     elif len({row["id"] for row in cleaned_actions}) != len(cleaned_actions):
@@ -1805,19 +2030,31 @@ def validate_presentation(doc, report: str,
     for check in accepted_checks or []:
         if not isinstance(check, dict):
             continue
-        notice = check.get("correction_notice")
-        if not isinstance(notice, dict):
-            continue
         check_id = str(check.get("id") or "").strip()
-        statement = str(notice.get("statement") or "").strip()
-        if statement and not any(
-            check_id in row["check_ids"]
-            and _public_literal_in(statement, row["text"])
+        notice = check.get("correction_notice")
+        if isinstance(notice, dict):
+            statement = str(notice.get("statement") or "").strip()
+            if statement and not any(
+                check_id in row["check_ids"]
+                and _public_literal_in(statement, row["text"])
+                for row in cleaned_actions
+            ):
+                problems.append(
+                    "presentation.actions does not include the exact correction "
+                    f"statement for check {check_id!r}")
+        alignment = check.get("population_alignment")
+        if not isinstance(alignment, dict) or alignment.get("status") != "unreconciled":
+            continue
+        reconciliation = str(alignment.get("reconciliation_action") or "").strip()
+        if not any(
+            row.get("kind") == "reconcile_before_change"
+            and check_id in row["check_ids"]
+            and _public_literal_in(reconciliation, row["text"])
             for row in cleaned_actions
         ):
             problems.append(
-                "presentation.actions does not include the exact correction "
-                f"statement for check {check_id!r}")
+                "presentation.actions has no reconcile_before_change action "
+                f"for check {check_id!r}")
     if problems and not summary_text and not cleaned_actions and not cleaned_limits:
         return None, problems
     return {
@@ -2081,7 +2318,8 @@ def main() -> int:
         text, sandbox, proposed, claim_ids, args.report,
         sources=accepted_sources,
         claim_labels={row["id"]: row["public_label"] for row in grounded_claims},
-        report_date=claims_meta.get("report_date"))
+        report_date=claims_meta.get("report_date"),
+        report_period=claims_meta.get("report_period"))
     ledger = attach_claim_outcomes(grounded_claims, validated)
     ledger = apply_host_classifications(
         ledger, discarded_claims, inventory,

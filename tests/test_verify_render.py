@@ -188,14 +188,28 @@ def raw_for(checks: list[dict], *, sources: list[dict] | None = None,
     }
 
 
-def guidance_for(checks: list[dict], *, text: str | None = None) -> dict:
+def guidance_for(checks: list[dict], *, text: str | None = None,
+                 visible_confirmed_ids: list[str] | None = None) -> dict:
+    confirmed = [row["id"] for row in checks if row["verdict"] == "confirmed"]
+    selected = (
+        list(visible_confirmed_ids)
+        if visible_confirmed_ids is not None else confirmed[:1]
+    )
     return {
+        "summary": "The accepted results show what is ready and what needs attention.",
+        "check_ids": selected or [checks[0]["id"]],
         "actions": [{
             "id": "A1",
+            "kind": (
+                "correct_report"
+                if checks[0]["verdict"] == "contradicted"
+                else "review_before_share"
+            ),
             "text": text or "Review the material receipts before sharing the report.",
             "report_quote": "Visible report claim 1.",
             "check_ids": [checks[0]["id"]],
         }],
+        "limits": [],
     }
 
 
@@ -225,6 +239,10 @@ class PublicLayerTests(unittest.TestCase):
                 "report_value": 1, "replacement_value": 2,
                 "locations": ["Summary", "Table total"],
             },
+            "population_alignment": {
+                "status": "same_population", "reason": "Internal grounding only.",
+                "links": [],
+            },
         })
         first = render._public_layer2([check], sources=[retained_source()])
         check["formula"] = "changed prose that must have no effect"
@@ -235,6 +253,7 @@ class PublicLayerTests(unittest.TestCase):
         self.assertNotIn("formula", json.dumps(first))
         self.assertNotIn("addressed_clause_refs", json.dumps(first))
         self.assertNotIn("correction_notice", json.dumps(first))
+        self.assertNotIn("population_alignment", json.dumps(first))
         self.assertNotIn("/private", json.dumps(first))
 
     def test_renderer_has_no_semantic_fallback_apis(self) -> None:
@@ -505,11 +524,18 @@ class HtmlTests(unittest.TestCase):
         ):
             self.assertNotIn(canned, page)
 
-    def test_prominence_comes_only_from_accepted_verdict_and_severity(self) -> None:
-        prominent = accepted_check(1, "confirmed", severity="medium")
-        technical = accepted_check(2, "confirmed", severity="low")
+    def test_confirmation_prominence_comes_only_from_host_selected_ids(self) -> None:
+        prominent = accepted_check(1, "confirmed", severity="low")
+        technical = accepted_check(2, "confirmed", severity="high")
         contradiction = accepted_check(3, "contradicted")
-        page = render.html_of(make_artifact([prominent, technical, contradiction]))
+        checks = [prominent, technical, contradiction]
+        raw = raw_for(checks)
+        artifact = render.artifact_from_findings(
+            raw, run_id="host-placement",
+            generated_at="2026-08-25T13:10:00Z", layer2=checks,
+            guidance=guidance_for(checks, visible_confirmed_ids=["C1"]),
+        )
+        page = render.html_of(artifact)
         details_at = page.index('<details class="technical-detail"')
         self.assertLess(page.index('data-card-id="C1"'), details_at)
         self.assertGreater(page.index('data-card-id="C2"'), details_at)
@@ -522,6 +548,44 @@ class HtmlTests(unittest.TestCase):
             card = page[start:end]
             self.assertIn(check["public_receipt"]["explanation"], card)
             self.assertIn("Visible report claim", card)
+
+        swapped = render.artifact_from_findings(
+            raw, run_id="host-placement-swapped",
+            generated_at="2026-08-25T13:10:00Z", layer2=checks,
+            guidance=guidance_for(checks, visible_confirmed_ids=["C2"]),
+        )
+        swapped_page = render.html_of(swapped)
+        swapped_details = swapped_page.index('<details class="technical-detail"')
+        self.assertGreater(swapped_page.index('data-card-id="C1"'), swapped_details)
+        self.assertLess(swapped_page.index('data-card-id="C2"'), swapped_details)
+
+    def test_summary_is_exact_host_copy_and_selects_visible_confirmation(self) -> None:
+        checks = [accepted_check(1, "confirmed", severity="high")]
+        summary = "The confirmed receipt is decision-relevant for sharing this report."
+        guidance = guidance_for(checks, visible_confirmed_ids=["C1"])
+        guidance["summary"] = summary
+        artifact = render.artifact_from_findings(
+            raw_for(checks), run_id="host-placement-reason",
+            generated_at="2026-08-25T13:10:00Z", layer2=checks,
+            guidance=guidance,
+        )
+        page = render.html_of(artifact)
+        self.assertEqual(artifact["presentation"]["summary"], summary)
+        self.assertIn(summary, page)
+        self.assertLess(
+            page.index('data-card-id="C1"'),
+            page.index('<details class="technical-detail"'),
+        )
+
+    def test_renderer_rejects_unaccepted_confirmation_selection(self) -> None:
+        check = accepted_check(1, "confirmed")
+        guidance = guidance_for([check], visible_confirmed_ids=["UNKNOWN"])
+        with self.assertRaisesRegex(SystemExit, "presentation check ids are invalid"):
+            render.artifact_from_findings(
+                raw_for([check]), run_id="bad-placement",
+                generated_at="2026-08-25T13:10:00Z", layer2=[check],
+                guidance=guidance,
+            )
 
     def test_html_shows_only_agent_authored_card_meaning_and_complete_receipt(self) -> None:
         check = accepted_check(1, severity="high")
@@ -547,6 +611,13 @@ class HtmlTests(unittest.TestCase):
             "Project status snapshot", "status.json", "Supplied file",
         ):
             self.assertIn(text, page)
+        self.assertIn('<table class="receipt-math num">', page)
+        self.assertIn("Calculated result", page)
+        self.assertIn("Report shows", page)
+        self.assertLess(page.index("On-time deliveries"), page.index("Calculated result"))
+        self.assertLess(page.index("Calculated result"), page.index("Report shows"))
+        self.assertIn("94 / 100 * 100", page)
+
         for fallback in (
             "The figure matches the source", "The claim matches your evidence",
             "Checked by a program", "receipts.json", "findings.json",
@@ -570,6 +641,21 @@ class HtmlTests(unittest.TestCase):
             receipt["explanation"],
         ):
             self.assertIn(text, changed)
+
+    def test_not_checkable_is_compact_in_main_flow_with_full_receipt_in_detail(self) -> None:
+        check = accepted_check(1, "not_checkable")
+        artifact = make_artifact([check])
+        page = render.html_of(artifact)
+        details_at = page.index('<details class="technical-detail"')
+        compact_at = page.index('class="not-checkable-item"')
+        card_at = page.index('data-card-id="C1"')
+        self.assertLess(compact_at, details_at)
+        self.assertGreater(card_at, details_at)
+        compact_end = page.index("</li>", compact_at)
+        compact = page[compact_at:compact_end]
+        self.assertIn("Visible report claim 1.", compact)
+        self.assertIn(check["public_receipt"]["explanation"], compact)
+        self.assertEqual(page.count('data-card-id="C1"'), 1)
 
     def test_each_evidence_card_has_one_local_source_row_and_unused_sources_do_not_render(self) -> None:
         used = retained_source(kind="live_tool")
@@ -810,6 +896,9 @@ class SchemaAndSerializationTests(unittest.TestCase):
             "report_quote": "Visible report claim.",
             "evidence_json": [{"pointer": "/metric", "value": 1}],
             "date_receipt": {"pointer": "/date", "value": "2026-08-23"},
+            "population_alignment": {
+                "status": "same_population", "reason": "Internal only.",
+            },
         })
         raw = raw_for([check])
         raw["claims"][0]["arithmetic_inventory_ids"] = ["INV1"]
@@ -819,7 +908,7 @@ class SchemaAndSerializationTests(unittest.TestCase):
         )
         blob = json.dumps(art)
         for forbidden in (
-            "evidence_json", "date_receipt", "/metric",
+            "evidence_json", "date_receipt", "population_alignment", "/metric",
             "arithmetic_inventory_ids", "found_by", "verification_mode",
         ):
             self.assertNotIn(forbidden, blob)

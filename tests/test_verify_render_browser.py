@@ -208,6 +208,45 @@ class ChromeSession:
 
 @unittest.skipUnless(CHROME.is_file(), "Google Chrome is required")
 class BrowserCustomerLawTests(unittest.TestCase):
+    def test_host_selected_confirmation_is_visible_before_technical_detail(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            page_path = root / "grade-artifact.html"
+            page_path.write_text(customer_page())
+            browser = ChromeSession(root, page_path.as_uri())
+            try:
+                result = browser.devtools.call("Runtime.evaluate", {
+                    "expression": """
+(() => {
+  const details = document.querySelector('details.technical-detail');
+  const selected = document.querySelector('[data-card-id="C1"]');
+  const deferred = document.querySelector('[data-card-id="C2"]');
+  return {
+    selectedBeforeDetails: !!selected && !!details &&
+      (selected.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    deferredInsideDetails: !!deferred && !!details && details.contains(deferred),
+    notCheckableReceiptInsideDetails: !!details && details.contains(
+      document.querySelector('[data-card-id="C4"]')
+    ),
+    compactNotCheckableVisible: !!document.querySelector(
+      '[data-outcome-section="not_checkable"] .not-checkable-item'
+    ),
+    confirmedSectionVisible: !!document.querySelector(
+      '[data-outcome-section="confirmed"] [data-card-id="C1"]'
+    )
+  };
+})()
+""",
+                    "returnByValue": True,
+                })["result"]["value"]
+                self.assertTrue(result["selectedBeforeDetails"], result)
+                self.assertTrue(result["deferredInsideDetails"], result)
+                self.assertTrue(result["notCheckableReceiptInsideDetails"], result)
+                self.assertTrue(result["compactNotCheckableVisible"], result)
+                self.assertTrue(result["confirmedSectionVisible"], result)
+            finally:
+                browser.close()
+
     def test_long_receipt_page_has_no_390px_horizontal_overflow(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = pathlib.Path(raw)
@@ -226,7 +265,7 @@ class BrowserCustomerLawTests(unittest.TestCase):
   document.querySelectorAll('details').forEach((row) => { row.open = true; });
   const width = document.documentElement.clientWidth;
   const nodes = [...document.querySelectorAll(
-    '.material-card,.operand,.card-source,.receipt-row'
+    '.material-card,.operand,.card-source,.receipt-row,.receipt-math'
   )];
   return {
     clientWidth: width,
@@ -348,13 +387,21 @@ class BrowserCustomerLawTests(unittest.TestCase):
   document.querySelectorAll('details').forEach((row) => { row.open = true; });
   return {
     card: getComputedStyle(document.querySelector('.material-card')).breakInside,
-    stats: getComputedStyle(document.querySelector('.stats')).breakInside
+    stats: getComputedStyle(document.querySelector('.stats')).breakInside,
+    scope: getComputedStyle(document.querySelector('.technical-scope')).breakInside,
+    operand: getComputedStyle(document.querySelector('.operand')).breakInside,
+    detailHeading: getComputedStyle(
+      document.querySelector('details.technical-detail > summary')
+    ).display
   };
 })()
 """,
                     "returnByValue": True,
                 })["result"]["value"]
-                self.assertEqual(styles, {"card": "avoid", "stats": "avoid"})
+                self.assertEqual(styles, {
+                    "card": "avoid", "stats": "avoid", "scope": "avoid",
+                    "operand": "avoid", "detailHeading": "block",
+                })
                 pdf_result = browser.devtools.call("Page.printToPDF", {
                     "printBackground": True,
                     "preferCSSPageSize": True,
@@ -378,6 +425,20 @@ class BrowserCustomerLawTests(unittest.TestCase):
             printed = text_path.read_text()
             for index in range(1, 5):
                 self.assertIn(f"Visible report claim {index}.", printed)
+            self.assertIn("Technical detail", printed)
+            self.assertLess(
+                printed.index("Technical detail"),
+                printed.index("Visible report claim 2."),
+            )
+            pages = [page for page in printed.split("\f") if page.strip()]
+            self.assertLessEqual(len(pages), 4, pages)
+            scope_pages = [page for page in pages if "Technical scope" in page]
+            self.assertEqual(len(scope_pages), 1, pages)
+            for text in (
+                "Material outcomes", "Retained sources", "Live source",
+                "Did not run", "Report format", "md",
+            ):
+                self.assertIn(text, scope_pages[0])
 
 
 if __name__ == "__main__":

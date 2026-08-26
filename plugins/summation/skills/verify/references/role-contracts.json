@@ -1,10 +1,49 @@
 {
-  "contract_version": "verify-role-handoff/coordinator-v3",
+  "contract_version": "verify-role-handoff/coordinator-v4",
   "classifications": [
     "material_claim",
     "supporting_provenance",
     "structural_context"
   ],
+  "independent_semantic_authorship": {
+    "initial_prompt_allowed": [
+      "report",
+      "neutral_inventory",
+      "approved_sources",
+      "role_contracts"
+    ],
+    "initial_prompt_forbidden": [
+      "claim_classifications",
+      "verdicts",
+      "severities",
+      "check_ids",
+      "public_labels",
+      "operands",
+      "calculations",
+      "expected_counts",
+      "score",
+      "next_action",
+      "prior_grade_artifact"
+    ],
+    "repair_prompt_allowed": [
+      "original_role_input",
+      "prior_role_output",
+      "mechanical_repair_reasons"
+    ],
+    "repair_prompt_forbidden": [
+      "claim_classifications",
+      "verdicts",
+      "severities",
+      "check_ids",
+      "public_labels",
+      "operands",
+      "calculations",
+      "expected_counts",
+      "score",
+      "next_action",
+      "prior_grade_artifact"
+    ]
+  },
   "claim_taker": {
     "input": {
       "required": ["partition_id", "visible_text", "inventory", "report_metadata"],
@@ -84,7 +123,11 @@
         "substantive_supporting_provenance_reason",
         "substantive_structural_context_reason",
         "public_numeric_calculation_result",
-        "repeated_occurrence_correction_statement"
+        "repeated_occurrence_correction_statement",
+        "exact_population_alignment_receipts",
+        "grounded_verdict_summary",
+        "visible_confirmed_selection",
+        "action_check_consistency"
       ]
     },
     "final_merge": {
@@ -93,8 +136,15 @@
       },
       "output": {
         "required": ["sources", "checks", "presentation"],
-        "presentation_required": ["actions"],
-        "action_required": ["id", "text", "report_quote", "check_ids"],
+        "presentation_required": ["summary", "check_ids", "actions", "limits"],
+        "check_ids_meaning": "summary_grounding_ids; confirmed ids in this list are host-selected visible confirmations",
+        "summary_grounding": "all ids are accepted checks and at least one is a decision-relevant confirmation when confirmed outcomes exist",
+        "action_required": ["id", "kind", "text", "report_quote", "check_ids"],
+        "action_kinds": [
+          "correct_report",
+          "reconcile_before_change",
+          "review_before_share"
+        ],
         "repeated_correction_action": "copies the exact accepted correction_notice.statement"
       }
     }
@@ -152,6 +202,27 @@
       "calculation": {
         "required": ["expression", "result"],
         "result": "public_numeric_value"
+      },
+      "population_alignment": {
+        "required_for": "evidence-basis contradiction of a report with a period or date",
+        "statuses": ["same_population", "unreconciled"],
+        "same_population_required": ["status", "reason", "links"],
+        "link_required": ["dimension", "report_quote", "source_receipt"],
+        "link_dimensions": [
+          "report_period",
+          "as_of_date",
+          "scope",
+          "population_key"
+        ],
+        "unreconciled_required": [
+          "status",
+          "reason",
+          "missing_dimensions",
+          "conflict_receipts",
+          "reconciliation_action"
+        ],
+        "unreconciled_verdict": "not_checkable",
+        "unreconciled_action_kind": "reconcile_before_change"
       }
     }
   },

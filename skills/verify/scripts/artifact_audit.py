@@ -20,7 +20,7 @@ from receipt_math import calculation_problem  # noqa: E402
 
 FORBIDDEN_KEYS = frozenset({
     "found_by", "verification_mode", "report_quote", "report_quote_2",
-    "evidence_json", "evidence_quote", "date_receipt",
+    "evidence_json", "evidence_quote", "date_receipt", "population_alignment",
     "used_for_internal_arithmetic", "arithmetic_inventory_ids",
 })
 _ABS_PATH = re.compile(
@@ -376,6 +376,10 @@ def _customer_html_problems(artifact: dict, page: str) -> list[str]:
         str(row.get("id") or ""): row
         for row in artifact.get("sources") or [] if isinstance(row, dict)
     }
+    summary_ids = {
+        str(value) for value in (
+            (artifact.get("presentation") or {}).get("check_ids") or [])
+    }
     details_at = page.find('<details class="technical-detail"')
     for check in artifact.get("evidence_checks") or []:
         if not isinstance(check, dict):
@@ -411,16 +415,32 @@ def _customer_html_problems(artifact: dict, page: str) -> list[str]:
         label = render.DISPOSITION_LABELS.get(str(check.get("verdict") or ""))
         if label is None or f'<span class="tag">{html_lib.escape(label)}</span>' not in card:
             problems.append(f"material card {check_id} has no exact visible disposition badge")
-        expected_prominence = (
-            "technical" if check.get("verdict") == "confirmed"
-            and check.get("severity") not in {"high", "medium"}
-            else "prominent"
-        )
+        expected_prominence = "prominent"
+        if (
+            check.get("verdict") == "not_checkable"
+            or check.get("verdict") == "confirmed" and check_id not in summary_ids
+        ):
+            expected_prominence = "technical"
         if f'data-prominence="{expected_prominence}"' not in card:
             problems.append(f"material card {check_id} is in the wrong customer group")
         if expected_prominence == "technical":
             if details_at < 0 or match.start() < details_at:
-                problems.append(f"technical confirmation {check_id} is outside Technical detail")
+                problems.append(f"technical receipt {check_id} is outside Technical detail")
+            if check.get("verdict") == "not_checkable":
+                compact = re.search(
+                    r'<section class="outcome-section compact-outcomes" '
+                    r'data-outcome-section="not_checkable">(.*?)</section>',
+                    page, re.S,
+                )
+                expected_compact = (
+                    html_lib.escape(str(claim.get("quote") or "")),
+                    html_lib.escape(str(receipt.get("explanation") or "")),
+                )
+                if compact is None or any(
+                    value not in compact.group(1) for value in expected_compact
+                ):
+                    problems.append(
+                        f"not-checkable outcome {check_id} is missing from the compact list")
         else:
             section = re.search(
                 rf'<section class="outcome-section" data-outcome-section="{re.escape(str(check.get("verdict") or ""))}">(.*?)</section>',

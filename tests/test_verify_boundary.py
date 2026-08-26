@@ -133,16 +133,38 @@ def public_artifact(checks: list[dict], *, source_kind: str = "supplied_file") -
         },
         "claims": claims,
     }
+    selected = next(
+        (row["id"] for row in checks if row["verdict"] == "confirmed"),
+        checks[0]["id"],
+    )
     return render.artifact_from_findings(
         raw, run_id="boundary-cards",
         generated_at="2026-08-25T13:10:00Z", layer2=checks,
-        guidance={"actions": [{
-            "id": "A1", "text": "Review the accepted receipts before sharing.",
+        guidance={
+          "summary": "The accepted receipts show what is ready and what needs attention.",
+          "check_ids": [selected], "limits": [], "actions": [{
+            "id": "A1", "kind": (
+                "correct_report" if checks[0]["verdict"] == "contradicted"
+                else "review_before_share"
+            ),
+            "text": "Review the accepted receipts before sharing this report.",
             "report_quote": claims[0]["quote"], "check_ids": [checks[0]["id"]],
         }]})
 
 
 class SourceContractTests(unittest.TestCase):
+    def test_public_text_mechanics_do_not_reject_content_patterns_semantically(self) -> None:
+        for module in (accept, render):
+            self.assertFalse(hasattr(module, "_RAW_PUBLIC_IDENTIFIER"))
+            self.assertFalse(hasattr(module, "_VAGUE_LOCATION"))
+        self.assertIsNone(accept._public_text_problem(
+            "SEGMENT_ALPHA revenue", operand_label=True))
+        self.assertTrue(render._operand_publishable({
+            "label": "SEGMENT_ALPHA revenue",
+            "value": "$10",
+            "location": "narrative note",
+        }))
+
     def test_checks_file_requires_top_level_sources_and_checks_arrays(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             path = pathlib.Path(raw) / "checks.json"
@@ -290,8 +312,11 @@ class SchemaContractTests(unittest.TestCase):
             run_id="schema-emission",
             generated_at="2026-08-25T13:10:00Z",
             layer2=[check],
-            guidance={"actions": [{
-                "id": "A1", "text": "Review the accepted receipt before sharing.",
+            guidance={
+              "summary": "The accepted receipt supports the displayed report value.",
+              "check_ids": ["C-REPORT"], "limits": [], "actions": [{
+                "id": "A1", "kind": "review_before_share",
+                "text": "Review the accepted receipt before sharing this report.",
                 "report_quote": "Active projects: 12", "check_ids": ["C-REPORT"],
             }]},
         )
