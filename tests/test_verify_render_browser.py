@@ -43,6 +43,13 @@ def customer_page() -> str:
     return fixtures.render.html_of(artifact)
 
 
+def rounded_customer_page() -> str:
+    check = fixtures.rounded_arithmetic_check()
+    artifact = fixtures.make_artifact([check], sources=[])
+    return fixtures.render.html_of(
+        artifact, render_context=fixtures.render_context([check]))
+
+
 def _free_port() -> int:
     probe = socket.socket()
     probe.bind(("127.0.0.1", 0))
@@ -208,6 +215,56 @@ class ChromeSession:
 
 @unittest.skipUnless(CHROME.is_file(), "Google Chrome is required")
 class BrowserCustomerLawTests(unittest.TestCase):
+    def test_declared_rounding_math_is_visible_and_contained_at_390px(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            page_path = root / "grade-artifact.html"
+            page_path.write_text(rounded_customer_page())
+            browser = ChromeSession(root, page_path.as_uri())
+            try:
+                browser.devtools.call("Emulation.setDeviceMetricsOverride", {
+                    "width": 390, "height": 844, "deviceScaleFactor": 1,
+                    "mobile": True,
+                })
+                browser.devtools.call("Page.navigate", {"url": page_path.as_uri()})
+                time.sleep(0.2)
+                result = browser.devtools.call("Runtime.evaluate", {
+                    "expression": """
+(() => {
+  const table = document.querySelector('.receipt-math');
+  const card = document.querySelector('.material-card');
+  const width = document.documentElement.clientWidth;
+  const tableRect = table.getBoundingClientRect();
+  const cardRect = card.getBoundingClientRect();
+  return {
+    visible: card.innerText,
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: width,
+    tableInside: tableRect.left >= -0.5 && tableRect.right <= width + 0.5,
+    cardInside: cardRect.left >= -0.5 && cardRect.right <= width + 0.5,
+    rows: [...table.querySelectorAll('tr')].map((row) => row.innerText),
+    roundedCount: table.querySelectorAll('tr.customer-rounded').length
+  };
+})()
+""",
+                    "returnByValue": True,
+                })["result"]["value"]
+                self.assertEqual(result["clientWidth"], 390)
+                self.assertLessEqual(result["scrollWidth"], result["clientWidth"])
+                self.assertTrue(result["tableInside"], result)
+                self.assertTrue(result["cardInside"], result)
+                self.assertEqual(result["roundedCount"], 1)
+                for text in (
+                    "Calculated result\t4.574032879496728%",
+                    "Customer-rounded result\t4.6%",
+                    "Report shows",
+                ):
+                    self.assertTrue(any(text in row for row in result["rows"]), result)
+                for token in ("numeric_comparison", "half_up", "decimal_places"):
+                    self.assertNotIn(token, result["visible"])
+            finally:
+                browser.close()
+
     def test_host_selected_confirmation_is_visible_before_technical_detail(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = pathlib.Path(raw)

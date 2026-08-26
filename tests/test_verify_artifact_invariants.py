@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import copy
+import json
 import pathlib
 import sys
+import tempfile
 import unittest
 
 
@@ -14,7 +16,12 @@ sys.path.insert(0, str(SCRIPTS))
 
 import artifact_audit as audit  # noqa: E402
 import render  # noqa: E402
-from test_verify_render import accepted_check, make_artifact  # noqa: E402
+from test_verify_render import (  # noqa: E402
+    accepted_check,
+    make_artifact,
+    render_context,
+    rounded_arithmetic_check,
+)
 
 
 def valid_artifact_pair() -> tuple[dict, str]:
@@ -29,6 +36,29 @@ def valid_artifact_pair() -> tuple[dict, str]:
 
 
 class InvariantTests(unittest.TestCase):
+    def test_black_box_audit_accepts_exact_private_render_context(self) -> None:
+        check = rounded_arithmetic_check()
+        artifact = make_artifact([check], sources=[])
+        context = render_context([check])
+        page = render.html_of(artifact, render_context=context)
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            artifact_path = folder / "grade-artifact.json"
+            page_path = folder / "grade-artifact.html"
+            context_path = folder / "receipts.json"
+            artifact_path.write_text(json.dumps(artifact))
+            page_path.write_text(page)
+            context_path.write_text(json.dumps(context))
+            argv = sys.argv
+            sys.argv = [
+                "artifact_audit.py", str(artifact_path), str(page_path),
+                str(context_path),
+            ]
+            try:
+                self.assertEqual(audit.main(), 0)
+            finally:
+                sys.argv = argv
+
     def test_valid_artifact_and_exact_html_pass(self) -> None:
         artifact, page = valid_artifact_pair()
         self.assertEqual(audit.audit_public_artifact(artifact, page), [])

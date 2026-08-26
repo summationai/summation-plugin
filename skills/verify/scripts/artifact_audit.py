@@ -21,6 +21,7 @@ from receipt_math import calculation_problem  # noqa: E402
 FORBIDDEN_KEYS = frozenset({
     "found_by", "verification_mode", "report_quote", "report_quote_2",
     "evidence_json", "evidence_quote", "date_receipt", "population_alignment",
+    "numeric_comparison", "source_consideration",
     "used_for_internal_arithmetic", "arithmetic_inventory_ids",
 })
 _ABS_PATH = re.compile(
@@ -470,7 +471,8 @@ def _customer_html_problems(artifact: dict, page: str) -> list[str]:
     return list(dict.fromkeys(problems))
 
 
-def audit_public_artifact(artifact: dict, page: str) -> list[str]:
+def audit_public_artifact(artifact: dict, page: str, *,
+                          render_context: dict | None = None) -> list[str]:
     problems = []
     try:
         render.validate_artifact(artifact)
@@ -486,7 +488,8 @@ def audit_public_artifact(artifact: dict, page: str) -> list[str]:
     problems.extend(_card_identity_problems(artifact, page))
     problems.extend(_customer_html_problems(artifact, page))
     try:
-        expected_page = render.html_of(artifact)
+        expected_page = render.html_of(
+            artifact, render_context=render_context)
     except Exception as exc:
         problems.append(f"canonical HTML could not be serialized: {exc}")
     except SystemExit as exc:
@@ -637,12 +640,21 @@ def mutate_static_source_claims_live_complete(artifact: dict) -> dict:
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print("usage: artifact_audit.py grade-artifact.json grade-artifact.html", file=sys.stderr)
+    if len(sys.argv) not in {3, 4}:
+        print(
+            "usage: artifact_audit.py grade-artifact.json grade-artifact.html "
+            "[accepted-receipts.json]",
+            file=sys.stderr,
+        )
         return 2
     artifact = json.loads(pathlib.Path(sys.argv[1]).read_text())
     page = pathlib.Path(sys.argv[2]).read_text()
-    problems = audit_public_artifact(artifact, page)
+    context = (
+        json.loads(pathlib.Path(sys.argv[3]).read_text())
+        if len(sys.argv) == 4 else None
+    )
+    problems = audit_public_artifact(
+        artifact, page, render_context=context)
     for problem in problems:
         print(problem)
     return 1 if problems else 0

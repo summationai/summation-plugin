@@ -689,8 +689,101 @@ def _display_date(value: str, *, field: str) -> str:
     return f"{parsed.strftime('%B')} {parsed.day}, {parsed.year}"
 
 
+def _accepted_render_context(artifact: dict, render_context: dict | None
+                             ) -> tuple[dict[str, dict], list[dict]]:
+    """Accept private mechanics only when they match the public accepted ledger."""
+    if render_context is None:
+        return {}, []
+    if not isinstance(render_context, dict):
+        raise SystemExit("render: accepted render context is not an object")
+    if render_context.get("source_consideration_problems"):
+        raise SystemExit("render: source consideration did not validate")
+    public_checks = {
+        str(row.get("id") or ""): row for row in artifact["evidence_checks"]
+    }
+    comparisons: dict[str, dict] = {}
+    checks = render_context.get("checks") or render_context.get("validated") or []
+    if not isinstance(checks, list):
+        raise SystemExit("render: accepted context checks are not an array")
+    for raw in checks:
+        if not isinstance(raw, dict) or raw.get("numeric_comparison") is None:
+            continue
+        check_id = str(raw.get("id") or "")
+        public = public_checks.get(check_id)
+        if public is None or raw.get("public_receipt") != public.get("public_receipt"):
+            raise SystemExit(
+                "render: private numeric comparison does not match an accepted check")
+        comparison = raw.get("numeric_comparison")
+        if not isinstance(comparison, dict):
+            raise SystemExit("render: private numeric comparison is invalid")
+        mode = comparison.get("mode")
+        if mode == "rounded":
+            if set(comparison) != {
+                "mode", "rounding", "decimal_places", "customer_result", "matches",
+            } or not _publishable_text(comparison.get("customer_result")):
+                raise SystemExit("render: accepted rounded comparison is incomplete")
+        elif mode == "absolute_tolerance":
+            if set(comparison) != {"mode", "tolerance", "matches"}:
+                raise SystemExit("render: accepted tolerance comparison is incomplete")
+        else:
+            raise SystemExit("render: accepted numeric comparison mode is invalid")
+        if comparison.get("matches") is not (
+            public.get("verdict") == "confirmed"
+        ):
+            raise SystemExit(
+                "render: accepted numeric comparison does not match the disposition")
+        comparisons[check_id] = comparison
+
+    source_rows = {
+        str(row.get("id") or ""): row for row in artifact["sources"]
+    }
+    considerations = render_context.get("source_consideration")
+    if considerations is None:
+        considerations = []
+    if not isinstance(considerations, list):
+        raise SystemExit("render: source_consideration is not an array")
+    clean_considerations: list[dict] = []
+    seen: set[str] = set()
+    citations: dict[str, set[str]] = {}
+    for check in artifact["evidence_checks"]:
+        source_id = str(
+            ((check.get("public_receipt") or {}).get("source_id") or "")
+        )
+        if source_id:
+            citations.setdefault(source_id, set()).add(str(check.get("claim_id") or ""))
+    for row in considerations:
+        if not isinstance(row, dict):
+            raise SystemExit("render: source_consideration row is not an object")
+        source_id = str(row.get("source_id") or "")
+        if source_id not in source_rows or source_id in seen:
+            raise SystemExit("render: source_consideration source is invalid or duplicated")
+        seen.add(source_id)
+        if "claim_ids" in row and "exclusion_reason" not in row:
+            claim_ids = row.get("claim_ids")
+            if not isinstance(claim_ids, list) or set(claim_ids) != citations.get(
+                source_id, set()
+            ):
+                raise SystemExit(
+                    "render: source_consideration citations do not match accepted cards")
+            clean_considerations.append({
+                "source_id": source_id, "claim_ids": list(claim_ids),
+            })
+        elif "exclusion_reason" in row and "claim_ids" not in row:
+            reason = str(row.get("exclusion_reason") or "").strip()
+            if citations.get(source_id) or not _publishable_text(reason):
+                raise SystemExit("render: source exclusion is invalid")
+            clean_considerations.append({
+                "source_id": source_id, "exclusion_reason": reason,
+            })
+        else:
+            raise SystemExit("render: source_consideration row is ambiguous")
+    if seen != set(source_rows):
+        raise SystemExit("render: source_consideration does not cover retained sources")
+    return comparisons, clean_considerations
+
+
 def _card_html(check: dict, claim: dict, sources: dict[str, dict], *,
-               prominence: str) -> str:
+               prominence: str, numeric_comparison: dict | None = None) -> str:
     receipt = check["public_receipt"]
     report_operand = receipt["report_operand"]
     disposition = _fixed_label(
@@ -714,6 +807,14 @@ def _card_html(check: dict, claim: dict, sources: dict[str, dict], *,
             f'{math_rows}'
             '<tr class="sum"><td>Calculated result</td>'
             f'<td class="v">{result}</td></tr>'
+            + (
+                '<tr class="customer-rounded"><td>Customer-rounded result</td>'
+                f'<td class="v">{html.escape(_display(numeric_comparison["customer_result"]))}</td></tr>'
+                if isinstance(numeric_comparison, dict)
+                and numeric_comparison.get("mode") == "rounded"
+                else ""
+            )
+            + (
             '<tr class="report"><td>Report shows'
             f'<span class="math-location">{html.escape(report_operand["label"])} · '
             f'{html.escape(report_operand["location"])}</span></td>'
@@ -721,6 +822,7 @@ def _card_html(check: dict, claim: dict, sources: dict[str, dict], *,
             '</tbody></table>'
             '<span class="receipt-key expression-key">Calculation expression</span>'
             f'<span class="calculation-line">{expression} = {result}</span></div>'
+            )
         )
     else:
         operands.append(
@@ -831,9 +933,11 @@ def _not_checkable_section(rows: list[tuple[dict, dict]]) -> str:
     )
 
 
-def html_of(artifact: dict) -> str:
+def html_of(artifact: dict, *, render_context: dict | None = None) -> str:
     """Lay accepted public fields into the locked customer hierarchy."""
     validate_artifact(artifact)
+    comparisons, source_consideration = _accepted_render_context(
+        artifact, render_context)
     sources = {str(row["id"]): row for row in artifact["sources"]}
     claims_by_check = {
         str(row.get("check_id") or ""): row for row in artifact["claims"]
@@ -859,7 +963,10 @@ def html_of(artifact: dict) -> str:
             check["verdict"] == "confirmed" and check["id"] not in visible_confirmed
         ) or check["verdict"] == "not_checkable"
         placement = "technical" if is_technical else "prominent"
-        card = _card_html(check, claim, sources, prominence=placement)
+        card = _card_html(
+            check, claim, sources, prominence=placement,
+            numeric_comparison=comparisons.get(str(check["id"])),
+        )
         if check["verdict"] == "not_checkable":
             technical_not_checkable.append(card)
             compact_not_checkable.append((check, claim))
@@ -925,6 +1032,24 @@ def html_of(artifact: dict) -> str:
         for row in artifact["evidence_checks"]
         if (row.get("public_receipt") or {}).get("source_id")
     })
+    excluded_sources = []
+    for row in source_consideration:
+        if "exclusion_reason" not in row:
+            continue
+        source_row = sources[row["source_id"]]
+        excluded_sources.append(
+            '<li><div class="excluded-source-meta">'
+            f'<strong>{html.escape(source_row["label"])}</strong>'
+            f'<code>{html.escape(source_row["evidence_file"])}</code>'
+            f'<span>{html.escape(_fixed_label(SOURCE_KIND_LABELS, source_row["kind"], "source kind"))}</span>'
+            '</div>'
+            f'<p>{html.escape(row["exclusion_reason"])}</p></li>'
+        )
+    source_exclusions = (
+        '<div class="source-exclusions"><h3>Excluded retained sources</h3><ul>'
+        + "".join(excluded_sources) + '</ul></div>'
+        if excluded_sources else ""
+    )
     actions = artifact.get("actions") or []
     if not actions:
         raise SystemExit("render: accepted customer action is missing")
@@ -960,11 +1085,12 @@ section{margin-top:44px}h2{font-size:18px;letter-spacing:-.01em;margin-bottom:6p
 .receipt-key{display:block;color:var(--ink-3);font-size:12px;font-weight:600}.calculation,.receipt-explanation,.reconstruction-attempt,.card-source{margin-top:12px;font-size:13px}.calculation-line{display:block;margin-top:3px;font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.receipt-explanation p,.reconstruction-attempt p{margin-top:3px;color:var(--ink-2);max-width:62ch}.card-source{display:flex;gap:5px 10px;align-items:baseline;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px}.card-source .receipt-key{width:100%}.card-source code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel);padding:1px 5px;border-radius:3px;overflow-wrap:anywhere}.source-time{color:var(--ink-3)}
 .receipt-math{width:100%;max-width:460px;border-collapse:collapse;font-size:13px}.receipt-math td{padding:7px 0;vertical-align:top}.receipt-math td.v{text-align:right;padding-left:20px;font-weight:600;white-space:nowrap}.receipt-math tr+tr td{border-top:1px solid var(--line)}.receipt-math tr.sum td{font-weight:700}.receipt-math tr.report td{color:var(--red);font-weight:700}.material-card[data-disposition="confirmed"] .receipt-math tr.report td{color:var(--green)}.math-location{display:block;color:var(--ink-3);font-size:12px;font-weight:400;overflow-wrap:anywhere}.expression-key{margin-top:10px}.plain{list-style:none}.not-checkable-item{padding:12px 0;border-bottom:1px solid var(--line);font-size:14px}.not-checkable-item:last-child{border-bottom:none}.compact-claim{display:block;max-width:66ch}.compact-claim strong{display:block;color:var(--ink)}.compact-claim span{display:block;margin-top:3px;color:var(--ink-2)}
 .scope{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 26px;margin-top:8px;font-size:13px}.scope div{color:var(--ink-3);text-wrap:pretty}.scope b{display:block;color:var(--ink);font-weight:600;font-size:13.5px}
+.source-exclusions{margin-top:18px;border-top:1px solid var(--line);padding-top:14px}.source-exclusions h3{font-size:14px}.source-exclusions ul{list-style:none;margin-top:8px}.source-exclusions li{padding:8px 0}.source-exclusions li+li{border-top:1px solid var(--line)}.excluded-source-meta{display:flex;gap:5px 10px;align-items:baseline;flex-wrap:wrap;font-size:12.5px}.excluded-source-meta code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel);padding:1px 5px;border-radius:3px;overflow-wrap:anywhere}.excluded-source-meta span{color:var(--ink-3)}.source-exclusions p{font-size:13px;color:var(--ink-2);margin-top:3px;max-width:62ch}
 .next{margin-top:34px;background:var(--panel);border-radius:8px;padding:16px 20px;font-size:14px;color:var(--ink-2)}.next b{color:var(--ink)}
 details{margin-top:26px;font-size:13px;color:var(--ink-3)}details summary{cursor:pointer;font-weight:600;color:var(--ink-2)}.technical-cards{margin-top:14px}.technical-cards:empty{display:none}
 footer{margin-top:52px;border-top:1px solid var(--line);padding-top:18px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink-3)}
 @media(max-width:40rem){body{padding:0 16px 48px}.verdict{padding-top:30px}h1{font-size:27px}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.stat{border-top:1px solid var(--line)}.stat:nth-child(-n+2){border-top:none}.stat:nth-child(3){border-left:none}.material-card{padding:18px 16px}.operand{grid-template-columns:minmax(0,1fr);gap:2px}.operand .value{margin-top:2px}.operand .location{margin-top:2px}.scope{grid-template-columns:minmax(0,1fr)}}
-@media print{body{padding:0;background:#fff}.material-card,.stats{break-inside:avoid;page-break-inside:avoid}.technical-scope,.scope,.operand,.receipt-row,.receipt-math tr,.calculation,.receipt-explanation,.card-source{break-inside:avoid;page-break-inside:avoid}.next{border:1px solid var(--line)}details.technical-detail>summary{display:block;list-style:none;font-size:18px;color:var(--ink);margin-bottom:12px}details.technical-detail>summary::-webkit-details-marker{display:none}details.technical-detail:not([open])>.technical-cards{display:block!important}footer{margin-top:28px}}
+@media print{body{padding:0;background:#fff}.material-card,.stats{break-inside:avoid;page-break-inside:avoid}.technical-scope,.scope,.source-exclusions,.source-exclusions li,.operand,.receipt-row,.receipt-math tr,.calculation,.receipt-explanation,.card-source{break-inside:avoid;page-break-inside:avoid}.next{border:1px solid var(--line)}details.technical-detail>summary{display:block;list-style:none;font-size:18px;color:var(--ink);margin-bottom:12px}details.technical-detail>summary::-webkit-details-marker{display:none}details.technical-detail:not([open])>.technical-cards{display:block!important}footer{margin-top:28px}}
 """
     return (
         '<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
@@ -991,7 +1117,7 @@ footer{margin-top:52px;border-top:1px solid var(--line);padding-top:18px;display
         f'<div><b>Retained sources</b>{len(artifact["sources"])} retained; {cited} cited</div>'
         f'<div><b>Live source</b>{html.escape(live_text)}</div>'
         f'<div><b>Report format</b>{html.escape(source["format"])}</div>'
-        '</div></section>'
+        f'</div>{source_exclusions}</section>'
         f'<div class="next"><b>Next:</b> {next_content}</div>'
         '<details class="technical-detail"><summary>Technical detail</summary>'
         f'{technical_cards}</details>'
@@ -1030,6 +1156,10 @@ def ungraded_reason(raw: dict, has_receipts: bool,
         return "accepted receipt ledger contains discarded rows"
     if receipts.get("discarded_sources"):
         return "retained source metadata did not validate"
+    if receipts.get("source_consideration_problems"):
+        return "approved source consideration did not validate"
+    if not isinstance(receipts.get("source_consideration"), list):
+        return "approved source consideration is missing"
     if receipts.get("presentation_problems"):
         return "accepted customer presentation did not validate"
     presentation = receipts.get("presentation")
@@ -1178,9 +1308,10 @@ def main() -> int:
         artifact = artifact_from_findings(
             raw, run_id=run_id, generated_at=generated_at, layer2=checks,
             guidance=receipts.get("presentation"))
-        page = html_of(artifact)
+        page = html_of(artifact, render_context=receipts)
         from artifact_audit import audit_public_artifact  # noqa: E402
-        problems = audit_public_artifact(artifact, page)
+        problems = audit_public_artifact(
+            artifact, page, render_context=receipts)
     except (SystemExit, ValueError) as exc:
         print(f"render: {exc}", file=sys.stderr)
         return 2

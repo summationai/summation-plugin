@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN, ROUND_HALF_UP
 import hashlib
 import html as html_lib
 import json
@@ -87,6 +87,10 @@ ACTION_KINDS = frozenset({
 POPULATION_DIMENSIONS = frozenset({
     "report_period", "as_of_date", "scope", "population_key",
 })
+ROUNDING_MODES = {
+    "half_up": ROUND_HALF_UP,
+    "half_even": ROUND_HALF_EVEN,
+}
 PRIVATE_NAMES = frozenset({
     "findings.json", "receipts.json", "checks.json", "claims.json",
     "grade-artifact.json", "report-visible.txt", "ledger.json",
@@ -358,9 +362,23 @@ def validate_sources(sandbox: pathlib.Path, proposed: list,
     """Validate retained evidence metadata without inferring source mode."""
     accepted: list[dict] = []
     discarded: list[dict] = []
-    seen: set[str] = set()
     if not isinstance(proposed, list):
         return [], [{"id": "", "problems": ["sources is not a list"]}]
+    identity_ids: dict[tuple[str, str, str], list[str]] = {}
+    for raw in proposed:
+        source = raw if isinstance(raw, dict) else {}
+        identity = (
+            str(source.get("kind") or "").strip(),
+            str(source.get("evidence_file") or "").strip(),
+            str(source.get("result_sha256") or "").strip().lower(),
+        )
+        if all(identity):
+            identity_ids.setdefault(identity, []).append(
+                str(source.get("id") or "").strip())
+    duplicate_identities = {
+        identity: ids for identity, ids in identity_ids.items() if len(ids) > 1
+    }
+    seen: set[str] = set()
     for raw in proposed:
         source = dict(raw) if isinstance(raw, dict) else {}
         problems: list[str] = []
@@ -375,6 +393,8 @@ def validate_sources(sandbox: pathlib.Path, proposed: list,
             problems.append("source id is not stable or public-safe")
         elif source_id in seen:
             problems.append(f"source id {source_id!r} is duplicated")
+        if source_id:
+            seen.add(source_id)
         if kind not in SOURCE_KINDS:
             problems.append("source kind is missing or unknown")
         label_problem = _public_text_problem(label, source_label=True)
@@ -437,11 +457,22 @@ def validate_sources(sandbox: pathlib.Path, proposed: list,
                 "tool": str(retrieval.get("tool") or "").strip(),
                 "arguments": retrieval.get("arguments"),
             }
+        identity = (kind, filename, digest)
         if problems:
             discarded.append({**canonical, "problems": problems})
-        else:
-            seen.add(source_id)
+        elif identity not in duplicate_identities:
             accepted.append(canonical)
+    for (kind, filename, digest), ids in duplicate_identities.items():
+        quoted_ids = ", ".join(repr(source_id) for source_id in ids)
+        discarded.append({
+            "id": "",
+            "group_problem": True,
+            "problems": [
+                "duplicate retained source identity for "
+                f"kind {kind!r}, evidence_file {filename!r}, and "
+                f"result_sha256 {digest!r} across ids [{quoted_ids}]"
+            ],
+        })
     return accepted, discarded
 
 
@@ -544,6 +575,8 @@ def validate_population_alignment(finding: dict, report: str,
     if raw is None:
         if basis == "evidence" and verdict == "contradicted" and dated:
             return None, ["dated evidence contradiction requires population_alignment"]
+        if basis == "evidence" and verdict == "confirmed" and dated:
+            return None, ["dated evidence confirmation requires population_alignment"]
         return None, []
     if basis != "evidence":
         return None, ["population_alignment is allowed only for evidence-basis checks"]
@@ -664,6 +697,110 @@ def _substantive_explanation(value) -> bool:
     return True
 
 
+def validate_source_consideration(raw, sources: list[dict], claims: list[dict],
+                                  checks: list[dict]) -> tuple[list[dict], list[str]]:
+    """Validate only host-declared source-to-claim coverage and exclusions."""
+    if not isinstance(raw, list):
+        return [], ["source_consideration is missing or not an array"]
+    source_ids = {
+        str(row.get("id") or "").strip() for row in sources
+        if isinstance(row, dict) and str(row.get("id") or "").strip()
+    }
+    material_claim_ids = {
+        str(row.get("id") or "").strip() for row in claims
+        if isinstance(row, dict)
+        and row.get("classification") == "material_claim"
+        and str(row.get("id") or "").strip()
+    }
+    check_by_claim = {
+        str(row.get("claim_id") or "").strip(): row for row in checks
+        if isinstance(row, dict) and str(row.get("claim_id") or "").strip()
+    }
+    cited_claims_by_source: dict[str, set[str]] = {}
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        source_id = str(
+            ((check.get("public_receipt") or {}).get("source_id") or "")
+            if isinstance(check.get("public_receipt"), dict) else ""
+        ).strip()
+        claim_id = str(check.get("claim_id") or "").strip()
+        if source_id and claim_id:
+            cited_claims_by_source.setdefault(source_id, set()).add(claim_id)
+
+    accepted: list[dict] = []
+    problems: list[str] = []
+    seen: set[str] = set()
+    for index, row in enumerate(raw):
+        label = f"source_consideration[{index}]"
+        if not isinstance(row, dict):
+            problems.append(f"{label} is not an object")
+            continue
+        unknown = sorted(set(row) - {"source_id", "claim_ids", "exclusion_reason"})
+        if unknown:
+            problems.append(f"{label} has unknown field {unknown[0]!r}")
+        source_id = str(row.get("source_id") or "").strip()
+        if not source_id:
+            problems.append(f"{label}.source_id is missing")
+        elif source_id not in source_ids:
+            problems.append(f"{label}.source_id {source_id!r} is not retained")
+        elif source_id in seen:
+            problems.append(f"source_consideration source {source_id!r} is duplicated")
+        seen.add(source_id)
+        has_claims = "claim_ids" in row
+        has_exclusion = "exclusion_reason" in row
+        if has_claims == has_exclusion:
+            problems.append(
+                f"{label} must contain exactly one claim_ids or exclusion_reason")
+            continue
+        if has_claims:
+            claim_ids = row.get("claim_ids")
+            if not isinstance(claim_ids, list) or not claim_ids:
+                problems.append(f"{label}.claim_ids is missing or empty")
+                claim_ids = []
+            clean_ids = [str(value or "").strip() for value in claim_ids]
+            if any(not value for value in clean_ids):
+                problems.append(f"{label}.claim_ids contains an empty id")
+            if len(clean_ids) != len(set(clean_ids)):
+                problems.append(f"{label}.claim_ids is duplicated")
+            for claim_id in clean_ids:
+                if claim_id not in material_claim_ids:
+                    problems.append(
+                        f"{label}.claim_ids references unknown material claim {claim_id!r}")
+                    continue
+                check = check_by_claim.get(claim_id)
+                cited_source_id = str(
+                    ((check or {}).get("public_receipt") or {}).get("source_id") or ""
+                ).strip()
+                if cited_source_id != source_id:
+                    problems.append(
+                        f"source_consideration source {source_id!r} maps claim "
+                        f"{claim_id!r} but its accepted check does not cite that source")
+            actual = cited_claims_by_source.get(source_id) or set()
+            if set(clean_ids) != actual:
+                problems.append(
+                    f"source_consideration source {source_id!r} claim_ids do not "
+                    "match its accepted check citations")
+            accepted.append({"source_id": source_id, "claim_ids": clean_ids})
+        else:
+            reason = str(row.get("exclusion_reason") or "").strip()
+            if not _substantive_explanation(reason):
+                problems.append(
+                    f"{label}.exclusion_reason is missing or not substantive")
+            if cited_claims_by_source.get(source_id):
+                problems.append(
+                    f"source_consideration source {source_id!r} is cited and cannot "
+                    "also be excluded")
+            accepted.append({
+                "source_id": source_id,
+                "exclusion_reason": reason,
+            })
+    for source_id in sorted(source_ids - seen):
+        problems.append(
+            f"accepted source {source_id!r} has no source_consideration row")
+    return accepted, list(dict.fromkeys(problems))
+
+
 def _operand_problem(raw, prefix: str) -> tuple[dict | None, list[str]]:
     problems: list[str] = []
     if not isinstance(raw, dict):
@@ -699,30 +836,127 @@ def _value_in(value, candidates: list) -> bool:
     return False
 
 
-def _arithmetic_disposition_problem(finding: dict, report_operand: dict | None,
-                                    calculation: dict | None) -> str | None:
-    """Check only an explicitly declared numeric report arithmetic outcome."""
-    if (
-        finding.get("basis") != "report"
-        or finding.get("type") != "arithmetic"
-        or finding.get("verdict") not in {"confirmed", "contradicted"}
-        or not isinstance(report_operand, dict)
-        or not isinstance(calculation, dict)
-    ):
-        return None
-    report_value = parse_quantity(report_operand.get("value"))
-    result_value = parse_quantity(calculation.get("result"))
+def _rounded_public_value(value, decimal_places: int,
+                          rounding: str) -> tuple[Decimal | None, str | None]:
+    """Apply only the host-declared numeric display rule and preserve public units."""
+    number = public_number(value)
+    if number is None:
+        return None, None
+    quantum = Decimal(1).scaleb(-decimal_places)
+    try:
+        rounded = number.quantize(quantum, rounding=ROUNDING_MODES[rounding])
+    except InvalidOperation:
+        return None, None
+    original = str(value).strip()
+    prefix = "$" if original.startswith("$") else ""
+    suffix_match = re.search(
+        r"(%|percent(?:age)?(?:\s+points?)?|points?|bps|basis\s+points?)\s*$",
+        original,
+        re.I,
+    )
+    suffix = suffix_match.group(1) if suffix_match else ""
+    grouped = "," in original or bool(prefix)
+    number_text = (
+        f"{rounded:,.{decimal_places}f}"
+        if grouped else f"{rounded:.{decimal_places}f}"
+    )
+    spacer = "" if suffix == "%" or not suffix else " "
+    return rounded, f"{prefix}{number_text}{spacer}{suffix}"
+
+
+def validate_numeric_comparison(finding: dict, report_operand: dict | None,
+                                calculation: dict | None
+                                ) -> tuple[dict | None, list[str]]:
+    """Validate a host-selected comparison rule without selecting precision."""
+    applicable = (
+        finding.get("basis") == "report"
+        and finding.get("type") == "arithmetic"
+        and finding.get("verdict") in {"confirmed", "contradicted"}
+    )
+    raw = finding.get("numeric_comparison")
+    if not applicable:
+        if raw is not None:
+            return None, [
+                "numeric_comparison is allowed only for confirmed or contradicted "
+                "report-basis arithmetic"
+            ]
+        return None, []
+    if not isinstance(raw, dict):
+        return None, [
+            "numeric_comparison is required for numeric report-basis arithmetic"
+        ]
+    mode = str(raw.get("mode") or "").strip()
+    problems: list[str] = []
+    canonical: dict = {"mode": mode}
+    if mode == "rounded":
+        unknown = sorted(set(raw) - {"mode", "rounding", "decimal_places"})
+        if unknown:
+            problems.append(
+                f"numeric_comparison has unknown field {unknown[0]!r}")
+        rounding = str(raw.get("rounding") or "").strip()
+        decimal_places = raw.get("decimal_places")
+        if rounding not in ROUNDING_MODES:
+            problems.append("numeric_comparison.rounding is missing or unknown")
+        if (
+            isinstance(decimal_places, bool)
+            or not isinstance(decimal_places, int)
+            or not 0 <= decimal_places <= 12
+        ):
+            problems.append(
+                "numeric_comparison.decimal_places must be an integer from 0 through 12")
+        canonical.update({
+            "rounding": rounding,
+            "decimal_places": decimal_places,
+        })
+    elif mode == "absolute_tolerance":
+        unknown = sorted(set(raw) - {"mode", "tolerance"})
+        if unknown:
+            problems.append(
+                f"numeric_comparison has unknown field {unknown[0]!r}")
+        tolerance = public_number(raw.get("tolerance"))
+        if tolerance is None or tolerance < 0:
+            problems.append(
+                "numeric_comparison.tolerance must be a non-negative public numeric value")
+        canonical["tolerance"] = raw.get("tolerance")
+    else:
+        problems.append("numeric_comparison.mode is missing or unknown")
+
+    report_value = public_number(
+        report_operand.get("value") if isinstance(report_operand, dict) else None)
+    result_value = public_number(
+        calculation.get("result") if isinstance(calculation, dict) else None)
     if report_value is None or result_value is None:
-        return None
-    if finding.get("verdict") == "confirmed" and report_value != result_value:
-        return (
-            "confirmed report-basis arithmetic result does not equal the report operand"
-        )
-    if finding.get("verdict") == "contradicted" and report_value == result_value:
-        return (
-            "contradicted report-basis arithmetic result equals the report operand"
-        )
-    return None
+        problems.append(
+            "numeric_comparison requires a numeric report operand and calculation result")
+    if problems:
+        return None, problems
+
+    if mode == "rounded":
+        report_compared, _report_display = _rounded_public_value(
+            report_operand["value"], canonical["decimal_places"], canonical["rounding"])
+        result_compared, customer_result = _rounded_public_value(
+            calculation["result"], canonical["decimal_places"], canonical["rounding"])
+        if report_compared is None or result_compared is None or customer_result is None:
+            return None, [
+                "numeric_comparison rounded values cannot be represented at the "
+                "declared decimal_places"
+            ]
+        matches = report_compared == result_compared
+        canonical["customer_result"] = customer_result
+    else:
+        matches = abs(report_value - result_value) <= public_number(
+            canonical["tolerance"])
+    canonical["matches"] = matches
+    verdict = finding.get("verdict")
+    if verdict == "confirmed" and not matches:
+        problems.append(
+            "confirmed report-basis arithmetic values differ under the declared "
+            "numeric comparison")
+    if verdict == "contradicted" and matches:
+        problems.append(
+            "contradicted report-basis arithmetic values match under the declared "
+            "numeric comparison")
+    return (None if problems else canonical), problems
 
 
 def _validate_public_receipt(finding: dict, report: str,
@@ -857,16 +1091,11 @@ def _validate_public_receipt(finding: dict, report: str,
                 if math_problem:
                     problems.append(f"public_receipt.{math_problem}")
             canonical_calculation = {"expression": expression, "result": result}
-            if (
-                not expression_problem
-                and result not in (None, "")
-                and numeric_result is not None
-                and not math_problem
-            ):
-                disposition_problem = _arithmetic_disposition_problem(
-                    finding, report_operand, canonical_calculation)
-                if disposition_problem:
-                    problems.append(disposition_problem)
+    numeric_comparison, comparison_problems = validate_numeric_comparison(
+        finding, report_operand, canonical_calculation)
+    problems.extend(comparison_problems)
+    if numeric_comparison is not None:
+        finding["numeric_comparison"] = numeric_comparison
     if (
         verdict != "not_checkable"
         and basis == "report"
@@ -2227,6 +2456,9 @@ def _row_repair_reasons(rows: list[dict], label: str) -> list[str]:
         if not isinstance(row, dict):
             reasons.append(f"{label} at index {index} is not an object")
             continue
+        if row.get("group_problem"):
+            reasons.extend(str(problem) for problem in row.get("problems") or [])
+            continue
         row_id = str(row.get("id") or "").strip()
         prefix = f"{label} {row_id!r}" if row_id else f"{label} at index {index}"
         for problem in row.get("problems") or []:
@@ -2275,6 +2507,14 @@ def validate_acceptance_bundle(*, text: str, sandbox: pathlib.Path,
         claim_labels={row["id"]: row["public_label"] for row in grounded_claims},
         report_date=claims_meta.get("report_date"),
         report_period=claims_meta.get("report_period"))
+    source_consideration, source_consideration_problems = (
+        validate_source_consideration(
+            (checks_doc or {}).get("source_consideration"),
+            accepted_sources,
+            grounded_claims,
+            validated,
+        )
+    )
     ledger = attach_claim_outcomes(grounded_claims, validated)
     ledger = apply_host_classifications(
         ledger, discarded_claims, inventory,
@@ -2318,6 +2558,7 @@ def validate_acceptance_bundle(*, text: str, sandbox: pathlib.Path,
         discarded_claims, "canonical claim"))
     repair_reasons.extend(_row_repair_reasons(
         discarded, "evidence-verifier check"))
+    repair_reasons.extend(source_consideration_problems)
     repair_reasons.extend(presentation_problems)
     repair_reasons.extend(sorted(
         _inventory_repair_reasons(inventory_cover["missing"])
@@ -2332,6 +2573,8 @@ def validate_acceptance_bundle(*, text: str, sandbox: pathlib.Path,
         "discarded": discarded,
         "sources": accepted_sources,
         "discarded_sources": discarded_sources,
+        "source_consideration": source_consideration,
+        "source_consideration_problems": source_consideration_problems,
         "proposed": len(material_proposed),
         "grounded": len(material_validated),
         "claims": ledger,

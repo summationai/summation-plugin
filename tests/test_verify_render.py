@@ -119,6 +119,45 @@ def accepted_check(index: int, verdict: str = "confirmed", *,
     }
 
 
+def rounded_arithmetic_check() -> dict:
+    check = accepted_check(1, "confirmed", basis="report")
+    check["type"] = "arithmetic"
+    check["public_receipt"] = public_receipt(
+        "Year-over-year revenue decrease", "4.6%", source_id=None,
+        decisive=[
+            {
+                "label": "Current revenue", "value": "350490.34",
+                "location": "Revenue total",
+            },
+            {
+                "label": "Prior-year revenue", "value": "367290.32",
+                "location": "Prior-year total",
+            },
+        ],
+        explanation=(
+            "The exact recomputation rounds to the one-decimal percentage shown."
+        ),
+    )
+    check["public_receipt"]["calculation"] = {
+        "expression": "(367290.32 - 350490.34) / 367290.32 * 100",
+        "result": "4.574032879496728%",
+    }
+    check["numeric_comparison"] = {
+        "mode": "rounded", "rounding": "half_up", "decimal_places": 1,
+        "customer_result": "4.6%", "matches": True,
+    }
+    return check
+
+
+def render_context(checks: list[dict], source_consideration: list[dict] | None = None
+                   ) -> dict:
+    return {
+        "checks": checks,
+        "source_consideration": list(source_consideration or []),
+        "source_consideration_problems": [],
+    }
+
+
 def raw_for(checks: list[dict], *, sources: list[dict] | None = None,
             supporting: bool = False) -> dict:
     source_rows = list(sources if sources is not None else [retained_source()])
@@ -327,6 +366,10 @@ class LedgerTests(unittest.TestCase):
             "checks": checks,
             "validated": checks,
             "sources": raw["sources"],
+            "source_consideration": [{
+                "source_id": "status-snapshot", "claim_ids": ["L1", "L2"],
+            }],
+            "source_consideration_problems": [],
             "inventory": raw["inventory"],
             "inventory_missing": [],
             "claims_in_ledger": 2,
@@ -642,6 +685,32 @@ class HtmlTests(unittest.TestCase):
         ):
             self.assertIn(text, changed)
 
+    def test_declared_rounding_is_private_but_exact_and_customer_result_render(self) -> None:
+        check = rounded_arithmetic_check()
+        artifact = make_artifact([check], sources=[])
+        self.assertNotIn("numeric_comparison", json.dumps(artifact))
+        page = render.html_of(
+            artifact, render_context=render_context([check]))
+        self.assertIn("Calculated result", page)
+        self.assertIn("4.574032879496728%", page)
+        self.assertIn("Customer-rounded result", page)
+        self.assertIn("4.6%", page)
+        self.assertLess(page.index("Calculated result"), page.index(
+            "Customer-rounded result"))
+        self.assertLess(page.index("Customer-rounded result"), page.index(
+            "Report shows"))
+        visible = re.sub(r"<[^>]+>", " ", page)
+        for private in (
+            "numeric_comparison", "half_up", "decimal_places",
+            "absolute_tolerance",
+        ):
+            self.assertNotIn(private, visible)
+        self.assertEqual(
+            audit.audit_public_artifact(
+                artifact, page, render_context=render_context([check])),
+            [],
+        )
+
     def test_not_checkable_is_compact_in_main_flow_with_full_receipt_in_detail(self) -> None:
         check = accepted_check(1, "not_checkable")
         artifact = make_artifact([check])
@@ -657,24 +726,39 @@ class HtmlTests(unittest.TestCase):
         self.assertIn(check["public_receipt"]["explanation"], compact)
         self.assertEqual(page.count('data-card-id="C1"'), 1)
 
-    def test_each_evidence_card_has_one_local_source_row_and_unused_sources_do_not_render(self) -> None:
+    def test_each_evidence_card_has_one_local_source_row_and_exclusion_is_scope_only(self) -> None:
         used = retained_source(kind="live_tool")
         unused = {
             "id": "unused-source", "kind": "supplied_file",
             "label": "Unused retained snapshot", "evidence_file": "unused.json",
             "result_sha256": "c" * 64,
         }
-        art = make_artifact([accepted_check(1, severity="high")], sources=[used, unused])
-        page = render.html_of(art)
+        check = accepted_check(1, severity="high")
+        art = make_artifact([check], sources=[used, unused])
+        exclusion = (
+            "This retained snapshot covers a different metric and was excluded from this claim."
+        )
+        context = render_context([check], [
+            {"source_id": "status-snapshot", "claim_ids": ["L1"]},
+            {"source_id": "unused-source", "exclusion_reason": exclusion},
+        ])
+        page = render.html_of(art, render_context=context)
         self.assertEqual(page.count('class="card-source"'), 1)
         for text in (
             "Project status snapshot", "status.json", "Live source",
             "2026-08-25T13:10:00Z",
         ):
             self.assertIn(text, page)
-        for text in ("Unused retained snapshot", "unused.json"):
-            self.assertNotIn(text, page)
+        self.assertIn('class="source-exclusions"', page)
+        for text in ("Unused retained snapshot", "unused.json", exclusion):
+            self.assertIn(text, page)
+        card_start = page.index('data-card-id="C1"')
+        card_end = page.index("</article>", card_start)
+        card = page[card_start:card_end]
+        for text in ("Unused retained snapshot", "unused.json", exclusion):
+            self.assertNotIn(text, card)
         self.assertNotIn('class="sources"', page)
+        self.assertNotIn("source_consideration", page)
 
     def test_sources_are_card_local_without_trailing_duplicates(self) -> None:
         checks = [accepted_check(index, severity="high") for index in range(1, 6)]
@@ -896,6 +980,10 @@ class SchemaAndSerializationTests(unittest.TestCase):
             "report_quote": "Visible report claim.",
             "evidence_json": [{"pointer": "/metric", "value": 1}],
             "date_receipt": {"pointer": "/date", "value": "2026-08-23"},
+            "numeric_comparison": {
+                "mode": "rounded", "rounding": "half_up",
+                "decimal_places": 1, "customer_result": "1.0", "matches": True,
+            },
             "population_alignment": {
                 "status": "same_population", "reason": "Internal only.",
             },
@@ -909,6 +997,7 @@ class SchemaAndSerializationTests(unittest.TestCase):
         blob = json.dumps(art)
         for forbidden in (
             "evidence_json", "date_receipt", "population_alignment", "/metric",
+            "numeric_comparison", "source_consideration",
             "arithmetic_inventory_ids", "found_by", "verification_mode",
         ):
             self.assertNotIn(forbidden, blob)

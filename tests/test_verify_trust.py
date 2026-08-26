@@ -35,12 +35,20 @@ BARE_HTML = """<!doctype html>
 
 
 def accepted_ledger(checks: list[dict]) -> dict:
+    cited = [
+        check["claim_id"] for check in checks
+        if (check.get("public_receipt") or {}).get("source_id") == "status-snapshot"
+    ]
     return {
         "checks": checks,
         "semantic_status": "complete",
         "discarded": [],
         "discarded_claims": [],
         "discarded_sources": [],
+        "source_consideration": ([{
+            "source_id": "status-snapshot", "claim_ids": cited,
+        }] if cited else []),
+        "source_consideration_problems": [],
         "presentation": guidance_for(checks),
         "presentation_problems": [],
     }

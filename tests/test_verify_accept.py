@@ -133,6 +133,18 @@ def unreconciled_alignment() -> dict:
     }
 
 
+def rounded_comparison(decimal_places: int = 1) -> dict:
+    return {
+        "mode": "rounded",
+        "rounding": "half_up",
+        "decimal_places": decimal_places,
+    }
+
+
+def exact_comparison() -> dict:
+    return {"mode": "absolute_tolerance", "tolerance": 0}
+
+
 def not_checkable_check() -> dict:
     return {
         "id": "C1",
@@ -282,6 +294,9 @@ def write_invalid_preflight_bundle(folder: pathlib.Path) -> dict[str, pathlib.Pa
     checks = folder / "checks.json"
     checks.write_text(json.dumps({
         "sources": [source_for(evidence, source_id="revenue-source")],
+        "source_consideration": [{
+            "source_id": "revenue-source", "claim_ids": ["L1"],
+        }],
         "checks": [check],
         "presentation": {
             "summary": "The accepted result requires the displayed total to be corrected.",
@@ -452,6 +467,25 @@ class SourceAndClaimTests(unittest.TestCase):
                 dropped[0]["problems"],
             )
 
+    def test_dated_evidence_confirmation_requires_grounded_same_population(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            evidence = folder / "status.json"
+            evidence.write_text('{"on_time":94,"total":100}\n')
+            sources, source_problems = accept.validate_sources(
+                folder, [source_for(evidence)], folder / "report.md")
+            self.assertEqual(source_problems, [])
+            kept, dropped = accept.validate_receipts(
+                REPORT, folder, [evidence_check()], {"L1"}, folder / "report.md",
+                sources=sources, claim_labels={"L1": CLAIM_LABEL},
+                report_date="2026-04-04", report_period="Week ending 2026-04-04",
+            )
+            self.assertEqual(kept, [])
+            self.assertIn(
+                "dated evidence confirmation requires population_alignment",
+                dropped[0]["problems"],
+            )
+
     def test_same_population_alignment_resolves_only_exact_agent_receipts(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
@@ -550,6 +584,84 @@ class SourceAndClaimTests(unittest.TestCase):
             self.assertEqual(accepted, [])
             self.assertIn("retrieved_at", " ".join(discarded[0]["problems"]))
 
+    def test_duplicate_source_identity_returns_one_reason_with_every_id(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            evidence = folder / "q3.json"
+            evidence.write_text('{"metric": 1}\n')
+            rows = [
+                source_for(evidence, source_id="q3-a"),
+                source_for(evidence, source_id="q3-b"),
+                source_for(evidence, source_id="q3-c"),
+            ]
+            accepted, discarded = accept.validate_sources(folder, rows)
+            self.assertEqual(accepted, [])
+            duplicate_reasons = [
+                problem
+                for row in discarded
+                for problem in row.get("problems") or []
+                if "duplicate retained source identity" in problem
+            ]
+            self.assertEqual(len(duplicate_reasons), 1)
+            for source_id in ("q3-a", "q3-b", "q3-c"):
+                self.assertIn(source_id, duplicate_reasons[0])
+
+    def test_source_consideration_covers_every_source_by_citation_or_exclusion(self) -> None:
+        sources = [
+            {"id": "q3", "kind": "supplied_file", "label": "Q3 warehouse extract",
+             "evidence_file": "q3.json", "result_sha256": "1" * 64},
+            {"id": "later-units", "kind": "supplied_file",
+             "label": "Later units snapshot", "evidence_file": "later.json",
+             "result_sha256": "2" * 64},
+        ]
+        claims = [claim()]
+        check = evidence_check()
+        check["public_receipt"]["source_id"] = "q3"
+        consideration = [
+            {"source_id": "q3", "claim_ids": ["L1"]},
+            {
+                "source_id": "later-units",
+                "exclusion_reason": (
+                    "The later snapshot does not cover this report-period delivery claim."
+                ),
+            },
+        ]
+        accepted, problems = accept.validate_source_consideration(
+            consideration, sources, claims, [check])
+        self.assertEqual(problems, [])
+        self.assertEqual(accepted, consideration)
+
+        missing, problems = accept.validate_source_consideration(
+            consideration[:1], sources, claims, [check])
+        self.assertEqual(missing, consideration[:1])
+        self.assertIn(
+            "accepted source 'later-units' has no source_consideration row",
+            problems,
+        )
+
+    def test_relevant_source_must_be_cited_by_its_mapped_claim(self) -> None:
+        sources = [
+            {"id": "q3", "kind": "supplied_file", "label": "Q3 warehouse extract",
+             "evidence_file": "q3.json", "result_sha256": "1" * 64},
+            {"id": "later-units", "kind": "supplied_file",
+             "label": "Later units snapshot", "evidence_file": "later.json",
+             "result_sha256": "2" * 64},
+        ]
+        check = evidence_check()
+        check["public_receipt"]["source_id"] = "q3"
+        _accepted, problems = accept.validate_source_consideration(
+            [
+                {"source_id": "q3", "claim_ids": ["L1"]},
+                {"source_id": "later-units", "claim_ids": ["L1"]},
+            ],
+            sources, [claim()], [check],
+        )
+        self.assertIn(
+            "source_consideration source 'later-units' maps claim 'L1' but its "
+            "accepted check does not cite that source",
+            problems,
+        )
+
     def test_source_labels_reject_private_or_vague_values(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
@@ -613,7 +725,8 @@ class SourceAndClaimTests(unittest.TestCase):
 
 class ReceiptTests(unittest.TestCase):
     def validate(self, folder: pathlib.Path, check: dict, source: dict | None = None,
-                 *, report: str = REPORT, label: str = CLAIM_LABEL):
+                 *, report: str = REPORT, label: str = CLAIM_LABEL,
+                 report_date: str | None = None):
         sources = []
         if source is not None:
             sources, source_drops = accept.validate_sources(
@@ -622,7 +735,7 @@ class ReceiptTests(unittest.TestCase):
         return accept.validate_receipts(
             report, folder, [check], {"L1"}, folder / "report.md",
             sources=sources, claim_labels={"L1": label},
-            report_date="2026-04-04",
+            report_date=report_date,
         )
 
     def test_evidence_receipt_and_claim_label_handoff_are_exact(self) -> None:
@@ -685,9 +798,11 @@ class ReceiptTests(unittest.TestCase):
         report = "On-time delivery was 94%; 94 deliveries out of 100 total."
         check = evidence_check()
         check["basis"] = "report"
+        check["type"] = "arithmetic"
         check.pop("evidence_json")
         check["report_quote"] = report
         check["public_receipt"].pop("source_id")
+        check["numeric_comparison"] = exact_comparison()
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
             kept, dropped = self.validate(folder, check, report=report)
@@ -712,6 +827,7 @@ class ReceiptTests(unittest.TestCase):
             "verdict": "confirmed",
             "importance": "material",
             "report_quote": report,
+            "numeric_comparison": exact_comparison(),
             "public_receipt": {
                 "report_operand": {
                     "label": "Total weekly revenue",
@@ -744,7 +860,8 @@ class ReceiptTests(unittest.TestCase):
                 pathlib.Path(raw), check, report=report, label="Total weekly revenue")
         self.assertEqual(kept, [])
         self.assertIn(
-            "confirmed report-basis arithmetic result does not equal the report operand",
+            "confirmed report-basis arithmetic values differ under the declared "
+            "numeric comparison",
             dropped[0]["problems"],
         )
 
@@ -762,6 +879,7 @@ class ReceiptTests(unittest.TestCase):
             "importance": "material",
             "severity": "high",
             "report_quote": report,
+            "numeric_comparison": exact_comparison(),
             "public_receipt": {
                 "report_operand": {
                     "label": "Total weekly revenue",
@@ -794,6 +912,117 @@ class ReceiptTests(unittest.TestCase):
                 pathlib.Path(raw), check, report=report, label="Total weekly revenue")
         self.assertEqual(dropped, [])
         self.assertEqual(kept[0]["verdict"], "contradicted")
+
+    def test_host_declared_rounding_controls_arithmetic_disposition(self) -> None:
+        report = (
+            "Revenue decreased 4.6% from the same week last year. "
+            "Current revenue was 350490.34 and prior revenue was 367290.32."
+        )
+        check = {
+            "id": "C1", "claim_id": "L1", "type": "arithmetic",
+            "basis": "report", "verdict": "confirmed", "importance": "material",
+            "report_quote": report, "numeric_comparison": rounded_comparison(1),
+            "public_receipt": {
+                "report_operand": {
+                    "label": "Year-over-year revenue decrease", "value": "4.6%",
+                    "location": "Revenue commentary",
+                },
+                "decisive_operands": [
+                    {"label": "Current revenue", "value": "350490.34",
+                     "location": "Revenue total"},
+                    {"label": "Prior-year revenue", "value": "367290.32",
+                     "location": "Prior-year total"},
+                ],
+                "calculation": {
+                    "expression": "(367290.32 - 350490.34) / 367290.32 * 100",
+                    "result": "4.574032879496728%",
+                },
+                "explanation": (
+                    "The recomputed decrease rounds to the one-decimal percentage shown."
+                ),
+            },
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            kept, dropped = self.validate(
+                pathlib.Path(raw), check, report=report,
+                label="Year-over-year revenue decrease")
+            self.assertEqual(dropped, [])
+            self.assertEqual(
+                kept[0]["numeric_comparison"]["customer_result"], "4.6%")
+
+            contradicted = json.loads(json.dumps(check))
+            contradicted["verdict"] = "contradicted"
+            kept, dropped = self.validate(
+                pathlib.Path(raw), contradicted, report=report,
+                label="Year-over-year revenue decrease")
+            self.assertEqual(kept, [])
+            self.assertIn(
+                "contradicted report-basis arithmetic values match under the "
+                "declared numeric comparison",
+                dropped[0]["problems"],
+            )
+
+    def test_report_arithmetic_requires_explicit_comparison_declaration(self) -> None:
+        report = "On-time delivery was 94%; 94 deliveries out of 100 total."
+        check = evidence_check()
+        check["basis"] = "report"
+        check["type"] = "arithmetic"
+        check.pop("evidence_json")
+        check["report_quote"] = report
+        check["public_receipt"].pop("source_id")
+        with tempfile.TemporaryDirectory() as raw:
+            kept, dropped = self.validate(pathlib.Path(raw), check, report=report)
+        self.assertEqual(kept, [])
+        self.assertIn(
+            "numeric_comparison is required for numeric report-basis arithmetic",
+            dropped[0]["problems"],
+        )
+
+    def test_host_declared_absolute_tolerance_controls_disposition(self) -> None:
+        report = "Adjusted total was 100.00 from base 100 plus 0.004."
+        check = {
+            "id": "C1", "claim_id": "L1", "type": "arithmetic",
+            "basis": "report", "verdict": "confirmed", "importance": "material",
+            "report_quote": report,
+            "numeric_comparison": {
+                "mode": "absolute_tolerance", "tolerance": "0.01",
+            },
+            "public_receipt": {
+                "report_operand": {
+                    "label": "Adjusted total", "value": "100.00",
+                    "location": "Adjusted total line",
+                },
+                "decisive_operands": [
+                    {"label": "Base total", "value": 100,
+                     "location": "Adjusted total line"},
+                    {"label": "Adjustment", "value": "0.004",
+                     "location": "Adjusted total line"},
+                ],
+                "calculation": {
+                    "expression": "100 + 0.004", "result": "100.004",
+                },
+                "explanation": (
+                    "The computed total is within the verifier-declared absolute tolerance."
+                ),
+            },
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            kept, dropped = self.validate(
+                pathlib.Path(raw), check, report=report, label="Adjusted total")
+            self.assertEqual(dropped, [])
+            self.assertTrue(kept[0]["numeric_comparison"]["matches"])
+            self.assertNotIn(
+                "customer_result", kept[0]["numeric_comparison"])
+
+            invalid = json.loads(json.dumps(check))
+            invalid["numeric_comparison"]["tolerance"] = -0.01
+            kept, dropped = self.validate(
+                pathlib.Path(raw), invalid, report=report, label="Adjusted total")
+            self.assertEqual(kept, [])
+            self.assertIn(
+                "numeric_comparison.tolerance must be a non-negative public numeric value",
+                dropped[0]["problems"],
+            )
 
     def test_not_checkable_requires_public_receipt_and_no_decisive_operands(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -1326,6 +1555,34 @@ class PresentationTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_duplicate_source_reasons_match_in_preflight_and_acceptance(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            paths = write_invalid_preflight_bundle(folder)
+            document = json.loads(paths["checks"].read_text())
+            duplicate = dict(document["sources"][0], id="revenue-source-copy")
+            document["sources"].append(duplicate)
+            document["source_consideration"].append({
+                "source_id": "revenue-source-copy", "claim_ids": ["L1"],
+            })
+            paths["checks"].write_text(json.dumps(document))
+            preflight_out = folder / "preflight-duplicate.json"
+            acceptance_out = folder / "receipts-duplicate.json"
+            self.assertEqual(
+                run_cli_bundle(paths, preflight_out, preflight=True), 2)
+            self.assertEqual(
+                run_cli_bundle(paths, acceptance_out, preflight=False), 2)
+            preflight = json.loads(preflight_out.read_text())["repair_reasons"]
+            acceptance = json.loads(acceptance_out.read_text())["repair_reasons"]
+            self.assertEqual(preflight, acceptance)
+            duplicate_reasons = [
+                reason for reason in preflight
+                if "duplicate retained source identity" in reason
+            ]
+            self.assertEqual(len(duplicate_reasons), 1)
+            self.assertIn("revenue-source", duplicate_reasons[0])
+            self.assertIn("revenue-source-copy", duplicate_reasons[0])
+
     def test_preflight_returns_notice_and_source_link_reasons_in_first_pass(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
@@ -1344,6 +1601,10 @@ class CliTests(unittest.TestCase):
                 "public_receipt.decisive_operands[0].value is not grounded",
                 "evidence-verifier check 'C1' "
                 "public_receipt.decisive_operands[1].value is not grounded",
+                "source_consideration source 'revenue-source' maps claim 'L1' "
+                "but its accepted check does not cite that source",
+                "source_consideration source 'revenue-source' claim_ids do not "
+                "match its accepted check citations",
                 "presentation.summary references unknown check id 'C1'",
                 "presentation.actions[0] references unknown check id 'C1'",
                 "presentation.actions has no accepted action",
@@ -1379,7 +1640,9 @@ class CliTests(unittest.TestCase):
             bad["public_receipt"]["calculation"] = {
                 "expression": "1 + 1", "result": "two projects",
             }
-            checks.write_text(json.dumps({"sources": [], "checks": [bad]}))
+            checks.write_text(json.dumps({
+                "sources": [], "source_consideration": [], "checks": [bad],
+            }))
             out = folder / "preflight.json"
             argv = sys.argv
             sys.argv = [
@@ -1453,6 +1716,9 @@ class CliTests(unittest.TestCase):
             checks = folder / "checks.json"
             checks.write_text(json.dumps({
                 "sources": [source_for(evidence)], "checks": [evidence_check()],
+                "source_consideration": [{
+                    "source_id": "status-snapshot", "claim_ids": ["L1"],
+                }],
                 "presentation": {
                     "summary": (
                         "The accepted receipt supports the displayed delivery rate."
@@ -1498,7 +1764,8 @@ class CliTests(unittest.TestCase):
             claims.write_text(json.dumps({"claims": [claim()]}))
             checks = folder / "checks.json"
             checks.write_text(json.dumps({
-                "sources": [], "checks": [not_checkable_check()],
+                "sources": [], "source_consideration": [],
+                "checks": [not_checkable_check()],
             }))
             out = folder / "receipts.json"
             argv = sys.argv

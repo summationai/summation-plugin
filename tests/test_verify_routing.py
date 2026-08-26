@@ -103,6 +103,8 @@ class RoutingTests(unittest.TestCase):
         contract = json.loads(
             (SKILLS / "verify" / "references" / "role-contracts.json").read_text()
         )
+        self.assertEqual(
+            contract["contract_version"], "verify-role-handoff/coordinator-v5")
         claim_output = contract["claim_taker"]["output"]["candidate_required"]
         coordinator_input = contract["coordinator"]["input"]["candidate_required"]
         verifier_input = contract["evidence_verifier"]["input"]["claim_required"]
@@ -179,6 +181,14 @@ class RoutingTests(unittest.TestCase):
         )
         self.assertIn(
             "presentation", final_merge["output"]["required"])
+        self.assertIn(
+            "source_consideration", final_merge["output"]["required"])
+        self.assertEqual(
+            final_merge["output"]["source_consideration_required"],
+            ["source_id", "exactly_one_of_claim_ids_or_exclusion_reason"],
+        )
+        self.assertIn(
+            "approved_sources", contract["coordinator"]["input"]["required"])
         self.assertEqual(
             final_merge["output"]["action_required"],
             ["id", "kind", "text", "report_quote", "check_ids"],
@@ -193,6 +203,10 @@ class RoutingTests(unittest.TestCase):
         )
         population = contract["evidence_verifier"]["output"]["population_alignment"]
         self.assertEqual(
+            population["required_for"],
+            "dated evidence-basis confirmed or contradicted outcome",
+        )
+        self.assertEqual(
             population["statuses"], ["same_population", "unreconciled"])
         self.assertIn("links", population["same_population_required"])
         self.assertIn(
@@ -205,6 +219,9 @@ class RoutingTests(unittest.TestCase):
         ):
             self.assertIn(forbidden, blindness["initial_prompt_forbidden"])
             self.assertIn(forbidden, blindness["repair_prompt_forbidden"])
+        for forbidden in ("numeric_precision_choice", "source_side_winner"):
+            self.assertIn(forbidden, blindness["initial_prompt_forbidden"])
+            self.assertIn(forbidden, blindness["repair_prompt_forbidden"])
         self.assertEqual(
             blindness["repair_prompt_allowed"],
             ["original_role_input", "prior_role_output", "mechanical_repair_reasons"],
@@ -214,6 +231,13 @@ class RoutingTests(unittest.TestCase):
         self.assertIn("prior grade artifact", roles)
         self.assertIn("population_alignment", roles)
         self.assertIn("host-selected visible confirmations", roles)
+        self.assertIn("numeric_comparison", roles)
+        self.assertIn("source_consideration", roles)
+        self.assertIn("every approved source", roles)
+        comparison = contract["evidence_verifier"]["output"]["numeric_comparison"]
+        self.assertEqual(
+            comparison["modes"], ["rounded", "absolute_tolerance"])
+        self.assertTrue(comparison["private_from_public_output"])
         live_status = contract["mechanical_outputs"]["verification.live_source"]
         self.assertEqual(live_status["input"], "accepted sources[].kind")
         self.assertEqual(

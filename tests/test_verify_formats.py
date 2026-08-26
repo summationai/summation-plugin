@@ -47,6 +47,7 @@ def validate_report_check(
     decisive: list[dict],
     explanation: str,
     calculation: dict | None = None,
+    numeric_comparison: dict | None = None,
 ) -> dict:
     visible, problem = inventory.visible_text_for(report)
     if problem:
@@ -82,6 +83,8 @@ def validate_report_check(
         "report_quote": visible,
         "public_receipt": receipt,
     }]
+    if numeric_comparison is not None:
+        proposed[0]["numeric_comparison"] = numeric_comparison
     with tempfile.TemporaryDirectory() as raw:
         accepted, discarded = accept.validate_receipts(
             visible,
@@ -232,6 +235,9 @@ class ExplicitFormatReceiptTests(unittest.TestCase):
                 },
             ],
             calculation={"expression": "43 - 40", "result": "3 percentage points"},
+            numeric_comparison={
+                "mode": "absolute_tolerance", "tolerance": 0,
+            },
             explanation=(
                 "The displayed margins rise from 40.0% to 43.0%, which equals three percentage points."
             ),
@@ -260,6 +266,9 @@ class ExplicitFormatReceiptTests(unittest.TestCase):
                 },
             ],
             calculation={"expression": "94 / 100 * 100", "result": "94%"},
+            numeric_comparison={
+                "mode": "absolute_tolerance", "tolerance": 0,
+            },
             explanation=(
                 "The displayed 94 on-time deliveries out of 100 total calculate to 94%, not 96%."
             ),

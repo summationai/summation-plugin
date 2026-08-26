@@ -1,5 +1,5 @@
 {
-  "contract_version": "verify-role-handoff/coordinator-v4",
+  "contract_version": "verify-role-handoff/coordinator-v5",
   "classifications": [
     "material_claim",
     "supporting_provenance",
@@ -23,7 +23,9 @@
       "expected_counts",
       "score",
       "next_action",
-      "prior_grade_artifact"
+      "prior_grade_artifact",
+      "numeric_precision_choice",
+      "source_side_winner"
     ],
     "repair_prompt_allowed": [
       "original_role_input",
@@ -41,7 +43,9 @@
       "expected_counts",
       "score",
       "next_action",
-      "prior_grade_artifact"
+      "prior_grade_artifact",
+      "numeric_precision_choice",
+      "source_side_winner"
     ]
   },
   "claim_taker": {
@@ -70,7 +74,8 @@
         "partition_results",
         "inventory",
         "report_metadata",
-        "internal_candidates"
+        "internal_candidates",
+        "approved_sources"
       ],
       "candidate_required": [
         "id",
@@ -125,6 +130,9 @@
         "public_numeric_calculation_result",
         "repeated_occurrence_correction_statement",
         "exact_population_alignment_receipts",
+        "host_declared_numeric_comparison",
+        "complete_approved_source_consideration",
+        "duplicate_source_identity_rejection",
         "grounded_verdict_summary",
         "visible_confirmed_selection",
         "action_check_consistency"
@@ -135,7 +143,12 @@
         "required": ["canonical_claims", "evidence_verifier_results"]
       },
       "output": {
-        "required": ["sources", "checks", "presentation"],
+        "required": ["sources", "checks", "source_consideration", "presentation"],
+        "source_consideration_required": [
+          "source_id",
+          "exactly_one_of_claim_ids_or_exclusion_reason"
+        ],
+        "source_consideration_coverage": "every deduplicated approved source is cited by its exact mapped canonical claims or carries a substantive exclusion reason",
         "presentation_required": ["summary", "check_ids", "actions", "limits"],
         "check_ids_meaning": "summary_grounding_ids; confirmed ids in this list are host-selected visible confirmations",
         "summary_grounding": "all ids are accepted checks and at least one is a decision-relevant confirmation when confirmed outcomes exist",
@@ -203,8 +216,17 @@
         "required": ["expression", "result"],
         "result": "public_numeric_value"
       },
+      "numeric_comparison": {
+        "required_for": "confirmed or contradicted report-basis arithmetic with numeric report and calculated values",
+        "modes": ["rounded", "absolute_tolerance"],
+        "rounded_required": ["mode", "rounding", "decimal_places"],
+        "rounding_values": ["half_up", "half_even"],
+        "absolute_tolerance_required": ["mode", "tolerance"],
+        "private_from_public_output": true,
+        "host_selects_mode_and_precision": true
+      },
       "population_alignment": {
-        "required_for": "evidence-basis contradiction of a report with a period or date",
+        "required_for": "dated evidence-basis confirmed or contradicted outcome",
         "statuses": ["same_population", "unreconciled"],
         "same_population_required": ["status", "reason", "links"],
         "link_required": ["dimension", "report_quote", "source_receipt"],
