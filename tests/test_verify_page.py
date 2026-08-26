@@ -54,6 +54,11 @@ class PageUtilityTests(unittest.TestCase):
             cards = {row["id"]: row["verdict"] for row in artifact["evidence_checks"]}
             self.assertEqual(cards["C-TOTAL"], "contradicted")
             self.assertEqual(cards["C-YOY"], "confirmed")
+            self.assertIn("table-layout:fixed", html)
+            self.assertIn(".receipt-math td{", html)
+            self.assertIn("word-break:normal", html)
+            self.assertIn("overflow-wrap:break-word", html)
+            self.assertIn(".receipt-math td.v{white-space:normal", html)
 
     def test_page_rejects_false_arithmetic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -81,3 +86,6 @@ class PageUtilityTests(unittest.TestCase):
 
     def test_packaged_plugin_copy_matches(self) -> None:
         self.assertEqual(PAGE.read_bytes(), PACKAGED.read_bytes())
+        render = ROOT / "skills/verify/scripts/render.py"
+        packaged_render = ROOT / "plugins/summation/skills/verify/scripts/render.py"
+        self.assertEqual(render.read_bytes(), packaged_render.read_bytes())
