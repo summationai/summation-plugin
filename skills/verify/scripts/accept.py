@@ -91,6 +91,13 @@ ROLE_OUTPUT_FIELDS = {
 CANONICAL_CLAIM_CLASSIFICATIONS = frozenset({
     "material_claim", "supporting_provenance",
 })
+COORDINATOR_V6_PRIVATE_CHECK_FIELDS = frozenset({
+    "id", "claim_id", "type", "basis", "verdict", "importance", "severity",
+    "addressed_clause_ids", "assessment_ids", "report_quote",
+    "public_receipt", "correction_notice", "evidence_json", "evidence_quote",
+    "report_value", "report_date", "current_value", "current_as_of",
+    "reconstruction_attempt", "date_receipt",
+})
 
 
 def load_known_verdicts(schema_path: pathlib.Path | None = None) -> frozenset:
@@ -2824,10 +2831,16 @@ def _validate_role_bundle_content(path: pathlib.Path, *, role_id: str,
                 f"role run {role_id!r} repair_context is not an input object")
         else:
             if set(repair_context) != {
-                "prior_role_output", "mechanical_repair_reasons",
+                "repair_pass_id", "prior_role_output",
+                "mechanical_repair_reasons",
             }:
                 problems.append(
                     f"role run {role_id!r} repair_context fields are invalid")
+            repair_pass_id = repair_context.get("repair_pass_id")
+            if type(repair_pass_id) is not int or repair_pass_id != 1:
+                problems.append(
+                    f"role run {role_id!r} repair_context.repair_pass_id "
+                    "must equal 1")
             if not isinstance(repair_context.get("prior_role_output"), dict):
                 problems.append(
                     f"role run {role_id!r} repair_context.prior_role_output is not an object")
@@ -2849,6 +2862,23 @@ def _role_body(payload: dict | None) -> dict:
             "contract_version", "role", "stage", "status", "repair_context",
         }
     }
+
+
+def _repair_generation_target(run: dict) -> str:
+    """Name one opaque role generation from declared stage input identifiers."""
+    stage = str(run.get("stage") or "")
+    payload = run.get("input_payload") or {}
+    if stage == "claim_taking":
+        identity = str(payload.get("partition_id") or "")
+    elif stage == "dependency_ordered_verification":
+        identity = ",".join(sorted(
+            str(row.get("id") or "")
+            for row in payload.get("canonical_claims") or []
+            if isinstance(row, dict) and row.get("id")
+        ))
+    else:
+        identity = "global"
+    return f"{stage}:{identity}"
 
 
 def _keyed_rows(raw, *, label: str, key_of, problems: list[str]) -> dict:
@@ -3175,6 +3205,11 @@ def validate_role_provenance(raw, bundle_root: pathlib.Path, *,
     if not isinstance(raw, dict):
         return None, ["role_provenance is missing or not an object"]
     problems: list[str] = []
+    unknown_top = sorted(
+        set(raw) - {"route", "repair_passes_used", "runs"})
+    if unknown_top:
+        problems.append(
+            f"role_provenance has unknown field {unknown_top[0]!r}")
     route = str(raw.get("route") or "").strip()
     if route not in {"native_subagents", "sequential"}:
         problems.append("role_provenance.route is missing or unknown")
@@ -3182,6 +3217,13 @@ def validate_role_provenance(raw, bundle_root: pathlib.Path, *,
     if not isinstance(runs, list) or not runs:
         problems.append("role_provenance.runs is missing or empty")
         runs = []
+    repair_passes_used = raw.get("repair_passes_used")
+    if (
+        type(repair_passes_used) is not int
+        or repair_passes_used not in {0, 1}
+    ):
+        problems.append(
+            "role_provenance.repair_passes_used must be the integer 0 or 1")
     seen: set[str] = set()
     roles: set[str] = set()
     stages: set[str] = set()
@@ -3301,6 +3343,35 @@ def validate_role_provenance(raw, bundle_root: pathlib.Path, *,
             "input_payload": bundle_payloads.get("input_bundle"),
             "output_payload": bundle_payloads.get("output_bundle"),
         })
+    repaired_runs = [
+        row for row in loaded_runs
+        if isinstance((row.get("input_payload") or {}).get("repair_context"), dict)
+    ]
+    repair_ids = [
+        row["input_payload"]["repair_context"].get("repair_pass_id")
+        for row in repaired_runs
+    ]
+    if repair_ids and any(
+        type(repair_pass_id) is not int or repair_pass_id != 1
+        for repair_pass_id in repair_ids
+    ):
+        problems.append(
+            "repaired role inputs do not share the one global repair_pass_id 1")
+    if repair_passes_used == 0 and repaired_runs:
+        problems.append(
+            "role_provenance declares zero repair passes but repaired role inputs "
+            "are present")
+    if repair_passes_used == 1 and not repaired_runs:
+        problems.append(
+            "role_provenance declares repair pass 1 but has no repaired role input")
+    seen_repair_targets: set[str] = set()
+    for run in repaired_runs:
+        target = _repair_generation_target(run)
+        if target in seen_repair_targets:
+            problems.append(
+                "repair pass 1 contains a second generation for role target "
+                f"{target!r}")
+        seen_repair_targets.add(target)
     for required_role in ("claim_taker", "coordinator", "evidence_verifier"):
         if required_role not in roles:
             problems.append(f"role_provenance has no {required_role} run")
@@ -3312,7 +3383,11 @@ def validate_role_provenance(raw, bundle_root: pathlib.Path, *,
             problems.append(f"role_provenance has no {required_stage} stage")
     if isinstance(expected_workflow, dict):
         _validate_role_wiring(loaded_runs, expected_workflow, problems)
-    return {"route": route, "runs": clean_runs}, list(dict.fromkeys(problems))
+    return {
+        "route": route,
+        "repair_passes_used": repair_passes_used,
+        "runs": clean_runs,
+    }, list(dict.fromkeys(problems))
 
 
 def bundle_sha256(*, report_path: pathlib.Path, text: str, inventory: dict,
@@ -3344,6 +3419,27 @@ def bundle_sha256(*, report_path: pathlib.Path, text: str, inventory: dict,
         "claims": copy.deepcopy(proposed_claims),
         "claims_meta": digest_meta,
         "checks": copy.deepcopy(checks_doc),
+        "repair_ledger": {
+            "repair_passes_used": (
+                (checks_doc.get("role_provenance") or {}).get(
+                    "repair_passes_used")
+                if isinstance(checks_doc.get("role_provenance"), dict)
+                else None
+            ),
+            "role_input_generations": [
+                {
+                    "id": str(row.get("id") or ""),
+                    "stage": str(row.get("stage") or ""),
+                    "input_sha256": str(
+                        ((row.get("input_bundle") or {}).get("sha256") or "")
+                    ),
+                }
+                for row in (
+                    (checks_doc.get("role_provenance") or {}).get("runs") or []
+                )
+                if isinstance(row, dict)
+            ],
+        },
         "evidence": evidence_rows,
     }
     encoded = json.dumps(
@@ -3378,6 +3474,11 @@ def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
         problems: list[str] = []
         receipt_updates: dict = {}
         check_id = str(finding.get("id") or "").strip()
+        unknown_private_fields = sorted(
+            set(finding) - COORDINATOR_V6_PRIVATE_CHECK_FIELDS)
+        for field in unknown_private_fields:
+            problems.append(
+                f"private field {field!r} is not allowed in coordinator-v6")
         if not check_id:
             problems.append("check id is missing")
         elif not _SOURCE_ID.fullmatch(check_id):
@@ -4245,19 +4346,6 @@ def validate_acceptance_bundle(*, text: str, sandbox: pathlib.Path,
     if validation_stage == "full" and checks_doc.get("checks") != proposed:
         workflow_problems.append(
             "checks loader input does not match checks_doc.checks")
-    for check in proposed:
-        if not isinstance(check, dict):
-            continue
-        check_id = str(check.get("id") or "")
-        if "numeric_comparison" in check:
-            workflow_problems.append(
-                f"customer check {check_id!r} numeric_comparison must be declared "
-                "on its private assessment")
-        if "population_alignment" in check:
-            workflow_problems.append(
-                f"customer check {check_id!r} population_alignment must be declared "
-                "on its private assessment")
-
     coordinator_handoff, coordinator_problems = coordinator_preflight(
         proposed_claims, claims_meta.get("coordinator"), inventory, proposed,
         presentation_doc=checks_doc)

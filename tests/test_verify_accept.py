@@ -237,7 +237,11 @@ def role_provenance_for(folder: pathlib.Path, *, report_text: str,
                 ),
             ],
         })
-    return {"route": "native_subagents", "runs": runs}
+    return {
+        "route": "native_subagents",
+        "repair_passes_used": 0,
+        "runs": runs,
+    }
 
 
 def evidence_check(*, verdict: str = "confirmed") -> dict:
@@ -1034,7 +1038,8 @@ class SourceAndClaimTests(unittest.TestCase):
 class ReceiptTests(unittest.TestCase):
     def validate(self, folder: pathlib.Path, check: dict, source: dict | None = None,
                  *, report: str = REPORT, label: str = CLAIM_LABEL,
-                 report_date: str | None = None):
+                 report_date: str | None = None,
+                 numeric_comparison: dict | None = None):
         sources = []
         if source is not None:
             sources, source_drops = accept.validate_sources(
@@ -1044,6 +1049,10 @@ class ReceiptTests(unittest.TestCase):
             report, folder, [check], {"L1"}, folder / "report.md",
             sources=sources, claim_labels={"L1": label},
             report_date=report_date,
+            numeric_comparisons=(
+                {"L1": numeric_comparison}
+                if numeric_comparison is not None else None
+            ),
         )
 
     def test_evidence_receipt_and_claim_label_handoff_are_exact(self) -> None:
@@ -1110,15 +1119,19 @@ class ReceiptTests(unittest.TestCase):
         check.pop("evidence_json")
         check["report_quote"] = report
         check["public_receipt"].pop("source_id")
-        check["numeric_comparison"] = exact_comparison()
+        numeric_comparison = exact_comparison()
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
-            kept, dropped = self.validate(folder, check, report=report)
+            kept, dropped = self.validate(
+                folder, check, report=report,
+                numeric_comparison=numeric_comparison)
             self.assertEqual(dropped, [])
             self.assertEqual(kept[0]["public_receipt"]["calculation"]["result"], "94%")
             wrong = json.loads(json.dumps(check))
             wrong["public_receipt"]["calculation"]["result"] = "95%"
-            kept, dropped = self.validate(folder, wrong, report=report)
+            kept, dropped = self.validate(
+                folder, wrong, report=report,
+                numeric_comparison=numeric_comparison)
             self.assertEqual(kept, [])
             self.assertIn("computed expression", " ".join(dropped[0]["problems"]))
 
@@ -1135,7 +1148,6 @@ class ReceiptTests(unittest.TestCase):
             "verdict": "confirmed",
             "importance": "material",
             "report_quote": report,
-            "numeric_comparison": exact_comparison(),
             "public_receipt": {
                 "report_operand": {
                     "label": "Total weekly revenue",
@@ -1165,7 +1177,9 @@ class ReceiptTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as raw:
             kept, dropped = self.validate(
-                pathlib.Path(raw), check, report=report, label="Total weekly revenue")
+                pathlib.Path(raw), check, report=report,
+                label="Total weekly revenue",
+                numeric_comparison=exact_comparison())
         self.assertEqual(kept, [])
         self.assertIn(
             "confirmed report-basis arithmetic values differ under the declared "
@@ -1187,7 +1201,6 @@ class ReceiptTests(unittest.TestCase):
             "importance": "material",
             "severity": "high",
             "report_quote": report,
-            "numeric_comparison": exact_comparison(),
             "public_receipt": {
                 "report_operand": {
                     "label": "Total weekly revenue",
@@ -1217,7 +1230,9 @@ class ReceiptTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as raw:
             kept, dropped = self.validate(
-                pathlib.Path(raw), check, report=report, label="Total weekly revenue")
+                pathlib.Path(raw), check, report=report,
+                label="Total weekly revenue",
+                numeric_comparison=exact_comparison())
         self.assertEqual(dropped, [])
         self.assertEqual(kept[0]["verdict"], "contradicted")
 
@@ -1229,7 +1244,7 @@ class ReceiptTests(unittest.TestCase):
         check = {
             "id": "C1", "claim_id": "L1", "type": "arithmetic",
             "basis": "report", "verdict": "confirmed", "importance": "material",
-            "report_quote": report, "numeric_comparison": rounded_comparison(1),
+            "report_quote": report,
             "public_receipt": {
                 "report_operand": {
                     "label": "Year-over-year revenue decrease", "value": "4.6%",
@@ -1253,7 +1268,8 @@ class ReceiptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             kept, dropped = self.validate(
                 pathlib.Path(raw), check, report=report,
-                label="Year-over-year revenue decrease")
+                label="Year-over-year revenue decrease",
+                numeric_comparison=rounded_comparison(1))
             self.assertEqual(dropped, [])
             self.assertEqual(
                 kept[0]["numeric_comparison"]["customer_result"], "4.6%")
@@ -1262,7 +1278,8 @@ class ReceiptTests(unittest.TestCase):
             contradicted["verdict"] = "contradicted"
             kept, dropped = self.validate(
                 pathlib.Path(raw), contradicted, report=report,
-                label="Year-over-year revenue decrease")
+                label="Year-over-year revenue decrease",
+                numeric_comparison=rounded_comparison(1))
             self.assertEqual(kept, [])
             self.assertIn(
                 "contradicted report-basis arithmetic values match under the "
@@ -1292,9 +1309,6 @@ class ReceiptTests(unittest.TestCase):
             "id": "C1", "claim_id": "L1", "type": "arithmetic",
             "basis": "report", "verdict": "confirmed", "importance": "material",
             "report_quote": report,
-            "numeric_comparison": {
-                "mode": "absolute_tolerance", "tolerance": "0.01",
-            },
             "public_receipt": {
                 "report_operand": {
                     "label": "Adjusted total", "value": "100.00",
@@ -1314,18 +1328,23 @@ class ReceiptTests(unittest.TestCase):
                 ),
             },
         }
+        numeric_comparison = {
+            "mode": "absolute_tolerance", "tolerance": "0.01",
+        }
         with tempfile.TemporaryDirectory() as raw:
             kept, dropped = self.validate(
-                pathlib.Path(raw), check, report=report, label="Adjusted total")
+                pathlib.Path(raw), check, report=report, label="Adjusted total",
+                numeric_comparison=numeric_comparison)
             self.assertEqual(dropped, [])
             self.assertTrue(kept[0]["numeric_comparison"]["matches"])
             self.assertNotIn(
                 "customer_result", kept[0]["numeric_comparison"])
 
-            invalid = json.loads(json.dumps(check))
-            invalid["numeric_comparison"]["tolerance"] = -0.01
+            invalid = json.loads(json.dumps(numeric_comparison))
+            invalid["tolerance"] = -0.01
             kept, dropped = self.validate(
-                pathlib.Path(raw), invalid, report=report, label="Adjusted total")
+                pathlib.Path(raw), check, report=report, label="Adjusted total",
+                numeric_comparison=invalid)
             self.assertEqual(kept, [])
             self.assertIn(
                 "numeric_comparison.tolerance must be a non-negative public numeric value",

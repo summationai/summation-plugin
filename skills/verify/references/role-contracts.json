@@ -36,7 +36,8 @@
     "repair_prompt_allowed": [
       "original_role_input_bundle",
       "prior_role_output",
-      "mechanical_repair_reasons"
+      "mechanical_repair_reasons",
+      "repair_pass_id"
     ],
     "repair_prompt_forbidden": [
       "claim_classifications",
@@ -208,6 +209,29 @@
         "assessment_ids",
         "public_receipt"
       ],
+      "check_allowed": [
+        "id",
+        "claim_id",
+        "type",
+        "basis",
+        "verdict",
+        "importance",
+        "severity",
+        "addressed_clause_ids",
+        "assessment_ids",
+        "report_quote",
+        "public_receipt",
+        "correction_notice",
+        "evidence_json",
+        "evidence_quote",
+        "report_value",
+        "report_date",
+        "current_value",
+        "current_as_of",
+        "reconstruction_attempt",
+        "date_receipt"
+      ],
+      "unknown_or_legacy_check_fields": "reject before grounding",
       "repeated_occurrence_correction_notice": {
         "required": [
           "statement",
@@ -366,12 +390,14 @@
       "inventory",
       "claims",
       "checks",
+      "repair_ledger",
       "source_manifest",
       "actual_evidence_digests"
     ]
   },
   "role_provenance": {
-    "required": ["route", "runs"],
+    "required": ["route", "repair_passes_used", "runs"],
+    "repair_passes_used": [0, 1],
     "run_required": [
       "id",
       "role",
@@ -452,9 +478,14 @@
       ]
     },
     "repair_context_optional": [
+      "repair_pass_id",
       "prior_role_output",
       "mechanical_repair_reasons"
-    ]
+    ],
+    "repair_pass_id": 1,
+    "all_repaired_inputs_share_one_pass_id": true,
+    "one_repaired_generation_per_role_target": true,
+    "repair_ledger_in_bundle_digest": true
   },
   "mechanical_outputs": {
     "verification.live_source": {

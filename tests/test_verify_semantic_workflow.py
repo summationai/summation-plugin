@@ -58,6 +58,59 @@ def rewrite_role_bundle(case: dict, role_id: str, field: str, mutate) -> None:
     run[field]["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def add_repair_context(case: dict, role_id: str, *, repair_pass_id: int) -> None:
+    """Materialize one mechanical repair generation for a bounded role input."""
+    run = next(
+        row for row in case["checks_doc"]["role_provenance"]["runs"]
+        if row["id"] == role_id
+    )
+    prior_output = json.loads(
+        (case["bundle_root"] / run["output_bundle"]["path"]).read_text()
+    )
+    rewrite_role_bundle(
+        case, role_id, "input_bundle",
+        lambda payload: payload.update({
+            "repair_context": {
+                "repair_pass_id": repair_pass_id,
+                "prior_role_output": prior_output,
+                "mechanical_repair_reasons": [
+                    "The prior role output failed one exact mechanical preflight rule."
+                ],
+            },
+        }),
+    )
+
+
+def duplicate_repaired_generation(case: dict, role_id: str,
+                                  duplicate_id: str) -> None:
+    """Add a second materialized generation for the same mechanical role target."""
+    original = next(
+        row for row in case["checks_doc"]["role_provenance"]["runs"]
+        if row["id"] == role_id
+    )
+    duplicate = copy.deepcopy(original)
+    duplicate["id"] = duplicate_id
+    for field, folder in (
+        ("input_bundle", "role-inputs"),
+        ("output_bundle", "role-outputs"),
+    ):
+        original_path = case["bundle_root"] / original[field]["path"]
+        duplicate_path = case["bundle_root"] / folder / f"{duplicate_id}.json"
+        duplicate_path.write_bytes(original_path.read_bytes())
+        if field == "input_bundle":
+            duplicate_path.chmod(0o444)
+        duplicate[field] = {
+            "path": str(duplicate_path.relative_to(case["bundle_root"])),
+            "sha256": hashlib.sha256(duplicate_path.read_bytes()).hexdigest(),
+        }
+    duplicate["allowed_read_paths"] = [
+        duplicate["input_bundle"]["path"],
+        *original["allowed_read_paths"][1:],
+    ]
+    duplicate["observed_read_paths"] = list(duplicate["allowed_read_paths"])
+    case["checks_doc"]["role_provenance"]["runs"].append(duplicate)
+
+
 class CoordinatorV6AcceptedBundleTests(unittest.TestCase):
     def test_complete_v6_bundle_is_accepted_and_validator_is_pure(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -86,6 +139,117 @@ class CoordinatorV6AcceptedBundleTests(unittest.TestCase):
                 verifier_run["observed_read_paths"],
                 verifier_run["allowed_read_paths"],
             )
+            self.assertEqual(
+                result["role_provenance"]["repair_passes_used"], 0)
+
+    def test_zero_and_one_global_repair_pass_are_accepted_and_digest_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            zero_pass = build_case(root)
+            zero_result = validate(zero_pass)
+            self.assertEqual(zero_result["repair_reasons"], [])
+            self.assertEqual(
+                zero_result["role_provenance"]["repair_passes_used"], 0)
+
+            one_pass = build_case(root)
+            one_pass["checks_doc"]["role_provenance"][
+                "repair_passes_used"] = 1
+            add_repair_context(one_pass, "RR-total", repair_pass_id=1)
+            add_repair_context(one_pass, "RR-yoy", repair_pass_id=1)
+            first = validate(one_pass)
+            second = validate(one_pass)
+            self.assertEqual(first["repair_reasons"], [])
+            self.assertEqual(first["role_provenance"]["repair_passes_used"], 1)
+            self.assertEqual(first["bundle_sha256"], second["bundle_sha256"])
+            self.assertNotEqual(
+                zero_result["bundle_sha256"], first["bundle_sha256"])
+
+    def test_two_pass_declaration_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            two_pass = build_case(root)
+            two_pass["checks_doc"]["role_provenance"][
+                "repair_passes_used"] = 2
+            add_repair_context(two_pass, "RR-total", repair_pass_id=1)
+            two_pass_reasons = reasons(two_pass)
+            self.assertIn(
+                "role_provenance.repair_passes_used must be the integer 0 or 1",
+                two_pass_reasons,
+            )
+
+    def test_inconsistent_repair_ids_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            inconsistent = build_case(root)
+            inconsistent["checks_doc"]["role_provenance"][
+                "repair_passes_used"] = 1
+            add_repair_context(inconsistent, "RR-total", repair_pass_id=1)
+            add_repair_context(inconsistent, "RR-yoy", repair_pass_id=2)
+            inconsistent_reasons = reasons(inconsistent)
+            self.assertIn(
+                "role run 'RR-yoy' repair_context.repair_pass_id must equal 1",
+                inconsistent_reasons,
+            )
+            self.assertIn(
+                "repaired role inputs do not share the one global repair_pass_id 1",
+                inconsistent_reasons,
+            )
+
+    def test_repaired_generation_without_declared_pass_one_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            case = build_case(pathlib.Path(raw))
+            add_repair_context(case, "RR-yoy", repair_pass_id=1)
+            self.assertIn(
+                "role_provenance declares zero repair passes but repaired role inputs are present",
+                reasons(case),
+            )
+
+    def test_declared_pass_one_without_a_repaired_generation_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            case = build_case(pathlib.Path(raw))
+            case["checks_doc"]["role_provenance"]["repair_passes_used"] = 1
+            self.assertIn(
+                "role_provenance declares repair pass 1 but has no repaired role input",
+                reasons(case),
+            )
+
+    def test_second_generation_after_pass_one_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            case = build_case(pathlib.Path(raw))
+            case["checks_doc"]["role_provenance"]["repair_passes_used"] = 1
+            add_repair_context(case, "RR-yoy", repair_pass_id=1)
+            duplicate_repaired_generation(case, "RR-yoy", "RR-yoy-again")
+            self.assertIn(
+                "repair pass 1 contains a second generation for role target "
+                "'dependency_ordered_verification:L-YOY'",
+                reasons(case),
+            )
+
+    def test_private_check_cutover_rejects_every_legacy_and_unknown_field(self) -> None:
+        mutations = {
+            "report_quote_2": "A second report quote.",
+            "addressed_clause_refs": ["P-main:CL-TOTAL"],
+            "population_alignment": {"status": "same_population"},
+            "numeric_comparison": {
+                "mode": "rounded", "rounding": "half_up", "decimal_places": 2,
+            },
+            "invented_semantic_alias": {"meaning": "confirmed"},
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            for field, value in mutations.items():
+                case = build_case(root)
+                case["proposed"][0][field] = value
+                with self.subTest(field=field):
+                    result = validate(case)
+                    self.assertIn(
+                        f"evidence-verifier check 'C-TOTAL' private field "
+                        f"{field!r} is not allowed in coordinator-v6",
+                        result["repair_reasons"],
+                    )
+                    self.assertEqual(result["status"], "failed")
+                    self.assertNotIn(
+                        "C-TOTAL", {row["id"] for row in result["checks"]})
 
     def test_legacy_private_contract_is_rejected_without_a_shim(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -430,11 +594,10 @@ class CoordinatorV6AcceptedBundleTests(unittest.TestCase):
                     "--out", str(receipts_path),
                 ]
                 self.assertEqual(accept.main(), 0)
-                checks_doc = json.loads(checks_path.read_text())
-                checks_doc["presentation"]["summary"] = (
-                    "The changed bundle has not been preflighted with this exact digest."
-                )
-                checks_path.write_text(json.dumps(checks_doc))
+                case["checks_doc"]["role_provenance"][
+                    "repair_passes_used"] = 1
+                add_repair_context(case, "RR-yoy", repair_pass_id=1)
+                checks_path.write_text(json.dumps(case["checks_doc"]))
                 self.assertEqual(accept.main(), 2)
             finally:
                 sys.argv = original

@@ -11,7 +11,7 @@ This is the private `verify-role-handoff/coordinator-v6` workflow. The public ar
 5. Evidence verifiers run in dependency order and author private assessments, explicit operand origins, source decisions, proposed resolutions, and public checks.
 6. The coordinator reconciles all assessments and source pairs into one resolution and one check per material claim, then authors presentation and actions.
 7. `validate_acceptance_bundle()` runs one full preflight and records the exact bundle digest and complete repair-reason set.
-8. At most one bounded repair is allowed. Every affected descendant, resolution, and presentation row is regenerated.
+8. At most one bounded repair is allowed. `role_provenance.repair_passes_used` is exactly `0` or `1`; every repaired input uses `repair_context.repair_pass_id: 1`. Every affected descendant, resolution, and presentation row is regenerated once.
 9. Final acceptance reruns the same validator against the unchanged digest before render and audit.
 
 ## Coordinator semantic plan
@@ -64,7 +64,9 @@ The assessment and source-pair rows materialized by evidence verifiers must exac
 
 Author presentation only after the full dependency, source, and resolution ledgers are complete. The summary and each action cite accepted check ids and resolution ids. Every action includes the complete dependency closure. `correct_report` requires a stable contradicted resolution with a grounded replacement and no unresolved ancestor or relevant source conflict. `reconcile_before_change` requires an unreconciled resolution. At least one host-selected decision-relevant confirmation stays visible when confirmations exist. Per-claim source exclusions remain private; only separately authored whole-source exclusions appear in Technical scope.
 
-Run one full `validate_acceptance_bundle()` preflight and record its bundle digest and complete reasons. The entire run has at most one repair. Give the responsible role only its original read-only input bundle, prior output, and exact mechanical reasons. Regenerate every affected descendant, resolution, and presentation row. Final acceptance reruns the same validator and requires the unchanged preflight digest and zero reasons.
+Run one full `validate_acceptance_bundle()` preflight and record its bundle digest and complete reasons. The entire run has at most one repair. Give the responsible role only its original read-only input bundle, prior output, exact mechanical reasons, and the shared `repair_pass_id: 1`. Set top-level `role_provenance.repair_passes_used` to `0` when no repair ran and `1` when it did. All repaired role inputs share that id, and a role target has at most one repaired generation. The repair ledger is part of the full bundle digest. A second id, a repaired input with a zero-pass declaration, or another generation after pass 1 fails closed. Regenerate every affected descendant, resolution, and presentation row. Final acceptance reruns the same validator and requires the unchanged preflight digest and zero reasons.
+
+Before grounding, each coordinator-v6 check contains only the exact allowed private check fields in [role-contracts.json](role-contracts.json). Legacy `report_quote_2`, `addressed_clause_refs`, check-level `population_alignment`, check-level `numeric_comparison`, and any other unknown semantic field fail closed. There are no compatibility aliases or inferred migrations. Numeric comparison and population alignment remain private assessment fields.
 
 ## Host support
 

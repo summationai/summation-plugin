@@ -599,6 +599,7 @@ def build_case(root: pathlib.Path) -> dict:
         "presentation": presentation,
         "role_provenance": {
             "route": "native_subagents",
+            "repair_passes_used": 0,
             "runs": role_runs,
         },
     }

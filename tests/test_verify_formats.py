@@ -83,8 +83,6 @@ def validate_report_check(
         "report_quote": visible,
         "public_receipt": receipt,
     }]
-    if numeric_comparison is not None:
-        proposed[0]["numeric_comparison"] = numeric_comparison
     with tempfile.TemporaryDirectory() as raw:
         accepted, discarded = accept.validate_receipts(
             visible,
@@ -94,6 +92,10 @@ def validate_report_check(
             report_path=report,
             sources=[],
             claim_labels={"L1": claims[0]["public_label"]},
+            numeric_comparisons=(
+                {"L1": numeric_comparison}
+                if numeric_comparison is not None else None
+            ),
         )
     if discarded:
         raise AssertionError(discarded)

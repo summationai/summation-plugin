@@ -249,8 +249,33 @@ class RoutingTests(unittest.TestCase):
             blindness["repair_prompt_allowed"],
             [
                 "original_role_input_bundle", "prior_role_output",
+                "mechanical_repair_reasons", "repair_pass_id",
+            ],
+        )
+        self.assertEqual(
+            contract["role_provenance"]["required"],
+            ["route", "repair_passes_used", "runs"],
+        )
+        self.assertEqual(
+            contract["role_provenance"]["repair_passes_used"], [0, 1])
+        self.assertEqual(
+            contract["role_provenance"]["repair_context_optional"],
+            [
+                "repair_pass_id", "prior_role_output",
                 "mechanical_repair_reasons",
             ],
+        )
+        self.assertEqual(contract["role_provenance"]["repair_pass_id"], 1)
+        self.assertEqual(
+            set(verifier["output"]["check_allowed"]),
+            {
+                "id", "claim_id", "type", "basis", "verdict", "importance",
+                "severity", "addressed_clause_ids", "assessment_ids",
+                "report_quote", "public_receipt", "correction_notice",
+                "evidence_json", "evidence_quote", "report_value",
+                "report_date", "current_value", "current_as_of",
+                "reconstruction_attempt", "date_receipt",
+            },
         )
         self.assertIn("answer key", roles)
         self.assertIn("prior grade artifact", roles)
