@@ -656,6 +656,8 @@ class PageUtilityTests(unittest.TestCase):
             self.assertIn("August 24, 2026", html)
             self.assertIn("Week ending August 24, 2026", html)
             self.assertNotIn("24 August", html)
+            self.assertIn("records 39,229 spans", html)
+            self.assertNotIn("records 39229 spans", html)
             self.assertIn("1.337612", html)
 
     def test_packaged_plugin_copy_matches(self) -> None:

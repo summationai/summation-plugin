@@ -687,10 +687,11 @@ _DAY_MONTH = re.compile(
     re.I,
 )
 _ISO_DATE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})(?!T)\b")
+_PLAIN_INT = re.compile(r"\b\d{4,}\b")
 
 
 def _customer_english(text: str) -> str:
-    """Rewrite day-month English and ISO calendar dates to month-day order."""
+    """Rewrite dates to month-day order and group live integer counts."""
 
     def day_month(match: re.Match[str]) -> str:
         day = int(match.group(1))
@@ -707,7 +708,14 @@ def _customer_english(text: str) -> str:
             return match.group(0)
         return f"{parsed.strftime('%B')} {parsed.day}, {parsed.year}"
 
-    return _ISO_DATE.sub(iso, _DAY_MONTH.sub(day_month, text))
+    def grouped_int(match: re.Match[str]) -> str:
+        number = int(match.group(0))
+        if 1900 <= number <= 2099:
+            return match.group(0)
+        return f"{number:,}"
+
+    dated = _ISO_DATE.sub(iso, _DAY_MONTH.sub(day_month, text))
+    return _PLAIN_INT.sub(grouped_int, dated)
 
 
 def _display(value, *, places: int | None = None) -> str:
