@@ -21,7 +21,14 @@ from receipt_math import calculation_problem  # noqa: E402
 FORBIDDEN_KEYS = frozenset({
     "found_by", "verification_mode", "report_quote", "report_quote_2",
     "evidence_json", "evidence_quote", "date_receipt", "population_alignment",
-    "numeric_comparison", "source_consideration",
+    "numeric_comparison", "source_consideration", "whole_source_exclusions",
+    "source_consideration_plan", "source_consideration_results",
+    "assessment_ids", "assessments", "resolutions", "resolution_ids",
+    "claim_dependencies", "operand_bindings", "depends_on_assessment_ids",
+    "population_requirements", "classification_reviews", "role_provenance",
+    "proposed_resolutions", "correction_notice", "structural_context",
+    "claim_ancestors", "topological_claim_ids", "resolved_operands",
+    "bundle_sha256", "contract_version",
     "used_for_internal_arithmetic", "arithmetic_inventory_ids",
 })
 _ABS_PATH = re.compile(

@@ -88,7 +88,7 @@ class RoutingTests(unittest.TestCase):
         text = skill("verify")
         self.assertIn("`report_value` must be the visible report operand", text)
 
-    def test_role_contract_wires_public_label_and_identical_handoffs(self) -> None:
+    def test_role_contract_wires_coordinator_v6_and_identical_routes(self) -> None:
         verify = skill("verify")
         roles = (SKILLS / "verify" / "references" / "roles.md").read_text()
         self.assertIn("native subagents", verify)
@@ -99,123 +99,146 @@ class RoutingTests(unittest.TestCase):
         self.assertIn("same output schema", roles)
         self.assertIn("sequentially", roles)
         self.assertIn("not execution proof", roles.lower())
+        self.assertIn("read-only input", roles)
+        self.assertIn("observed read paths", roles)
+        self.assertIn("nine stage", roles)
 
         contract = json.loads(
             (SKILLS / "verify" / "references" / "role-contracts.json").read_text()
         )
         self.assertEqual(
-            contract["contract_version"], "verify-role-handoff/coordinator-v5")
-        claim_output = contract["claim_taker"]["output"]["candidate_required"]
-        coordinator_input = contract["coordinator"]["input"]["candidate_required"]
-        verifier_input = contract["evidence_verifier"]["input"]["claim_required"]
-        coordinator_output = contract["coordinator"]["output"]["claim_required"]
-        self.assertEqual(claim_output, coordinator_input)
-        self.assertEqual(coordinator_output, verifier_input)
+            contract["contract_version"], "verify-role-handoff/coordinator-v6")
+        self.assertEqual(contract["public_contract"], {
+            "schema_version": "grade-artifact/public-receipt-v1",
+            "schema_change": False,
+            "private_fields_are_serialized": False,
+        })
+        claim_taker = contract["claim_taker"]
         self.assertEqual(
-            contract["claim_taker"]["output"]["material_claim_required"],
-            ["clauses"],
+            claim_taker["input"]["required"],
+            ["partition_id", "visible_text", "inventory", "report_metadata"],
+        )
+        self.assertEqual(claim_taker["input"]["inventory_importance"], "unclassified")
+        self.assertEqual(
+            claim_taker["output"]["required"],
+            ["partition_id", "occurrence_decisions", "clauses"],
         )
         self.assertEqual(
-            contract["claim_taker"]["output"]["material_clause_required"],
-            ["id", "quote", "public_label"],
+            claim_taker["output"]["material_clause_required"],
+            [
+                "id", "occurrence_id", "span", "quote", "public_label",
+                "context_occurrence_ids",
+            ],
         )
-        self.assertIn(
-            "reason",
-            contract["claim_taker"]["output"]["structural_context_required"],
+        self.assertIn("reason", claim_taker["output"]["occurrence_decision_required"])
+
+        plan = contract["coordinator_semantic_plan"]
+        self.assertEqual(plan["output"]["required"], [
+            "classification_reviews", "canonical_claims",
+            "source_consideration_plan", "claim_dependencies",
+            "verifier_assignments",
+        ])
+        self.assertEqual(
+            plan["output"]["classification_review_decisions"],
+            ["accept", "demote", "challenge"],
         )
         self.assertEqual(
-            contract["coordinator"]["output"]["supporting_provenance_required"],
-            ["reason"],
+            plan["output"]["source_consideration_plan_required"],
+            ["source_id", "claim_id", "decision", "reason"],
+        )
+        self.assertIn("population_requirements", plan["output"]["material_claim_required"])
+        self.assertEqual(plan["output"]["claim_dependency_role"], "decisive_operand")
+
+        verifier = contract["evidence_verifier"]
+        self.assertEqual(
+            verifier["input"]["claims_from"],
+            "coordinator_semantic_plan.output.canonical_claims",
         )
         self.assertEqual(
-            contract["evidence_verifier"]["input"]["supporting_provenance_required"],
-            ["reason"],
-        )
-        self.assertEqual(
-            contract["evidence_verifier"]["output"]["calculation"]["result"],
+            verifier["output"]["calculation"]["result"],
             "public_numeric_value",
         )
+        for field in ("addressed_clause_ids", "assessment_ids", "public_receipt"):
+            self.assertIn(field, verifier["output"]["check_required"])
+        self.assertEqual(verifier["output"]["operand_origins"], {
+            "report_occurrence": ["kind", "occurrence_id"],
+            "source_receipt": ["kind", "source_id", "receipt"],
+            "assessment_result": ["kind", "assessment_id", "field"],
+        })
+        population = verifier["output"]["population_alignment"]
         self.assertEqual(
-            contract["coordinator"]["preflight"]["repair_passes"], 1)
+            population["required_for"],
+            "evidence assessment whose canonical claim declares population requirements",
+        )
+        self.assertEqual(population["statuses"], ["same_population", "unreconciled"])
+        self.assertIn("requirement_id", population["link_required"])
+        self.assertIn("reconciliation_action", population["unreconciled_required"])
+        comparison = verifier["output"]["numeric_comparison"]
+        self.assertEqual(comparison["modes"], ["rounded", "absolute_tolerance"])
+        self.assertTrue(comparison["private_from_public_output"])
+
+        final_merge = contract["coordinator_global_resolution"]
+        self.assertEqual(final_merge["output"]["source_consideration_required"], [
+            "source_id", "claim_id", "coordinator_decision",
+            "coordinator_reason", "verifier_decision", "verifier_reason",
+            "assessment_ids",
+        ])
+        self.assertIn("resolutions", final_merge["output"]["required"])
+        self.assertIn("role_provenance", final_merge["output"]["required"])
+        self.assertEqual(final_merge["output"]["action_required"], [
+            "id", "kind", "text", "report_quote", "check_ids", "resolution_ids",
+        ])
+        self.assertFalse(
+            final_merge["output"]["dependency_unresolved_behavior"]
+            ["correct_report_allowed"]
+        )
+
+        acceptance = contract["mechanical_acceptance"]
+        self.assertEqual(acceptance["validator"], "validate_acceptance_bundle")
+        self.assertTrue(acceptance["pure"])
         self.assertEqual(
-            contract["coordinator"]["preflight"]["runs_before"], "acceptance")
-        self.assertEqual(
-            contract["claim_taker"]["input"]["inventory_item_required"],
-            ["id", "displayed", "location", "importance"],
-        )
-        self.assertIn(
-            "severity",
-            contract["evidence_verifier"]["output"]["check_required"],
-        )
-        self.assertIn(
-            "addressed_clause_refs",
-            contract["evidence_verifier"]["output"]["check_required"],
-        )
-        self.assertIn(
-            "receipt_addresses_every_canonical_clause",
-            contract["coordinator"]["preflight"]["validates"],
+            acceptance["semantic_plan_preflight"]["validation_stage"],
+            "semantic_plan",
         )
         self.assertEqual(
-            contract["coordinator"]["output"]["material_member_ref_required"],
-            ["partition_id", "candidate_id", "clause_id"],
+            acceptance["semantic_plan_preflight"]["runs_before"],
+            "dependency_ordered_verification",
         )
+        self.assertTrue(acceptance["final_bundle_digest_must_match"])
+        self.assertEqual(acceptance["repair_passes"], 1)
+
+        provenance = contract["role_provenance"]
+        self.assertTrue(provenance["input_bundle_read_only"])
+        self.assertTrue(provenance["observed_reads_must_be_allowed"])
+        self.assertIn("assigned evidence files", provenance["allowed_reads"])
+        self.assertEqual(
+            set(provenance["input_bundle_stage_required"]),
+            {
+                "claim_taking", "coordinator_semantic_plan",
+                "dependency_ordered_verification", "coordinator_global_resolution",
+            },
+        )
+        self.assertEqual(
+            set(provenance["input_bundle_stage_required"]),
+            set(provenance["output_bundle_stage_required"]),
+        )
+
         native = contract["routes"]["native_subagents"]
         sequential = contract["routes"]["sequential"]
         self.assertTrue(native["primary"])
         self.assertFalse(sequential["primary"])
-        self.assertEqual(
-            native["stages"],
-            ["claim_taker", "coordinator", "evidence_verifier"],
-        )
+        self.assertEqual(native["stages"], contract["stage_sequence"])
+        self.assertEqual(len(native["stages"]), 9)
         self.assertEqual(native["stages"], sequential["stages"])
         self.assertEqual(native["input_contracts"], sequential["input_contracts"])
         self.assertEqual(native["output_contracts"], sequential["output_contracts"])
-        self.assertEqual(
-            contract["evidence_verifier"]["input"]["claims_from"],
-            "coordinator.output.canonical_claims",
-        )
-        final_merge = contract["coordinator"]["final_merge"]
-        self.assertEqual(
-            final_merge["input"]["required"],
-            ["canonical_claims", "evidence_verifier_results"],
-        )
-        self.assertIn(
-            "presentation", final_merge["output"]["required"])
-        self.assertIn(
-            "source_consideration", final_merge["output"]["required"])
-        self.assertEqual(
-            final_merge["output"]["source_consideration_required"],
-            ["source_id", "exactly_one_of_claim_ids_or_exclusion_reason"],
-        )
-        self.assertIn(
-            "approved_sources", contract["coordinator"]["input"]["required"])
-        self.assertEqual(
-            final_merge["output"]["action_required"],
-            ["id", "kind", "text", "report_quote", "check_ids"],
-        )
-        self.assertEqual(
-            final_merge["output"]["presentation_required"],
-            ["summary", "check_ids", "actions", "limits"],
-        )
-        self.assertEqual(
-            final_merge["output"]["check_ids_meaning"],
-            "summary_grounding_ids; confirmed ids in this list are host-selected visible confirmations",
-        )
-        population = contract["evidence_verifier"]["output"]["population_alignment"]
-        self.assertEqual(
-            population["required_for"],
-            "dated evidence-basis confirmed or contradicted outcome",
-        )
-        self.assertEqual(
-            population["statuses"], ["same_population", "unreconciled"])
-        self.assertIn("links", population["same_population_required"])
-        self.assertIn(
-            "reconciliation_action", population["unreconciled_required"])
+
         blindness = contract["independent_semantic_authorship"]
         for forbidden in (
             "claim_classifications", "verdicts", "severities", "check_ids",
             "public_labels", "operands", "calculations", "expected_counts",
-            "score", "next_action", "prior_grade_artifact",
+            "score", "next_action", "prior_grade_artifact", "claim_dependencies",
+            "verdict_summary", "action_text",
         ):
             self.assertIn(forbidden, blindness["initial_prompt_forbidden"])
             self.assertIn(forbidden, blindness["repair_prompt_forbidden"])
@@ -224,20 +247,16 @@ class RoutingTests(unittest.TestCase):
             self.assertIn(forbidden, blindness["repair_prompt_forbidden"])
         self.assertEqual(
             blindness["repair_prompt_allowed"],
-            ["original_role_input", "prior_role_output", "mechanical_repair_reasons"],
+            [
+                "original_role_input_bundle", "prior_role_output",
+                "mechanical_repair_reasons",
+            ],
         )
-        self.assertIn("a cited `presentation.actions` row", roles)
-        self.assertIn("No answer key", roles)
+        self.assertIn("answer key", roles)
         self.assertIn("prior grade artifact", roles)
-        self.assertIn("population_alignment", roles)
-        self.assertIn("host-selected visible confirmations", roles)
-        self.assertIn("numeric_comparison", roles)
-        self.assertIn("source_consideration", roles)
-        self.assertIn("every approved source", roles)
-        comparison = contract["evidence_verifier"]["output"]["numeric_comparison"]
-        self.assertEqual(
-            comparison["modes"], ["rounded", "absolute_tolerance"])
-        self.assertTrue(comparison["private_from_public_output"])
+        self.assertIn("Population alignment lives on an evidence assessment", roles)
+        self.assertIn("source_consideration_plan", roles)
+        self.assertIn("dependency closure", roles)
         live_status = contract["mechanical_outputs"]["verification.live_source"]
         self.assertEqual(live_status["input"], "accepted sources[].kind")
         self.assertEqual(

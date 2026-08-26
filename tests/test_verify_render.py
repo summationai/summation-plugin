@@ -149,12 +149,23 @@ def rounded_arithmetic_check() -> dict:
     return check
 
 
-def render_context(checks: list[dict], source_consideration: list[dict] | None = None
+def render_context(checks: list[dict], whole_source_exclusions: list[dict] | None = None
                    ) -> dict:
     return {
+        "status": "complete",
+        "contract_version": "verify-role-handoff/coordinator-v6",
         "checks": checks,
-        "source_consideration": list(source_consideration or []),
+        "assessments": [],
+        "resolutions": [],
+        "whole_source_exclusions": list(whole_source_exclusions or []),
+        "source_consideration": [],
         "source_consideration_problems": [],
+        "semantic_status": "complete",
+        "discarded": [],
+        "discarded_claims": [],
+        "discarded_sources": [],
+        "presentation": guidance_for(checks),
+        "presentation_problems": [],
     }
 
 
@@ -269,9 +280,14 @@ class PublicLayerTests(unittest.TestCase):
             "formula": "on-time / total semantic heuristic",
             "comparison": {"label": "row 9", "value": 999},
             "evidence_json": [{"pointer": "/private", "value": 1}],
-            "addressed_clause_refs": [{
-                "partition_id": "summary", "candidate_id": "K1",
-                "clause_id": "C1",
+            "addressed_clause_ids": ["summary:C1"],
+            "assessment_ids": ["AS-C1"],
+            "depends_on_assessment_ids": ["AS-UPSTREAM"],
+            "operand_bindings": [{
+                "slot": "decisive_operands/0",
+                "origin": {"kind": "assessment_result",
+                           "assessment_id": "AS-UPSTREAM",
+                           "field": "calculation.result"},
             }],
             "correction_notice": {
                 "statement": "Internal exact-copy enforcement only.",
@@ -290,7 +306,10 @@ class PublicLayerTests(unittest.TestCase):
         self.assertEqual(first[0]["public_receipt"], expected_receipt)
         self.assertEqual(set(first[0]), set(render.CHECK_PUBLIC_KEYS))
         self.assertNotIn("formula", json.dumps(first))
-        self.assertNotIn("addressed_clause_refs", json.dumps(first))
+        self.assertNotIn("addressed_clause_ids", json.dumps(first))
+        self.assertNotIn("assessment_ids", json.dumps(first))
+        self.assertNotIn("depends_on_assessment_ids", json.dumps(first))
+        self.assertNotIn("operand_bindings", json.dumps(first))
         self.assertNotIn("correction_notice", json.dumps(first))
         self.assertNotIn("population_alignment", json.dumps(first))
         self.assertNotIn("/private", json.dumps(first))
@@ -361,15 +380,63 @@ class LedgerTests(unittest.TestCase):
         }]
         for claim in raw["claims"]:
             claim["inventory_ids"] = ["INV-SHARED"]
+        for index, check in enumerate(checks, 1):
+            check["assessment_ids"] = [f"AS{index}"]
+        assessments = [
+            {
+                "id": f"AS{index}", "claim_id": f"L{index}",
+                "basis": "evidence",
+                "effect": (
+                    "contradicts" if check["verdict"] == "contradicted"
+                    else "supports"
+                ),
+                "source_id": "status-snapshot",
+                "depends_on_assessment_ids": [], "operand_bindings": [],
+            }
+            for index, check in enumerate(checks, 1)
+        ]
+        resolutions = [
+            {
+                "claim_id": f"L{index}", "assessment_ids": [f"AS{index}"],
+                "state": (
+                    "contradicted" if check["verdict"] == "contradicted"
+                    else "supported"
+                ),
+                "final_verdict": check["verdict"],
+                "reason": "The accepted assessment resolves this canonical claim.",
+                "required_action_kind": (
+                    "correct_report" if check["verdict"] == "contradicted"
+                    else "review_before_share"
+                ),
+            }
+            for index, check in enumerate(checks, 1)
+        ]
         receipts = {
+            "status": "complete",
+            "contract_version": "verify-role-handoff/coordinator-v6",
             "claims": raw["claims"],
             "checks": checks,
             "validated": checks,
             "sources": raw["sources"],
-            "source_consideration": [{
-                "source_id": "status-snapshot", "claim_ids": ["L1", "L2"],
-            }],
+            "source_consideration": [
+                {
+                    "source_id": "status-snapshot", "claim_id": f"L{index}",
+                    "coordinator_decision": "consider",
+                    "coordinator_reason": (
+                        "The retained source is relevant to this canonical claim."
+                    ),
+                    "verifier_decision": "used",
+                    "verifier_reason": (
+                        "The accepted assessment uses an exact receipt from this source."
+                    ),
+                    "assessment_ids": [f"AS{index}"],
+                }
+                for index in (1, 2)
+            ],
             "source_consideration_problems": [],
+            "assessments": assessments,
+            "resolutions": resolutions,
+            "whole_source_exclusions": [],
             "inventory": raw["inventory"],
             "inventory_missing": [],
             "claims_in_ledger": 2,
@@ -739,7 +806,6 @@ class HtmlTests(unittest.TestCase):
             "This retained snapshot covers a different metric and was excluded from this claim."
         )
         context = render_context([check], [
-            {"source_id": "status-snapshot", "claim_ids": ["L1"]},
             {"source_id": "unused-source", "exclusion_reason": exclusion},
         ])
         page = render.html_of(art, render_context=context)

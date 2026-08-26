@@ -40,6 +40,8 @@ def accepted_ledger(checks: list[dict]) -> dict:
         if (check.get("public_receipt") or {}).get("source_id") == "status-snapshot"
     ]
     return {
+        "status": "complete",
+        "contract_version": "verify-role-handoff/coordinator-v6",
         "checks": checks,
         "semantic_status": "complete",
         "discarded": [],
@@ -49,6 +51,9 @@ def accepted_ledger(checks: list[dict]) -> dict:
             "source_id": "status-snapshot", "claim_ids": cited,
         }] if cited else []),
         "source_consideration_problems": [],
+        "assessments": [],
+        "resolutions": [],
+        "whole_source_exclusions": [],
         "presentation": guidance_for(checks),
         "presentation_problems": [],
     }

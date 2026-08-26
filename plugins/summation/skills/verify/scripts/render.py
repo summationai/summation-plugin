@@ -737,11 +737,11 @@ def _accepted_render_context(artifact: dict, render_context: dict | None
     source_rows = {
         str(row.get("id") or ""): row for row in artifact["sources"]
     }
-    considerations = render_context.get("source_consideration")
-    if considerations is None:
-        considerations = []
-    if not isinstance(considerations, list):
-        raise SystemExit("render: source_consideration is not an array")
+    exclusions = render_context.get("whole_source_exclusions")
+    if exclusions is None:
+        exclusions = []
+    if not isinstance(exclusions, list):
+        raise SystemExit("render: whole_source_exclusions is not an array")
     clean_considerations: list[dict] = []
     seen: set[str] = set()
     citations: dict[str, set[str]] = {}
@@ -751,34 +751,20 @@ def _accepted_render_context(artifact: dict, render_context: dict | None
         )
         if source_id:
             citations.setdefault(source_id, set()).add(str(check.get("claim_id") or ""))
-    for row in considerations:
+    for row in exclusions:
         if not isinstance(row, dict):
-            raise SystemExit("render: source_consideration row is not an object")
+            raise SystemExit("render: whole_source_exclusions row is not an object")
         source_id = str(row.get("source_id") or "")
         if source_id not in source_rows or source_id in seen:
-            raise SystemExit("render: source_consideration source is invalid or duplicated")
+            raise SystemExit("render: whole-source exclusion is invalid or duplicated")
         seen.add(source_id)
-        if "claim_ids" in row and "exclusion_reason" not in row:
-            claim_ids = row.get("claim_ids")
-            if not isinstance(claim_ids, list) or set(claim_ids) != citations.get(
-                source_id, set()
-            ):
-                raise SystemExit(
-                    "render: source_consideration citations do not match accepted cards")
-            clean_considerations.append({
-                "source_id": source_id, "claim_ids": list(claim_ids),
-            })
-        elif "exclusion_reason" in row and "claim_ids" not in row:
-            reason = str(row.get("exclusion_reason") or "").strip()
-            if citations.get(source_id) or not _publishable_text(reason):
-                raise SystemExit("render: source exclusion is invalid")
-            clean_considerations.append({
-                "source_id": source_id, "exclusion_reason": reason,
-            })
-        else:
-            raise SystemExit("render: source_consideration row is ambiguous")
-    if seen != set(source_rows):
-        raise SystemExit("render: source_consideration does not cover retained sources")
+        reason = str(row.get("exclusion_reason") or "").strip()
+        if set(row) != {"source_id", "exclusion_reason"} \
+                or citations.get(source_id) or not _publishable_text(reason):
+            raise SystemExit("render: whole-source exclusion is invalid")
+        clean_considerations.append({
+            "source_id": source_id, "exclusion_reason": reason,
+        })
     return comparisons, clean_considerations
 
 
@@ -1160,6 +1146,15 @@ def ungraded_reason(raw: dict, has_receipts: bool,
         return "approved source consideration did not validate"
     if not isinstance(receipts.get("source_consideration"), list):
         return "approved source consideration is missing"
+    if receipts.get("status") != "complete":
+        return "accepted private workflow is not complete"
+    if receipts.get("contract_version") != "verify-role-handoff/coordinator-v6":
+        return "accepted private workflow version is invalid"
+    if not isinstance(receipts.get("assessments"), list) \
+            or not isinstance(receipts.get("resolutions"), list):
+        return "accepted private assessment or resolution ledger is missing"
+    if not isinstance(receipts.get("whole_source_exclusions"), list):
+        return "accepted whole-source exclusion ledger is missing"
     if receipts.get("presentation_problems"):
         return "accepted customer presentation did not validate"
     presentation = receipts.get("presentation")

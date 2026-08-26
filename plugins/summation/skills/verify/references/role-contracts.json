@@ -1,5 +1,10 @@
 {
-  "contract_version": "verify-role-handoff/coordinator-v5",
+  "contract_version": "verify-role-handoff/coordinator-v6",
+  "public_contract": {
+    "schema_version": "grade-artifact/public-receipt-v1",
+    "schema_change": false,
+    "private_fields_are_serialized": false
+  },
   "classifications": [
     "material_claim",
     "supporting_provenance",
@@ -7,9 +12,7 @@
   ],
   "independent_semantic_authorship": {
     "initial_prompt_allowed": [
-      "report",
-      "neutral_inventory",
-      "approved_sources",
+      "materialized_role_input_bundle",
       "role_contracts"
     ],
     "initial_prompt_forbidden": [
@@ -25,10 +28,13 @@
       "next_action",
       "prior_grade_artifact",
       "numeric_precision_choice",
-      "source_side_winner"
+      "source_side_winner",
+      "claim_dependencies",
+      "verdict_summary",
+      "action_text"
     ],
     "repair_prompt_allowed": [
-      "original_role_input",
+      "original_role_input_bundle",
       "prior_role_output",
       "mechanical_repair_reasons"
     ],
@@ -45,140 +51,151 @@
       "next_action",
       "prior_grade_artifact",
       "numeric_precision_choice",
-      "source_side_winner"
-    ]
+      "source_side_winner",
+      "claim_dependencies",
+      "verdict_summary",
+      "action_text"
+    ],
+    "repair_passes": 1
   },
   "claim_taker": {
     "input": {
       "required": ["partition_id", "visible_text", "inventory", "report_metadata"],
-      "inventory_item_required": ["id", "displayed", "location", "importance"]
+      "inventory_item_required": ["id", "displayed", "location", "importance"],
+      "inventory_importance": "unclassified"
     },
     "output": {
-      "required": ["partition_id", "candidates"],
-      "candidate_required": [
-        "id",
-        "quote",
-        "importance",
+      "required": ["partition_id", "occurrence_decisions", "clauses"],
+      "occurrence_decision_required": [
+        "occurrence_id",
         "classification",
-        "inventory_ids"
+        "reason",
+        "clause_ids"
       ],
-      "material_claim_required": ["clauses"],
-      "material_clause_required": ["id", "quote", "public_label"],
-      "supporting_provenance_required": ["public_label", "reason"],
-      "structural_context_required": ["reason"]
+      "material_clause_required": [
+        "id",
+        "occurrence_id",
+        "span",
+        "quote",
+        "public_label",
+        "context_occurrence_ids"
+      ],
+      "span_semantics": "zero-based [start,end) into normalized displayed text",
+      "nonmaterial_clause_ids": []
     }
   },
-  "coordinator": {
+  "coordinator_semantic_plan": {
     "input": {
       "required": [
         "partition_results",
         "inventory",
         "report_metadata",
         "internal_candidates",
-        "approved_sources"
-      ],
-      "candidate_required": [
-        "id",
-        "quote",
-        "importance",
-        "classification",
-        "inventory_ids"
+        "approved_source_manifest"
       ]
     },
     "output": {
       "required": [
+        "classification_reviews",
         "canonical_claims",
-        "membership",
-        "structural_context",
+        "source_consideration_plan",
+        "claim_dependencies",
         "verifier_assignments"
       ],
-      "claim_required": [
-        "id",
-        "quote",
-        "public_label",
-        "importance",
-        "classification",
-        "inventory_ids",
-        "member_refs"
-      ],
-      "membership_required": ["partition_id", "candidate_id", "canonical_claim_id"],
-      "material_membership_required": ["clause_id"],
-      "material_member_ref_required": ["partition_id", "candidate_id", "clause_id"],
-      "structural_context_required": [
-        "id",
-        "partition_id",
-        "candidate_id",
-        "quote",
-        "importance",
-        "classification",
+      "classification_review_required": [
+        "occurrence_id",
+        "claim_taker_partition_id",
+        "proposed_classification",
+        "final_classification",
+        "decision",
         "reason",
-        "inventory_ids"
+        "accepted_clause_ids"
       ],
-      "supporting_provenance_required": ["reason"],
+      "classification_review_decisions": ["accept", "demote", "challenge"],
+      "material_claim_required": [
+        "id",
+        "primary_clause_id",
+        "member_clause_ids",
+        "occurrence_ids",
+        "primary_quote",
+        "public_label",
+        "context_occurrence_ids",
+        "population_requirements"
+      ],
+      "population_requirement_required": [
+        "id",
+        "dimension",
+        "report_quote"
+      ],
+      "source_consideration_plan_required": [
+        "source_id",
+        "claim_id",
+        "decision",
+        "reason"
+      ],
+      "source_consideration_plan_decisions": [
+        "consider",
+        "exclude"
+      ],
+      "source_consideration_plan_coverage": "one row for every approved deduplicated source and material canonical claim pair before verifier assignment",
+      "population_dimensions": [
+        "report_period",
+        "as_of_date",
+        "scope",
+        "population_key"
+      ],
+      "claim_dependency_required": [
+        "id",
+        "upstream_claim_id",
+        "downstream_claim_id",
+        "role",
+        "reason"
+      ],
+      "claim_dependency_role": "decisive_operand",
       "verifier_assignment_required": ["verifier_id", "claim_ids"]
-    },
-    "preflight": {
-      "runs_before": "acceptance",
-      "repair_passes": 1,
-      "returns": ["status", "repair_reasons", "coordinator"],
-      "validates": [
-        "complete_unique_opaque_membership",
-        "complete_unique_material_clause_membership",
-        "receipt_addresses_every_canonical_clause",
-        "substantive_supporting_provenance_reason",
-        "substantive_structural_context_reason",
-        "public_numeric_calculation_result",
-        "repeated_occurrence_correction_statement",
-        "exact_population_alignment_receipts",
-        "host_declared_numeric_comparison",
-        "complete_approved_source_consideration",
-        "duplicate_source_identity_rejection",
-        "grounded_verdict_summary",
-        "visible_confirmed_selection",
-        "action_check_consistency"
-      ]
-    },
-    "final_merge": {
-      "input": {
-        "required": ["canonical_claims", "evidence_verifier_results"]
-      },
-      "output": {
-        "required": ["sources", "checks", "source_consideration", "presentation"],
-        "source_consideration_required": [
-          "source_id",
-          "exactly_one_of_claim_ids_or_exclusion_reason"
-        ],
-        "source_consideration_coverage": "every deduplicated approved source is cited by its exact mapped canonical claims or carries a substantive exclusion reason",
-        "presentation_required": ["summary", "check_ids", "actions", "limits"],
-        "check_ids_meaning": "summary_grounding_ids; confirmed ids in this list are host-selected visible confirmations",
-        "summary_grounding": "all ids are accepted checks and at least one is a decision-relevant confirmation when confirmed outcomes exist",
-        "action_required": ["id", "kind", "text", "report_quote", "check_ids"],
-        "action_kinds": [
-          "correct_report",
-          "reconcile_before_change",
-          "review_before_share"
-        ],
-        "repeated_correction_action": "copies the exact accepted correction_notice.statement"
-      }
     }
   },
   "evidence_verifier": {
     "input": {
-      "required": ["partition_id", "visible_text", "claims", "sources"],
-      "claims_from": "coordinator.output.canonical_claims",
-      "claim_required": [
-        "id",
-        "quote",
-        "public_label",
-        "importance",
-        "classification",
-        "inventory_ids",
-        "member_refs"
+      "required": [
+        "canonical_claims",
+        "relevant_report_text",
+        "assigned_sources",
+        "source_consideration_plan",
+        "accepted_upstream_assessment_results"
       ],
-      "supporting_provenance_required": ["reason"]
+      "claims_from": "coordinator_semantic_plan.output.canonical_claims",
+      "dependency_order": "claim_dependencies topological waves"
     },
     "output": {
-      "required": ["partition_id", "sources", "checks"],
+      "required": [
+        "assessments",
+        "source_consideration_results",
+        "proposed_resolutions",
+        "checks"
+      ],
+      "assessment_required": [
+        "id",
+        "claim_id",
+        "basis",
+        "effect",
+        "depends_on_assessment_ids",
+        "operand_bindings"
+      ],
+      "assessment_basis": ["report", "evidence"],
+      "assessment_effect": [
+        "supports",
+        "contradicts",
+        "unreconciled",
+        "changed_since_report"
+      ],
+      "operand_binding_required": ["slot", "origin"],
+      "operand_origins": {
+        "report_occurrence": ["kind", "occurrence_id"],
+        "source_receipt": ["kind", "source_id", "receipt"],
+        "assessment_result": ["kind", "assessment_id", "field"]
+      },
+      "assessment_result_field": "calculation.result",
       "check_required": [
         "id",
         "claim_id",
@@ -187,13 +204,9 @@
         "verdict",
         "importance",
         "severity",
-        "addressed_clause_refs",
+        "addressed_clause_ids",
+        "assessment_ids",
         "public_receipt"
-      ],
-      "addressed_clause_ref_required": [
-        "partition_id",
-        "candidate_id",
-        "clause_id"
       ],
       "repeated_occurrence_correction_notice": {
         "required": [
@@ -204,7 +217,7 @@
         ],
         "statement_usage": [
           "public_receipt.explanation",
-          "coordinator.final_merge.presentation.actions"
+          "coordinator_global_resolution.output.presentation.actions"
         ]
       },
       "public_receipt_required": [
@@ -226,10 +239,15 @@
         "host_selects_mode_and_precision": true
       },
       "population_alignment": {
-        "required_for": "dated evidence-basis confirmed or contradicted outcome",
+        "required_for": "evidence assessment whose canonical claim declares population requirements",
         "statuses": ["same_population", "unreconciled"],
         "same_population_required": ["status", "reason", "links"],
-        "link_required": ["dimension", "report_quote", "source_receipt"],
+        "link_required": [
+          "requirement_id",
+          "dimension",
+          "report_quote",
+          "source_receipt"
+        ],
         "link_dimensions": [
           "report_period",
           "as_of_date",
@@ -238,6 +256,7 @@
         ],
         "unreconciled_required": [
           "status",
+          "requirement_ids",
           "reason",
           "missing_dimensions",
           "conflict_receipts",
@@ -245,8 +264,197 @@
         ],
         "unreconciled_verdict": "not_checkable",
         "unreconciled_action_kind": "reconcile_before_change"
+      },
+      "proposed_resolution_required": [
+        "claim_id",
+        "assessment_ids",
+        "state",
+        "final_verdict",
+        "reason",
+        "required_action_kind"
+      ]
+    }
+  },
+  "coordinator_global_resolution": {
+    "input": {
+      "required": [
+        "canonical_claims",
+        "assessments",
+        "source_consideration_results",
+        "claim_dependencies"
+      ]
+    },
+    "output": {
+      "required": [
+        "sources",
+        "source_consideration",
+        "whole_source_exclusions",
+        "assessments",
+        "resolutions",
+        "checks",
+        "presentation",
+        "role_provenance"
+      ],
+      "source_consideration_required": [
+        "source_id",
+        "claim_id",
+        "coordinator_decision",
+        "coordinator_reason",
+        "verifier_decision",
+        "verifier_reason",
+        "assessment_ids"
+      ],
+      "source_consideration_coverage": "one row for every deduplicated source and material canonical claim pair",
+      "whole_source_exclusion_required": ["source_id", "reason"],
+      "resolution_required": [
+        "claim_id",
+        "assessment_ids",
+        "state",
+        "final_verdict",
+        "reason",
+        "required_action_kind"
+      ],
+      "resolution_states": [
+        "supported",
+        "contradicted",
+        "unreconciled",
+        "not_assessed",
+        "dependency_unresolved",
+        "changed_since_report"
+      ],
+      "presentation_required": ["summary", "check_ids", "actions", "limits"],
+      "action_required": [
+        "id",
+        "kind",
+        "text",
+        "report_quote",
+        "check_ids",
+        "resolution_ids"
+      ],
+      "action_kinds": [
+        "correct_report",
+        "reconcile_before_change",
+        "review_before_share"
+      ],
+      "dependency_unresolved_behavior": {
+        "upstream_not_checkable_or_changed_since_report": "downstream final_verdict is not_checkable until the dependency is grounded",
+        "correct_report_allowed": false
       }
     }
+  },
+  "mechanical_acceptance": {
+    "validator": "validate_acceptance_bundle",
+    "pure": true,
+    "semantic_plan_preflight": {
+      "validation_stage": "semantic_plan",
+      "runs_before": "dependency_ordered_verification",
+      "requires_zero_repair_reasons": true
+    },
+    "preflight_required": true,
+    "preflight_required_fields": [
+      "contract_version",
+      "status",
+      "bundle_sha256",
+      "repair_reasons",
+      "coordinator"
+    ],
+    "final_bundle_digest_must_match": true,
+    "repair_passes": 1,
+    "bundle_digest_covers": [
+      "report",
+      "visible_text",
+      "inventory",
+      "claims",
+      "checks",
+      "source_manifest",
+      "actual_evidence_digests"
+    ]
+  },
+  "role_provenance": {
+    "required": ["route", "runs"],
+    "run_required": [
+      "id",
+      "role",
+      "stage",
+      "input_bundle",
+      "output_bundle",
+      "allowed_read_paths",
+      "observed_read_paths"
+    ],
+    "bundle_required": ["path", "sha256"],
+    "input_bundle_read_only": true,
+    "observed_reads_must_be_allowed": true,
+    "allowed_reads": "the materialized input bundle plus exact assigned evidence files for dependency-ordered verification",
+    "cross_wiring": {
+      "claim_taker_outputs_equal_coordinator_partitions": true,
+      "semantic_plan_input_equals_partition_inventory_metadata_and_source_manifest": true,
+      "semantic_plan_output_equals_merged_coordinator_handoff": true,
+      "verifier_inputs_equal_coordinator_assignments_and_source_plan": true,
+      "verifier_assessments_and_source_results_equal_global_resolution_input": true,
+      "global_resolution_output_equals_final_acceptance_bundle": true,
+      "comparison_basis": "opaque ids and exact values only"
+    },
+    "input_bundle_stage_required": {
+      "claim_taking": [
+        "partition_id",
+        "visible_text",
+        "inventory",
+        "report_metadata"
+      ],
+      "coordinator_semantic_plan": [
+        "partition_results",
+        "inventory",
+        "report_metadata",
+        "internal_candidates",
+        "approved_source_manifest"
+      ],
+      "dependency_ordered_verification": [
+        "canonical_claims",
+        "relevant_report_text",
+        "assigned_sources",
+        "source_consideration_plan",
+        "accepted_upstream_assessment_results"
+      ],
+      "coordinator_global_resolution": [
+        "canonical_claims",
+        "assessments",
+        "source_consideration_results",
+        "claim_dependencies"
+      ]
+    },
+    "output_bundle_stage_required": {
+      "claim_taking": [
+        "partition_id",
+        "occurrence_decisions",
+        "clauses"
+      ],
+      "coordinator_semantic_plan": [
+        "classification_reviews",
+        "canonical_claims",
+        "source_consideration_plan",
+        "claim_dependencies",
+        "verifier_assignments"
+      ],
+      "dependency_ordered_verification": [
+        "assessments",
+        "source_consideration_results",
+        "proposed_resolutions",
+        "checks"
+      ],
+      "coordinator_global_resolution": [
+        "sources",
+        "source_consideration",
+        "whole_source_exclusions",
+        "assessments",
+        "resolutions",
+        "checks",
+        "presentation"
+      ]
+    },
+    "repair_context_optional": [
+      "prior_role_output",
+      "mechanical_repair_reasons"
+    ]
   },
   "mechanical_outputs": {
     "verification.live_source": {
@@ -256,33 +464,68 @@
       "host_authored": false
     }
   },
+  "stage_sequence": [
+    "mechanical_intake",
+    "claim_taking",
+    "coordinator_semantic_plan",
+    "semantic_plan_preflight",
+    "dependency_ordered_verification",
+    "coordinator_global_resolution",
+    "full_preflight",
+    "single_repair_if_required",
+    "final_acceptance_render_audit"
+  ],
   "routes": {
     "native_subagents": {
       "primary": true,
-      "stages": ["claim_taker", "coordinator", "evidence_verifier"],
+      "stages": [
+        "mechanical_intake",
+        "claim_taking",
+        "coordinator_semantic_plan",
+        "semantic_plan_preflight",
+        "dependency_ordered_verification",
+        "coordinator_global_resolution",
+        "full_preflight",
+        "single_repair_if_required",
+        "final_acceptance_render_audit"
+      ],
       "input_contracts": [
         "claim_taker.input",
-        "coordinator.input",
-        "evidence_verifier.input"
+        "coordinator_semantic_plan.input",
+        "evidence_verifier.input",
+        "coordinator_global_resolution.input"
       ],
       "output_contracts": [
         "claim_taker.output",
-        "coordinator.output",
-        "evidence_verifier.output"
+        "coordinator_semantic_plan.output",
+        "evidence_verifier.output",
+        "coordinator_global_resolution.output"
       ]
     },
     "sequential": {
       "primary": false,
-      "stages": ["claim_taker", "coordinator", "evidence_verifier"],
+      "stages": [
+        "mechanical_intake",
+        "claim_taking",
+        "coordinator_semantic_plan",
+        "semantic_plan_preflight",
+        "dependency_ordered_verification",
+        "coordinator_global_resolution",
+        "full_preflight",
+        "single_repair_if_required",
+        "final_acceptance_render_audit"
+      ],
       "input_contracts": [
         "claim_taker.input",
-        "coordinator.input",
-        "evidence_verifier.input"
+        "coordinator_semantic_plan.input",
+        "evidence_verifier.input",
+        "coordinator_global_resolution.input"
       ],
       "output_contracts": [
         "claim_taker.output",
-        "coordinator.output",
-        "evidence_verifier.output"
+        "coordinator_semantic_plan.output",
+        "evidence_verifier.output",
+        "coordinator_global_resolution.output"
       ]
     }
   }

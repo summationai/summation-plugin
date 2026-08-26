@@ -13,7 +13,7 @@ If they named a report that already lives in Summation and there is no disk file
 
 1. Before any grading: `command -v uv` succeeds, or `python3 -c "import jsonschema"` succeeds. If neither, resolve that with the user now. Do not start a long run that dies at render.
 2. Ask which file. If they already attached one, use it.
-3. Run `extract.py` first. Read the neutral `inventory` in `findings.json` and `report-visible.txt`. Every raw item begins `unclassified`; code does not infer meaning from prose, tags, labels, keys, locations, formulas, or value overlap. Claim-takers classify every assigned occurrence exactly once as `material_claim`, `supporting_provenance`, or `structural_context`. For a material occurrence, they enumerate each independently verifiable clause with an opaque id, exact visible quote, and public label. Missing, duplicate, or uncovered occurrence or clause membership fails closed. Then the coordinator receives every partition result, the complete inventory, report metadata, and opaque internal candidates. It maps every clause ref to one canonical claim. Multiple clauses may share one canonical claim only when one evidence-verifier receipt addresses every member clause. Code checks ids and declared coverage only; it never finds clauses in prose. Evidence verifiers receive canonical claims only. `report_period` is the visible display string. `report_date` is ISO `YYYY-MM-DD`; omit either when the report does not state it. Do not write claims from PowerPoint speaker notes.
+3. Run `extract.py` first. Read the neutral `inventory` in `findings.json` and `report-visible.txt`. Every raw item begins `unclassified`; code does not infer meaning from prose, tags, labels, keys, locations, formulas, identifiers, or value overlap. Use the exact nine-stage private `verify-role-handoff/coordinator-v6` workflow: bounded claim-taking; coordinator classification review, canonicalization, population requirements, source-by-claim plan, dependency DAG, and verifier assignments; shared semantic-plan preflight; dependency-ordered verification; coordinator global resolution and presentation; one full preflight; at most one repair; then final acceptance, render, and audit. Evidence verifiers receive canonical claims only. `report_period` is the visible display string. `report_date` is ISO `YYYY-MM-DD`; omit either when the report does not state it. Do not write claims from PowerPoint speaker notes.
 4. If a nearby `evidence/` folder exists, ask once whether to use it. Do not scan their whole disk.
 5. If GitHub, Snowflake, Slack, or similar tools are already connected in this session, ask once whether to query them. Save raw tool results as files under the run `evidence/` folder. Do not ask them to sign in to Summation to get evidence.
 6. State duration, then work:
@@ -46,9 +46,13 @@ run/
   report/          original file
   report-visible.txt   extract.py writes this
   evidence/        unchanged tool results and user files
-  claims.json      coordinator handoff: partitions, canonical claims, membership
-  checks.json      you write this after evidence
+  role-inputs/     read-only bounded JSON bundles, one per role run
+  role-outputs/    exact JSON output bundles, one per role run
+  claims.json      coordinator semantic plan and canonical claims
+  checks.json      assessments, resolutions, checks, sources, presentation
   findings.json    extract.py writes this
+  semantic-plan-preflight.json   pre-verifier plan result
+  preflight.json   exact complete bundle digest and repair reasons
   receipts.json    accept.py writes this
   artifact/        render.py writes grade-artifact.html + .json
 ```
@@ -70,9 +74,11 @@ uv run "$VERIFY/scripts/extract.py" \
 
 If `uv` is missing, run `python3` on `extract.py` only when `pypdf`, `openpyxl`, and `python-pptx` already import. Do not `pip install` without asking. Do not call OfficeCLI or Poppler.
 
-Then write the coordinator handoff in `claims.json` and evidence-verifier results in `checks.json`. Every canonical material claim must have exactly one accepted completed outcome. A report-basis check may use explicit arithmetic, rank, percentage, or consistency operands selected by the agent. The code recomputes only the declared mechanics; the presence of a displayed value or machine candidate never confirms a claim. Use `not_checkable` when no grounded evidence answers the claim or when an exact source conflict cannot establish the same report population. Convert every unresolved material claim to an honest `not_checkable` result before `render.py`. Do not leave `not_reached` rows. A remaining material `not_checkable` claim prevents `safe_to_share`.
+Then run the private workflow in [references/roles.md](references/roles.md) and materialize the exact stage bundles in [references/role-contracts.json](references/role-contracts.json). Every canonical material claim has one final resolution, one accepted outcome, and one customer card. Assessments are private evidence or report-consistency judgments; they are not extra claims or cards. A report-basis assessment may use explicit arithmetic, rank, percentage, or consistency operands selected by the host. Code recomputes only declared mechanics. A displayed value, machine candidate, or arithmetic-use marker never confirms a claim. Use `not_checkable` when no grounded assessment answers the claim, an aligned assessment conflict remains, a relevant source is unreconciled, or a dependency is unresolved. Do not leave `not_reached` rows. A material `not_checkable` claim prevents `safe_to_share`.
 
-Before acceptance, run the same `accept.py` command shown below with `--preflight-only` and change `--out` to `$RUN/preflight.json`. For PDF, xlsx, and pptx, keep `--report-text`. Preflight uses the final acceptance path and returns the complete exact repair reasons for coordinator membership, substantive supporting or structural reasons, public numeric calculation results, declared numeric comparison mechanics, source deduplication, source links, source consideration, privacy, and grounding. The run has one total repair pass. Give the responsible role only its original input, its prior output, and the exact mechanical reasons. Do not prescribe replacement classifications, verdicts, severities, ids, labels, operands, calculations, precision or tolerance choices, counts, score, a source-side winner, or action text. Rerun that failed validation once, and stop if any reason remains.
+After the coordinator semantic plan and before verifier fan-out, write a temporary v6 `checks.json` containing the canonical `sources` and an empty `checks` array. Run the relevant format command below with `--semantic-plan-only`, omit `--preflight-record`, and write `--out "$RUN/semantic-plan-preflight.json"`. This calls `validate_acceptance_bundle(validation_stage="semantic_plan")` and must report zero reasons before evidence verification starts. It validates classification review, canonical membership, population-requirement receipts, the complete source-by-claim plan, dependencies, and verifier ownership.
+
+Before final acceptance, run the relevant format command below without `--preflight-record`, add `--preflight-only`, and write `--out "$RUN/preflight.json"`. For PDF, xlsx, and pptx, keep `--report-text`. Full preflight and final acceptance call the same pure `validate_acceptance_bundle()` path. The reason set covers the complete private bundle: classification review and membership, source identity and every source/claim pair, population declarations, dependencies and operand origins, assessment calculations and host numeric policy, resolutions, actions and dependency closure, role-bundle provenance, privacy, and grounding. The run has one total repair pass. Give the responsible role only its original read-only input bundle, its prior output, and the exact mechanical reasons. Do not prescribe replacement classifications, verdicts, severities, ids, labels, operands, calculations, dependencies, precision or tolerance choices, counts, score, a source-side winner, summary, or action. Regenerate affected descendants and rerun the full preflight once. Stop if any reason remains. Then run final acceptance against the unchanged files with `--preflight-record "$RUN/preflight.json"` exactly as shown.
 
 If the report is HTML, Markdown, or plain text:
 
@@ -83,6 +89,7 @@ python3 "$VERIFY/scripts/accept.py" \
   --checks "$RUN/checks.json" \
   --findings "$RUN/findings.json" \
   --evidence-dir "$RUN/evidence" \
+  --preflight-record "$RUN/preflight.json" \
   --out "$RUN/receipts.json"
 ```
 
@@ -96,6 +103,7 @@ python3 "$VERIFY/scripts/accept.py" \
   --checks "$RUN/checks.json" \
   --findings "$RUN/findings.json" \
   --evidence-dir "$RUN/evidence" \
+  --preflight-record "$RUN/preflight.json" \
   --out "$RUN/receipts.json"
 ```
 
@@ -129,95 +137,30 @@ Read every inventory occurrence in full. The claim-taker, not Python, decides wh
 
 ## Agent roles
 
-On hosts with native subagents, use claim-takers, the coordinator, and evidence verifiers as the primary path. Claim-takers receive bounded report partitions and neutral inventory. The coordinator receives all partition outputs and declares canonical claims plus exact opaque membership. Evidence verifiers receive canonical claims only, author every complete receipt, verdict, severity, and retained source record, and copy `public_label` to `public_receipt.report_operand.label`. The coordinator deduplicates returned source records and authors complete `source_consideration`. Initial role prompts may contain only the report, neutral inventory, approved sources appropriate to that role, and the role contracts. They must not contain a semantic answer key, an expected precision or tolerance, a source-side winner, expected counts, or a prior grade artifact. On hosts without native subagents, perform the same three roles sequentially with identical input and output contracts. Never start a hidden `claude -p`, a second login, or another unaudited agent process. See [references/roles.md](references/roles.md) for the role rules and [references/role-contracts.json](references/role-contracts.json) for the exact handoff fields. These contracts do not claim that a host route has executed.
+On hosts with native subagents, use that primary path. Claim-takers, coordinator semantic planning, dependency-ordered evidence verification, and coordinator global resolution use separate materialized JSON bundles. On hosts without native subagents, execute the same stages sequentially with the same input schema and the same output schema. Record every bundle path and SHA-256 plus allowed and observed read paths. A role may read only its bounded input and declared evidence. A prior artifact, prior page, evaluator control, unrelated partition, or product checkout is not a role input. Never start a hidden `claude -p`, a second login, or another unaudited agent process. See [references/roles.md](references/roles.md) for ownership and [references/role-contracts.json](references/role-contracts.json) for exact fields. These contracts are not execution proof.
 
-The `claims` array in `claims.json` is the coordinator's canonical claim output. Its sibling `coordinator` object contains `partition_results`, clause-level `membership`, and `verifier_assignments`; `accept.py` derives the private structural-context ledger from those exact memberships. Every worker candidate and inventory occurrence is classified once, and every material clause ref appears in one membership path only. Canonical `supporting_provenance` rows retain a substantive reason; each private structural-context row also retains its exact quote and substantive reason. One canonical assertion produces one outcome and one customer card. Repeated occurrences of the same assertion may be members of one canonical claim; matching text or values alone never causes that merge. A compound occurrence produces separate canonical claims unless one assigned receipt declares every member in `addressed_clause_refs` and substantively answers all of them.
+Initial role bundles contain only the fields allowed for that stage. They do not prescribe classifications, verdicts, severity, check ids, public labels, operands, calculations, dependencies, expected counts, score, numeric precision, a source-side winner, summary, or action. A repair adds only `repair_context` with the prior role output and exact mechanical repair reasons; the original stage input remains unchanged. There is one repair maximum for the run.
+
+The `claims` array in `claims.json` is the coordinator's canonical claim output. Its sibling `coordinator` object contains `partition_results`, one `classification_reviews` row per inventory occurrence, a complete pre-verifier `source_consideration_plan`, `claim_dependencies`, and `verifier_assignments`. Each material claim names its primary clause, complete member clause ids and occurrence ids, context occurrence ids, public label, and host-declared population requirements. One clause belongs to one canonical claim. Repeated occurrences of one assertion may share one claim only by explicit ids. Each independent clause remains separate unless one receipt will address all member clauses. Structural context stays private. Supporting provenance stays outside material totals. Python validates exact ids and coverage and never infers these decisions.
 
 ## You write checks.json
 
-After evidence, write one outcome per claim you actually checked. Each row names `claim_id`:
+The final `checks.json` uses the same private workflow version and contains `sources`, `assessments`, the complete final `source_consideration` matrix, `whole_source_exclusions`, `resolutions`, one `checks` row per material claim, `presentation`, and `role_provenance`. Evidence verifiers propose assessments, resolutions, and checks. The coordinator performs the global merge. Python validates exact mechanics and does not author missing semantics.
 
-```json
-{"sources": [{
-  "id": "status-snapshot",
-  "kind": "supplied_file",
-  "label": "Project status snapshot",
-  "evidence_file": "status.json",
-  "result_sha256": "64-lowercase-hex-characters"
-}],
- "source_consideration": [{
-   "source_id": "status-snapshot",
-   "claim_ids": ["L1"]
- }],
- "checks": [{
-   "id": "C1",
-   "claim_id": "L1",
-   "type": "semantic",
-   "basis": "evidence",
-   "verdict": "confirmed",
-   "importance": "material",
-   "severity": null,
-   "report_quote": "On-time delivery was 94%.",
-   "evidence_json": [
-     {"pointer": "/on_time", "value": 94},
-     {"pointer": "/total", "value": 100}
-   ],
-   "public_receipt": {
-     "report_operand": {
-       "label": "Reported on-time delivery rate",
-       "value": "94%",
-       "location": "KPI summary, on-time delivery line"
-     },
-     "decisive_operands": [{
-       "label": "On-time deliveries",
-       "value": 94,
-       "location": "Project status snapshot, delivery totals"
-     }, {
-       "label": "Total deliveries",
-       "value": 100,
-       "location": "Project status snapshot, delivery totals"
-     }],
-     "calculation": {"expression": "94 / 100 * 100", "result": "94%"},
-     "explanation": "The recorded delivery totals calculate to the same 94% rate shown in the report.",
-     "source_id": "status-snapshot"
-   }
- }],
-  "presentation": {
-    "summary": "The accepted delivery receipt supports sharing this report value.",
-    "check_ids": ["C1"],
-    "actions": [{
-      "id": "A1",
-      "kind": "review_before_share",
-      "text": "Review the accepted delivery receipt before sharing this report.",
-      "report_quote": "On-time delivery was 94%.",
-      "check_ids": ["C1"]
-    }],
-    "limits": []
-  }
-}
-```
-
-`presentation` is required for customer HTML. Put it on the checks file next to the `checks` array. The coordinator's final merge authors one concise customer verdict summary and grounds it with accepted `check_ids`. If confirmed outcomes exist, those ids must include at least one decision-relevant confirmation; confirmed ids in this list are the explicit visible-confirmation selection. The coordinator also authors at least one `actions` row for the single Next block. An action id is `A` followed by digits, its `kind` is `correct_report`, `reconcile_before_change`, or `review_before_share`, its text is the exact customer action sentence, and its `report_quote` is visible report text. Every summary, action, and limit names the accepted check ids that support it. `accept.py` validates the declared action kind against those checks. `render.py` copies the accepted summary and action text; it never selects or writes their meaning.
-
-- `verdict`: `confirmed` | `contradicted` | `not_checkable`. `changed_since_report` is a last resort (see live source below). Never omit it.
-- `type`: `semantic` | `staleness` | `internal` | `logic` | `arithmetic` | `units` | `selection`.
-- `basis`: `evidence` or `report`. The agent decides whether operands answer the same claim and population.
-- Quotes are visible text, after whitespace normalize. Never quote HTML tags.
-- Every material outcome, including `not_checkable`, needs `public_receipt`. Its report operand needs the claim's exact `public_label`, exact value, and public location. Every decisive operand needs an explicit public-safe label, exact value, and public location. Generic labels such as `row 2`, `operand 1`, `item 4`, or `value 3` are rejected by the generic receipt contract. The host must also replace raw identifiers such as `SEGMENT_ALPHA` and generic locations such as `narrative note` with customer-safe wording such as `Segment Alpha` and a precise visible location. Python does not detect or rewrite those content patterns; the customer-page review enforces that host responsibility. A hidden pointer, a repeated claim, or machine-authored copy is not a public receipt. `not_checkable` has an empty `decisive_operands` array and a substantive explanation.
-- `public_receipt.explanation` is a substantive agent-written sentence. For `basis: evidence`, `source_id` must name a retained source. For `basis: report`, omit `source_id`.
-- Optional `calculation.expression` is numeric restricted arithmetic using `+`, `-`, `*`, `/`, parentheses, and the declared decisive values. `accept.py` recomputes it and checks `result`. The result must be a numeric public value such as `12`, `$350,490.34`, `94%`, or `2 percentage points`; semantic counts such as `1 project` are rejected. Put units such as `%` or `percentage points` in the result, not the expression.
-- A confirmed or contradicted report-basis arithmetic check also needs private `numeric_comparison`. Choose `{"mode":"rounded","rounding":"half_up","decimal_places":1}` or the same with `half_even`, or choose `{"mode":"absolute_tolerance","tolerance":0}` with the tolerance the report actually warrants. The evidence verifier chooses; Python never derives the rule from prose, formatting, units, or value overlap. Code recomputes the selected operands and rejects a verdict that disagrees under the declaration. The metadata is absent from public JSON and customer text. A rounded comparison displays both the exact calculated result and the mechanical customer-rounded result.
-- Copy the canonical claim's complete opaque member list into `addressed_clause_refs`. A missing, extra, or partial clause set fails coordinator preflight. This field is internal and is stripped from the public artifact.
-- When a contradicted report-basis calculation corrects one canonical assertion repeated in more than one member occurrence, author `correction_notice` with `statement`, `report_value`, `replacement_value`, and one public-safe label per `locations` entry. The statement must name every location and both exact values, state that every occurrence must change, and appear verbatim inside `public_receipt.explanation`. The coordinator must also copy it verbatim into an action that cites that check. Python validates exact copies and values; it does not author the statement.
-- Use either exact `evidence_json` pointers or one exact normalized `evidence_quote` present in the retained file. JSON field fragments, ellipses, quantity-equivalent quote searches, and inferred locations do not ground evidence. Numeric equivalence is allowed only after an explicit pointer or public operand selected the value. Pointers never become public labels or locations.
-- For a confirmed or contradicted evidence-basis outcome on a report with a period or date, add agent-authored `population_alignment`. `same_population` requires a substantive reason plus one or more `links`; each link names `report_period`, `as_of_date`, `scope`, or `population_key`, an exact visible `report_quote`, and an exact retained-source pointer or quote in `source_receipt`. If the source conflict cannot supply that link, use `status: unreconciled`, list `missing_dimensions`, retain exact `conflict_receipts`, and author a substantive `reconciliation_action`. That row is `not_checkable`, and its cited `reconcile_before_change` action must tell the customer to reconcile the source and report before changing either. Python resolves receipts and enforces the declared status/verdict/action relationship; it does not decide whether populations match.
-- Retain one source record per exact `kind`, `evidence_file`, and `result_sha256`. Duplicate identities fail preflight with all duplicate ids in one reason; the coordinator chooses the surviving id and public label and updates check references. Add one `source_consideration` row for every approved retained source. It contains `source_id` plus exactly one non-empty `claim_ids` list for accepted checks that cite it, or a substantive `exclusion_reason`. Code validates ids and complete citation coverage only. The host decides relevance. Exclusion reasons appear in Technical scope; cited sources remain card-local and are not duplicated there.
-- A `live_tool` source also needs `retrieval` with `retrieved_at`, the exact tool name, and safe arguments. Save the raw result as `evidence_file`, then hash that exact file. A `supplied_file` source must not contain retrieval metadata.
-- Accepted retained source metadata mechanically sets `verification.live_source`: at least one validated `live_tool` source emits `status: complete`; otherwise it emits `status: not_run`. Its public `detail` is always null. The host still authors the source records, verdicts, labels, and receipts; it does not author this derived status.
-- `not_checkable` needs a public report operand, public location, and substantive explanation. It has no decisive operands and no calculation.
-- The renderer puts the accepted check `id` and `verdict` on each material card as exact `data-card-id` and `data-disposition` attributes. Do not author aliases for these fields.
-- Host-authored `severity` remains a customer-priority field but does not control placement. The coordinator's accepted presentation ids select visible confirmations. At least one confirmation must be visible when confirmed outcomes exist. Other confirmations and all complete not-checkable receipt cards remain accessible under Technical detail. The main not-checkable section is a compact list of each exact claim quote and its substantive host explanation.
-- Customer card titles, locations, explanations, and claim quotes come directly from the accepted claim and `public_receipt`. Outcome grouping comes only from the accepted verdict. The verdict summary and Next sentence come only from the accepted coordinator presentation. For an explicit calculation, the renderer lays the accepted decisive operand labels and values above fixed `Calculated result`, optional mechanically accepted `Customer-rounded result`, and `Report shows` rows, then retains the exact expression as secondary receipt detail. Fixed total maps translate only the exact root verdict, disposition, and retained source-kind enums into customer labels. Run status stays in Technical scope, uses customer wording rather than a raw status token, and never becomes a claim card.
+- Canonicalize approved sources before verifier fan-out by exact `kind`, safe `evidence_file`, and `result_sha256`. The coordinator chooses the one stable id and public-safe label. A `live_tool` source also has retrieval time, exact tool, and safe arguments. A `supplied_file` source has no retrieval metadata. Accepted source metadata alone sets `verification.live_source` to `complete` or `not_run`, always with null detail.
+- The coordinator plan has one `source_consideration_plan` row for every approved source and material claim. The final matrix has that same pair plus exact coordinator decision/reason, verifier decision/reason, and assessment ids. A considered pair has an assessment. An excluded pair has substantive reasons. Coordinator/verifier disagreement fails closed. Per-claim reasons stay private. A separate `whole_source_exclusions` row is required only when a source is excluded for every material claim; only that reason may appear in Technical scope.
+- Each assessment declares `id`, `claim_id`, `basis`, `effect`, `depends_on_assessment_ids`, and `operand_bindings`. Exact report occurrences, exact source receipts, and accepted upstream `calculation.result` values are the only operand origins. Report/source population alignment and numeric comparison policy live on the assessment, never on the public check.
+- The complete `claim_dependencies` set is a host-authored DAG. A cross-claim report occurrence requires a declared edge. A downstream assessment that relies on a corrected upstream value binds to the upstream assessment result. A stale contradicted occurrence, unknown edge, cycle, or changed descendant fails closed. An upstream `not_checkable` or `changed_since_report` state forces the downstream customer resolution to `not_checkable` until grounded, even if a private report-consistency assessment runs.
+- The coordinator resolution contains the exact assessment ids, host-authored state, final verdict, reason, and required action kind. One resolution produces one public check. Relevant unreconciled evidence or aligned conflicting assessments resolve `not_checkable`. Python validates the declared state table and never chooses a source-side winner or rewrites a verdict.
+- Each public check keeps the existing fields: `id`, `claim_id`, `type`, `basis`, `verdict`, `importance`, `severity`, exact `report_quote`, complete private `addressed_clause_ids` and `assessment_ids`, exact grounding receipts, and `public_receipt`. `verdict` is `confirmed`, `contradicted`, `not_checkable`, or `changed_since_report`. Run status is separate and never becomes a claim outcome.
+- Every material outcome needs a `public_receipt`. Its report operand has the canonical claim's exact `public_label`, exact value, and public location. Confirmed, contradicted, and changed outcomes have explicit decisive operands; not-checkable has none. The explanation is substantive and host-authored. Evidence-basis receipts link a retained `source_id`; report-basis receipts omit it. Generic operand labels fail the generic public-text contract. Other semantic safety remains the host's responsibility and a customer-page review criterion; Python does not match identifiers or rewrite customer text.
+- Optional `public_receipt.calculation` uses restricted numeric arithmetic and a numeric public result. The private decisive assessment carries the host-selected rounded or absolute-tolerance comparison policy. Python recomputes exact values with that declaration. Policy fields remain private; the page may mechanically show the exact and customer-rounded results.
+- A repeated-occurrence arithmetic correction uses one host-authored `correction_notice` naming every public location, the repeated report value, replacement value, and a substantive statement that every occurrence must change. The public explanation and a cited action copy that statement exactly. This does not create a second claim or confirmation.
+- Exact evidence grounding uses explicit JSON pointers or one exact normalized quote. Numeric equivalence is allowed only after an explicit pointer or operand selected the value. Code never searches quantities to discover meaning or location.
+- Population requirements are host-authored on canonical claims. An evidence assessment declaring `same_population` links every requirement id to an exact report quote and exact source receipt. `unreconciled` names the requirement ids, missing dimensions, conflict receipts, substantive reason, and reconciliation action. Python resolves the links and coverage; it does not decide whether populations mean the same thing.
+- `presentation` is required. The coordinator authors one concise summary grounded to accepted check ids, selects at least one decision-relevant confirmation when confirmations exist, and authors the one Next block. Each action has an `A` plus digits id, a declared kind, exact text, exact visible report quote, accepted check ids, and complete resolution ids including dependency ancestors. `correct_report` is blocked by any unresolved ancestor or relevant source conflict. `reconcile_before_change` requires an unreconciled or dependency-unresolved resolution. Renderer text remains mechanical from accepted fields and fixed enum-label maps.
+- Every accepted role run records role, stage, read-only input bundle path/digest, output bundle path/digest, allowed paths, and observed paths. Stage bundle content must match the exact contract and the exact downstream merge: claim-taker outputs equal coordinator partitions, semantic-plan inputs and outputs equal the approved manifest and merged handoff, verifier assessments and source rows equal the global-resolution input, and global-resolution output equals final `checks.json`. These are opaque-id and exact-value comparisons only. Final acceptance requires the complete zero-reason `preflight.json` and an unchanged bundle digest.
+- The renderer puts each accepted material check `id` and verdict on exactly one card as `data-card-id` and `data-disposition`. At least one host-selected confirmation stays prominent when confirmations exist; lower-priority confirmations and full not-checkable receipts remain accessible under Technical detail. The public artifact remains `grade-artifact/public-receipt-v1`; private workflow fields never serialize.
 
 ### Data-currency dates
 

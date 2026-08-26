@@ -233,7 +233,11 @@ class ContractCutoverTests(unittest.TestCase):
         blob = str(artifact)
         for forbidden in (
             "report_quote_2", "evidence_json", "date_receipt",
-            "population_alignment",
+            "population_alignment", "classification_reviews",
+            "source_consideration_plan", "source_consideration_results",
+            "claim_dependencies", "assessments", "assessment_ids",
+            "depends_on_assessment_ids", "operand_bindings", "resolutions",
+            "resolution_ids", "proposed_resolutions", "role_provenance",
             "found_by", "verification_mode", "used_for_internal_arithmetic",
         ):
             self.assertNotIn(forbidden, blob)
@@ -241,6 +245,46 @@ class ContractCutoverTests(unittest.TestCase):
             "report_quote", str(artifact["evidence_checks"]),
         )
         self.assertTrue(all("report_quote" in row for row in artifact["actions"]))
+
+    def test_coordinator_v6_private_sentinels_never_reach_json_or_html(self) -> None:
+        check = accepted_check(1, "confirmed")
+        check.update({
+            "addressed_clause_ids": ["PRIVATE-CLAUSE-SENTINEL"],
+            "assessment_ids": ["PRIVATE-ASSESSMENT-SENTINEL"],
+            "depends_on_assessment_ids": ["PRIVATE-UPSTREAM-SENTINEL"],
+            "operand_bindings": [{
+                "slot": "PRIVATE-SLOT-SENTINEL",
+                "origin": {
+                    "kind": "assessment_result",
+                    "assessment_id": "PRIVATE-UPSTREAM-SENTINEL",
+                    "field": "calculation.result",
+                },
+            }],
+            "population_alignment": {
+                "status": "same_population",
+                "reason": "PRIVATE-POPULATION-SENTINEL",
+                "links": [],
+            },
+        })
+        artifact = make_artifact([check])
+        context = render_context([check])
+        context.update({
+            "classification_reviews": ["PRIVATE-REVIEW-SENTINEL"],
+            "claim_dependencies": ["PRIVATE-DEPENDENCY-SENTINEL"],
+            "source_consideration_plan": ["PRIVATE-SOURCE-PLAN-SENTINEL"],
+            "role_provenance": {"sentinel": "PRIVATE-ROLE-SENTINEL"},
+        })
+        page = render.html_of(artifact, render_context=context)
+        public_blob = json.dumps(artifact, sort_keys=True) + page
+        for sentinel in (
+            "PRIVATE-CLAUSE-SENTINEL", "PRIVATE-ASSESSMENT-SENTINEL",
+            "PRIVATE-UPSTREAM-SENTINEL", "PRIVATE-SLOT-SENTINEL",
+            "PRIVATE-POPULATION-SENTINEL", "PRIVATE-REVIEW-SENTINEL",
+            "PRIVATE-DEPENDENCY-SENTINEL", "PRIVATE-SOURCE-PLAN-SENTINEL",
+            "PRIVATE-ROLE-SENTINEL",
+        ):
+            self.assertNotIn(sentinel, public_blob)
+        self.assertEqual(audit.audit_public_artifact(artifact, page), [])
 
 
 if __name__ == "__main__":
