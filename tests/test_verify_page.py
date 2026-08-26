@@ -562,7 +562,8 @@ class PageUtilityTests(unittest.TestCase):
                     "quote": "22.8",
                     "verdict": "confirmed",
                     "explanation": (
-                        "Events divided by sessions rounds to 22.8."
+                        "Events divided by sessions is 22.755139, "
+                        "which rounds to 22.8."
                     ),
                     "location": "Events per session row",
                     "report_value": "22.8",
@@ -653,6 +654,8 @@ class PageUtilityTests(unittest.TestCase):
             self.assertNotIn(">37637<", html)
             self.assertIn("22.8", html)
             self.assertNotIn("22.755139056831922", html)
+            self.assertIn("22.755139", html)
+            self.assertNotIn("22.755,139", html)
             self.assertIn("August 24, 2026", html)
             self.assertIn("Week ending August 24, 2026", html)
             self.assertNotIn("24 August", html)

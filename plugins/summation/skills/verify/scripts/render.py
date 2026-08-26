@@ -687,7 +687,7 @@ _DAY_MONTH = re.compile(
     re.I,
 )
 _ISO_DATE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})(?!T)\b")
-_PLAIN_INT = re.compile(r"\b\d{4,}\b")
+_PLAIN_INT = re.compile(r"(?<![\d.])\d{4,}(?![\d.])")
 
 
 def _customer_english(text: str) -> str:
