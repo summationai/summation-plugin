@@ -58,6 +58,49 @@ def rewrite_role_bundle(case: dict, role_id: str, field: str, mutate) -> None:
     run[field]["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def use_corrected_yoy_report_check(case: dict) -> None:
+    """Expose the corrected-total YoY assessment as the public report check."""
+    check = case["proposed"][1]
+    check.update({"type": "arithmetic", "basis": "report"})
+    check.pop("evidence_json", None)
+    check["public_receipt"] = {
+        "report_operand": {
+            "label": "Year-over-year weekly revenue change",
+            "value": "4.6%",
+            "location": "weekly revenue narrative",
+        },
+        "decisive_operands": [
+            {
+                "label": "Corrected current-week revenue",
+                "value": "$350,490.34",
+                "location": "accepted total-revenue correction",
+            },
+            {
+                "label": "Prior-year revenue",
+                "value": "$367,290.32",
+                "location": "segment table, prior total revenue",
+            },
+        ],
+        "calculation": {
+            "expression": "(367290.32 - 350490.34) / 367290.32 * 100",
+            "result": "4.574032879496728%",
+        },
+        "explanation": (
+            "The accepted corrected current total produces a 4.574 percent decline, "
+            "which matches the report's 4.6 percent at the host-declared one-decimal "
+            "rounding."
+        ),
+    }
+    rewrite_role_bundle(
+        case, "RR-yoy", "output_bundle",
+        lambda payload: payload["checks"].__setitem__(0, copy.deepcopy(check)),
+    )
+    rewrite_role_bundle(
+        case, "RR-resolution", "output_bundle",
+        lambda payload: payload["checks"].__setitem__(1, copy.deepcopy(check)),
+    )
+
+
 def add_repair_context(case: dict, role_id: str, *, repair_pass_id: int) -> None:
     """Materialize one mechanical repair generation for a bounded role input."""
     run = next(
@@ -272,6 +315,29 @@ class CoordinatorV6AcceptedBundleTests(unittest.TestCase):
                 reasons(case),
             )
 
+    def test_missing_or_inconsistent_analytical_role_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            missing = build_case(root)
+            decision = missing["claims_meta"]["coordinator"][
+                "partition_results"][0]["occurrence_decisions"][0]
+            decision.pop("analytical_role")
+            self.assertIn(
+                "claim-taker decision for occurrence 'INV-PERIOD' "
+                "analytical_role is missing or unknown",
+                reasons(missing),
+            )
+
+            inconsistent = build_case(root)
+            review = inconsistent["claims_meta"]["coordinator"][
+                "classification_reviews"][1]
+            review["analytical_role"] = "structural_context"
+            self.assertIn(
+                "coordinator classification review for occurrence 'INV-KPI' "
+                "analytical_role does not match its final classification",
+                reasons(inconsistent),
+            )
+
     def test_unresolved_classification_challenge_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             case = build_case(pathlib.Path(raw))
@@ -288,6 +354,7 @@ class CoordinatorV6AcceptedBundleTests(unittest.TestCase):
             review = case["claims_meta"]["coordinator"]["classification_reviews"][0]
             review.update({
                 "final_classification": "material_claim",
+                "analytical_role": "load_bearing_analytical_assertion",
                 "decision": "accept",
                 "accepted_clause_ids": [],
             })
@@ -348,9 +415,23 @@ class CoordinatorV6AcceptedBundleTests(unittest.TestCase):
                 reasons(case),
             )
 
-    def test_stale_upstream_report_value_and_upstream_mutation_invalidate_descendant(self) -> None:
+    def test_contradicted_total_propagates_to_yoy_with_host_declared_rounding(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = pathlib.Path(raw)
+            corrected = build_case(root)
+            use_corrected_yoy_report_check(corrected)
+            accepted = validate(corrected)
+            self.assertEqual(accepted["repair_reasons"], [])
+            yoy = next(row for row in accepted["checks"] if row["id"] == "C-YOY")
+            self.assertEqual(yoy["verdict"], "confirmed")
+            self.assertEqual(
+                yoy["public_receipt"]["calculation"]["result"],
+                "4.574032879496728%",
+            )
+            self.assertEqual(
+                yoy["numeric_comparison"]["customer_result"], "4.6%")
+            self.assertTrue(yoy["numeric_comparison"]["matches"])
+
             case = build_case(root)
             downstream = case["checks_doc"]["assessments"][1]
             downstream["depends_on_assessment_ids"] = []

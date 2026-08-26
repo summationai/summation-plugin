@@ -404,12 +404,14 @@ def write_invalid_preflight_bundle(folder: pathlib.Path) -> dict[str, pathlib.Pa
                     {
                         "occurrence_id": "INV-KPI",
                         "classification": "material_claim",
+                        "analytical_role": "load_bearing_analytical_assertion",
                         "reason": "This occurrence states the displayed weekly total.",
                         "clause_ids": [clause_ids[0]],
                     },
                     {
                         "occurrence_id": "INV-TOTAL",
                         "classification": "material_claim",
+                        "analytical_role": "load_bearing_analytical_assertion",
                         "reason": "This occurrence repeats the displayed weekly total.",
                         "clause_ids": [clause_ids[1]],
                     },
@@ -437,6 +439,7 @@ def write_invalid_preflight_bundle(folder: pathlib.Path) -> dict[str, pathlib.Pa
                     "claim_taker_partition_id": "revenue",
                     "proposed_classification": "material_claim",
                     "final_classification": "material_claim",
+                    "analytical_role": "load_bearing_analytical_assertion",
                     "decision": "accept",
                     "reason": "The coordinator accepts this explicit material classification.",
                     "accepted_clause_ids": [clause_id],
@@ -1489,20 +1492,21 @@ class LedgerTests(unittest.TestCase):
             "complete": True,
             "items": [
                 {
-                    "id": "INV1", "displayed": "Weekly status", "quote": "Weekly status",
+                    "id": "INV1", "displayed": "Weekly Sales Snapshot", "quote": "Weekly Sales Snapshot",
                     "location": "line1", "importance": "unclassified",
                 },
                 {
-                    "id": "INV2", "displayed": "Owner 07", "quote": "Owner 07",
+                    "id": "INV2", "displayed": "OWNER_07", "quote": "OWNER_07",
                     "location": "line2", "importance": "unclassified",
                 },
                 {
-                    "id": "INV3", "displayed": "Week ending April 4, 2026",
-                    "quote": "Week ending April 4, 2026", "location": "line3",
+                    "id": "INV3", "displayed": "Week ending 2026-04-04.",
+                    "quote": "Week ending 2026-04-04.", "location": "line3",
                     "importance": "unclassified",
                 },
                 {
-                    "id": "INV4", "displayed": "Revenue", "quote": "Revenue",
+                    "id": "INV4", "displayed": "Prepared from the analytics warehouse.",
+                    "quote": "Prepared from the analytics warehouse.",
                     "location": "line4", "importance": "unclassified",
                 },
                 {
@@ -1514,10 +1518,11 @@ class LedgerTests(unittest.TestCase):
         }
         occurrence_decisions = []
         classification_reviews = []
-        for index, inventory_id in enumerate(("INV1", "INV2", "INV3", "INV4"), 1):
+        for inventory_id in ("INV1", "INV2", "INV3"):
             occurrence_decisions.append({
                 "occurrence_id": inventory_id,
                 "classification": "structural_context",
+                "analytical_role": "structural_context",
                 "reason": "This visible item organizes the report and is not an analytical assertion.",
                 "clause_ids": [],
             })
@@ -1526,13 +1531,38 @@ class LedgerTests(unittest.TestCase):
                 "claim_taker_partition_id": "report-shell",
                 "proposed_classification": "structural_context",
                 "final_classification": "structural_context",
+                "analytical_role": "structural_context",
                 "decision": "accept",
                 "reason": "The coordinator accepts the explicit structural classification.",
                 "accepted_clause_ids": [],
             })
         occurrence_decisions.append({
+            "occurrence_id": "INV4",
+            "classification": "supporting_provenance",
+            "analytical_role": "supporting_provenance",
+            "reason": (
+                "This statement identifies the report's asserted source origin and "
+                "does not state a separate analytical result."
+            ),
+            "clause_ids": [],
+        })
+        classification_reviews.append({
+            "occurrence_id": "INV4",
+            "claim_taker_partition_id": "report-shell",
+            "proposed_classification": "supporting_provenance",
+            "final_classification": "supporting_provenance",
+            "analytical_role": "supporting_provenance",
+            "decision": "accept",
+            "reason": (
+                "The coordinator keeps the source-origin statement as supporting "
+                "provenance outside the material denominator."
+            ),
+            "accepted_clause_ids": [],
+        })
+        occurrence_decisions.append({
             "occurrence_id": "INV5",
             "classification": "material_claim",
+            "analytical_role": "load_bearing_analytical_assertion",
             "reason": "This occurrence states the report's claimed data-currency date.",
             "clause_ids": ["report-shell:C1"],
         })
@@ -1549,6 +1579,7 @@ class LedgerTests(unittest.TestCase):
             "claim_taker_partition_id": "report-shell",
             "proposed_classification": "material_claim",
             "final_classification": "material_claim",
+            "analytical_role": "load_bearing_analytical_assertion",
             "decision": "accept",
             "reason": "The coordinator accepts the explicit material classification.",
             "accepted_clause_ids": ["report-shell:C1"],
@@ -1566,6 +1597,18 @@ class LedgerTests(unittest.TestCase):
             "member_clause_ids": ["report-shell:C1"],
             "context_occurrence_ids": ["INV3"],
             "population_requirements": [],
+        }, {
+            "id": "S1",
+            "quote": "Prepared from the analytics warehouse.",
+            "public_label": "Analytics warehouse provenance",
+            "classification": "supporting_provenance",
+            "importance": "supporting",
+            "reason": (
+                "This statement identifies the report's asserted source origin and "
+                "does not state a separate analytical result."
+            ),
+            "inventory_ids": ["INV4"],
+            "occurrence_ids": ["INV4"],
         }]
         coordinator = {
             "partition_results": [{
@@ -1581,7 +1624,7 @@ class LedgerTests(unittest.TestCase):
         handoff, problems = accept.validate_coordinator_handoff(
             claims, coordinator, inv)
         self.assertEqual(problems, [])
-        self.assertEqual(len(handoff["structural_context"]), 4)
+        self.assertEqual(len(handoff["structural_context"]), 3)
         self.assertEqual(handoff["material_claim_ids"], ["L1"])
 
         report_text = " ".join(item["displayed"] for item in inv["items"])
@@ -1604,12 +1647,16 @@ class LedgerTests(unittest.TestCase):
         )
         self.assertEqual(covered["missing"], [])
         self.assertEqual(covered["material"], 1)
-        self.assertEqual([row["id"] for row in ledger], ["L1"])
+        self.assertEqual([row["id"] for row in ledger], ["L1", "S1"])
         self.assertTrue(all(item["importance"] == "unclassified" for item in inv["items"]))
         self.assertTrue(all(
             item["classification"] == "structural_context"
-            for item in classified_inventory["items"][:4]
+            for item in classified_inventory["items"][:3]
         ))
+        self.assertEqual(
+            classified_inventory["items"][3]["classification"],
+            "supporting_provenance",
+        )
 
         with tempfile.TemporaryDirectory() as raw:
             root = pathlib.Path(raw)
@@ -1687,7 +1734,8 @@ class LedgerTests(unittest.TestCase):
             self.assertEqual(accepted["repair_reasons"], [])
             self.assertEqual(accepted["claims_in_ledger"], 1)
             self.assertEqual(accepted["claims_reached_by_a_check"], 1)
-            self.assertEqual([row["id"] for row in accepted["claims"]], ["L1"])
+            self.assertEqual(
+                [row["id"] for row in accepted["claims"]], ["L1", "S1"])
             self.assertTrue(all(item["importance"] == "unclassified" for item in inv["items"]))
 
     def test_duplicate_inventory_assignment_fails_closed(self) -> None:
@@ -1725,6 +1773,7 @@ class LedgerTests(unittest.TestCase):
                     "partition_id": "p1",
                     "occurrence_decisions": [{
                         "occurrence_id": "INV1", "classification": "material_claim",
+                        "analytical_role": "load_bearing_analytical_assertion",
                         "reason": "This partition declares the visible occurrence material.",
                         "clause_ids": ["p1:C1"],
                     }],
@@ -1740,6 +1789,7 @@ class LedgerTests(unittest.TestCase):
                     "partition_id": "p2",
                     "occurrence_decisions": [{
                         "occurrence_id": "INV1", "classification": "material_claim",
+                        "analytical_role": "load_bearing_analytical_assertion",
                         "reason": "A second partition incorrectly consumes the same occurrence.",
                         "clause_ids": ["p2:C1"],
                     }],
@@ -1756,6 +1806,7 @@ class LedgerTests(unittest.TestCase):
                 "occurrence_id": "INV1", "claim_taker_partition_id": "p1",
                 "proposed_classification": "material_claim",
                 "final_classification": "material_claim", "decision": "accept",
+                "analytical_role": "load_bearing_analytical_assertion",
                 "reason": "The coordinator records one explicit classification review.",
                 "accepted_clause_ids": ["p1:C1"],
             }],

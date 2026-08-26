@@ -30,6 +30,12 @@ from receipt_math import calculation_problem, public_number  # noqa: E402
 CLAIM_CLASSIFICATIONS = frozenset({
     "material_claim", "supporting_provenance", "structural_context",
 })
+CLASSIFICATION_ANALYTICAL_ROLE = {
+    "material_claim": "load_bearing_analytical_assertion",
+    "supporting_provenance": "supporting_provenance",
+    "structural_context": "structural_context",
+}
+ANALYTICAL_ROLES = frozenset(CLASSIFICATION_ANALYTICAL_ROLE.values())
 WORKFLOW_VERSION = "verify-role-handoff/coordinator-v6"
 ASSESSMENT_EFFECTS = frozenset({
     "supports", "contradicts", "unreconciled", "changed_since_report",
@@ -1346,7 +1352,8 @@ def validate_coordinator_handoff(canonical_claims, coordinator,
                 problems.append(f"{decision_label} is not an object")
                 continue
             unknown = sorted(set(decision) - {
-                "occurrence_id", "classification", "reason", "clause_ids",
+                "occurrence_id", "classification", "analytical_role", "reason",
+                "clause_ids",
             })
             if unknown:
                 problems.append(
@@ -1366,6 +1373,16 @@ def validate_coordinator_handoff(canonical_claims, coordinator,
                 problems.append(
                     f"claim-taker decision for occurrence {occurrence_id!r} "
                     "classification is missing or unknown")
+            analytical_role = str(
+                decision.get("analytical_role") or "").strip()
+            if analytical_role not in ANALYTICAL_ROLES:
+                problems.append(
+                    f"claim-taker decision for occurrence {occurrence_id!r} "
+                    "analytical_role is missing or unknown")
+            elif analytical_role != CLASSIFICATION_ANALYTICAL_ROLE.get(classification):
+                problems.append(
+                    f"claim-taker decision for occurrence {occurrence_id!r} "
+                    "analytical_role does not match its classification")
             reason = str(decision.get("reason") or "").strip()
             if not _substantive_explanation(reason):
                 problems.append(
@@ -1384,6 +1401,7 @@ def validate_coordinator_handoff(canonical_claims, coordinator,
             clean = {
                 "occurrence_id": occurrence_id,
                 "classification": classification,
+                "analytical_role": analytical_role,
                 "reason": reason,
                 "clause_ids": clause_ids,
                 "partition_id": partition_id,
@@ -1487,7 +1505,8 @@ def validate_coordinator_handoff(canonical_claims, coordinator,
             continue
         unknown = sorted(set(review) - {
             "occurrence_id", "claim_taker_partition_id", "proposed_classification",
-            "final_classification", "decision", "reason", "accepted_clause_ids",
+            "final_classification", "analytical_role", "decision", "reason",
+            "accepted_clause_ids",
         })
         if unknown:
             problems.append(f"{label} has unknown field {unknown[0]!r}")
@@ -1507,6 +1526,7 @@ def validate_coordinator_handoff(canonical_claims, coordinator,
         partition_id = str(review.get("claim_taker_partition_id") or "").strip()
         proposed = str(review.get("proposed_classification") or "").strip()
         final = str(review.get("final_classification") or "").strip()
+        analytical_role = str(review.get("analytical_role") or "").strip()
         decision = str(review.get("decision") or "").strip()
         if partition_id != proposal.get("partition_id"):
             problems.append(
@@ -1520,6 +1540,14 @@ def validate_coordinator_handoff(canonical_claims, coordinator,
             problems.append(
                 f"coordinator classification review for occurrence {occurrence_id!r} "
                 "final_classification is missing or unknown")
+        if analytical_role not in ANALYTICAL_ROLES:
+            problems.append(
+                f"coordinator classification review for occurrence {occurrence_id!r} "
+                "analytical_role is missing or unknown")
+        elif analytical_role != CLASSIFICATION_ANALYTICAL_ROLE.get(final):
+            problems.append(
+                f"coordinator classification review for occurrence {occurrence_id!r} "
+                "analytical_role does not match its final classification")
         reason = str(review.get("reason") or "").strip()
         if not _substantive_explanation(reason):
             problems.append(
@@ -1544,6 +1572,10 @@ def validate_coordinator_handoff(canonical_claims, coordinator,
                     problems.append(
                         f"coordinator classification review for occurrence {occurrence_id!r} "
                         "accept must preserve the proposed classification")
+            if analytical_role != proposal.get("analytical_role"):
+                problems.append(
+                    f"coordinator classification review for occurrence {occurrence_id!r} "
+                    "accept must preserve the claim-taker analytical_role")
         elif decision == "demote":
             if proposed != "material_claim" or final == "material_claim":
                 problems.append(
@@ -1582,6 +1614,7 @@ def validate_coordinator_handoff(canonical_claims, coordinator,
             "claim_taker_partition_id": partition_id,
             "proposed_classification": proposed,
             "final_classification": final,
+            "analytical_role": analytical_role,
             "decision": decision,
             "reason": reason,
             "accepted_clause_ids": review_clause_ids,

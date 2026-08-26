@@ -235,12 +235,14 @@ class CoordinatorContractTests(unittest.TestCase):
                 if row["occurrence_id"] == "INV-SOURCE"
             )
             decision["classification"] = "supporting_provenance"
+            decision["analytical_role"] = "supporting_provenance"
             review = next(
                 row for row in coordinator["classification_reviews"]
                 if row["occurrence_id"] == "INV-SOURCE"
             )
             review["proposed_classification"] = "supporting_provenance"
             review["final_classification"] = "supporting_provenance"
+            review["analytical_role"] = "supporting_provenance"
             case["proposed_claims"].append({
                 "id": "S-SOURCE",
                 "quote": "Source: weekly report.",
@@ -347,6 +349,7 @@ class CoordinatorContractTests(unittest.TestCase):
                 "occurrence_decisions": [{
                     "occurrence_id": "INV-TITLE",
                     "classification": "structural_context",
+                    "analytical_role": "structural_context",
                     "reason": "The host classifies this occurrence as structural context.",
                     "clause_ids": [],
                 }],
@@ -357,6 +360,7 @@ class CoordinatorContractTests(unittest.TestCase):
                 "claim_taker_partition_id": "title",
                 "proposed_classification": "structural_context",
                 "final_classification": "structural_context",
+                "analytical_role": "structural_context",
                 "decision": "accept",
                 "reason": "The coordinator accepts the explicit structural classification.",
                 "accepted_clause_ids": [],
@@ -398,6 +402,7 @@ class CoordinatorContractTests(unittest.TestCase):
                 "occurrence_decisions": [{
                     "occurrence_id": "INV-TITLE",
                     "classification": "material_claim",
+                    "analytical_role": "load_bearing_analytical_assertion",
                     "reason": "The claim-taker proposes this occurrence for semantic review.",
                     "clause_ids": ["title:CL1"],
                 }],
@@ -413,6 +418,7 @@ class CoordinatorContractTests(unittest.TestCase):
                 "claim_taker_partition_id": "title",
                 "proposed_classification": "material_claim",
                 "final_classification": "material_claim",
+                "analytical_role": "load_bearing_analytical_assertion",
                 "decision": "challenge",
                 "reason": "The coordinator requires the claim-taker to reconsider this classification.",
                 "accepted_clause_ids": ["title:CL1"],

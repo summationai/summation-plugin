@@ -131,6 +131,15 @@ class RoutingTests(unittest.TestCase):
             ],
         )
         self.assertIn("reason", claim_taker["output"]["occurrence_decision_required"])
+        self.assertIn(
+            "analytical_role",
+            claim_taker["output"]["occurrence_decision_required"],
+        )
+        self.assertEqual(claim_taker["output"]["analytical_roles"], [
+            "load_bearing_analytical_assertion",
+            "supporting_provenance",
+            "structural_context",
+        ])
 
         plan = contract["coordinator_semantic_plan"]
         self.assertEqual(plan["output"]["required"], [
@@ -142,6 +151,17 @@ class RoutingTests(unittest.TestCase):
             plan["output"]["classification_review_decisions"],
             ["accept", "demote", "challenge"],
         )
+        self.assertIn(
+            "analytical_role",
+            plan["output"]["classification_review_required"],
+        )
+        structural_policy = plan["output"]["structural_classification_policy"]
+        self.assertEqual(structural_policy["owner"], "claim_taker_and_coordinator")
+        self.assertFalse(structural_policy["python_text_heuristics"])
+        self.assertIn("report_title", structural_policy["context_categories"])
+        self.assertIn("owner_identifier", structural_policy["context_categories"])
+        self.assertIn("reporting_period", structural_policy["context_categories"])
+        self.assertIn("source_origin", structural_policy["context_categories"])
         self.assertEqual(
             plan["output"]["source_consideration_plan_required"],
             ["source_id", "claim_id", "decision", "reason"],

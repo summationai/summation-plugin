@@ -70,9 +70,20 @@
       "occurrence_decision_required": [
         "occurrence_id",
         "classification",
+        "analytical_role",
         "reason",
         "clause_ids"
       ],
+      "analytical_roles": [
+        "load_bearing_analytical_assertion",
+        "supporting_provenance",
+        "structural_context"
+      ],
+      "classification_analytical_role": {
+        "material_claim": "load_bearing_analytical_assertion",
+        "supporting_provenance": "supporting_provenance",
+        "structural_context": "structural_context"
+      },
       "material_clause_required": [
         "id",
         "occurrence_id",
@@ -108,11 +119,24 @@
         "claim_taker_partition_id",
         "proposed_classification",
         "final_classification",
+        "analytical_role",
         "decision",
         "reason",
         "accepted_clause_ids"
       ],
       "classification_review_decisions": ["accept", "demote", "challenge"],
+      "structural_classification_policy": {
+        "owner": "claim_taker_and_coordinator",
+        "context_categories": [
+          "report_title",
+          "owner_identifier",
+          "reporting_period",
+          "source_origin"
+        ],
+        "context_role": "structural_context_or_supporting_provenance",
+        "material_exception": "an exact clause span identifies a separate load-bearing analytical assertion",
+        "python_text_heuristics": false
+      },
       "material_claim_required": [
         "id",
         "primary_clause_id",

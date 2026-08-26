@@ -49,6 +49,7 @@
           {
             "occurrence_id": "INV-NARRATIVE",
             "classification": "material_claim",
+            "analytical_role": "load_bearing_analytical_assertion",
             "reason": "This occurrence states two independently verifiable analytical propositions.",
             "clause_ids": [
               "narrative:CL-RATE",
@@ -82,6 +83,7 @@
         "claim_taker_partition_id": "narrative",
         "proposed_classification": "material_claim",
         "final_classification": "material_claim",
+        "analytical_role": "load_bearing_analytical_assertion",
         "decision": "accept",
         "reason": "The coordinator accepts the explicit two-clause material classification for canonicalization.",
         "accepted_clause_ids": [

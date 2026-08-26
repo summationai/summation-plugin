@@ -86,6 +86,7 @@ def build_case(root: pathlib.Path) -> dict:
             decisions.append({
                 "occurrence_id": item_id,
                 "classification": "material_claim",
+                "analytical_role": "load_bearing_analytical_assertion",
                 "reason": (
                     "This visible occurrence states a quantitative assertion whose "
                     "truth changes the report conclusion."
@@ -104,6 +105,7 @@ def build_case(root: pathlib.Path) -> dict:
             decisions.append({
                 "occurrence_id": item_id,
                 "classification": "structural_context",
+                "analytical_role": "structural_context",
                 "reason": (
                     "This visible occurrence supplies context used to interpret or "
                     "calculate the material assertions."
@@ -118,6 +120,7 @@ def build_case(root: pathlib.Path) -> dict:
             "claim_taker_partition_id": "P-main",
             "proposed_classification": decision["classification"],
             "final_classification": decision["classification"],
+            "analytical_role": decision["analytical_role"],
             "decision": "accept",
             "reason": (
                 "The coordinator independently accepts this explicit classification "
