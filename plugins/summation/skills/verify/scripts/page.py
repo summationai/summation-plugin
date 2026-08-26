@@ -189,6 +189,16 @@ def grade_to_artifact(findings: dict, grade: dict, *, sources: list[dict],
         "limits": [],
     }
     raw = json.loads(json.dumps(findings))
+    source = raw.setdefault("source", {})
+    if not isinstance(source, dict):
+        source = {}
+        raw["source"] = source
+    period = str(grade.get("report_period") or "").strip()
+    report_date = str(grade.get("report_date") or "").strip()
+    if period:
+        source["period_label"] = period
+    if report_date:
+        source["report_date"] = report_date
     raw["claims"] = claims
     raw["sources"] = sources
     raw["verification"] = {

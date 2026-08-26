@@ -1,5 +1,7 @@
 {
   "summary": "Fix the displayed weekly total before you share this report. The 4.6% decline matches the corrected arithmetic.",
+  "report_period": "Week ending 2026-04-04",
+  "report_date": "2026-04-04",
   "confirmations": ["C-YOY"],
   "cards": [
     {

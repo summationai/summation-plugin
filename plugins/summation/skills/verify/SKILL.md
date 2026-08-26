@@ -48,6 +48,8 @@ Write one object:
 ```json
 {
   "summary": "One sentence the customer can forward.",
+  "report_period": "Week ending 2026-04-04",
+  "report_date": "2026-04-04",
   "cards": [
     {
       "id": "C-TOTAL",
@@ -76,6 +78,8 @@ Write one object:
 ```
 
 `verdict` is `confirmed`, `contradicted`, `not_checkable`, or `changed_since_report`.
+
+If the report states a period, put that visible string in `report_period`. If it states a calendar date, put ISO `YYYY-MM-DD` in `report_date`. Those fields are not customer cards. `page.py` copies them onto the file line. Leave them out only when the report does not state them.
 
 A `not_checkable` card has an explanation and no operands. An `evidence` card names `source_id` matching `SRC-<filename-without-extension>`.
 

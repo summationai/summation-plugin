@@ -9,6 +9,7 @@ NEEDLE_EXTRACT = "`extract.py`"
 NEEDLE_PAGE = "`page.py`"
 NEEDLE_NO_DISK = "Do not search the disk."
 NEEDLE_GRADE = "Write `run/grade.json`."
+NEEDLE_PERIOD = "`report_period`"
 BANNED = (
     "write_claim_taker_inputs.py",
     "write_coordinator_input.py",
@@ -26,6 +27,7 @@ class AnalystSkillInstructionTests(unittest.TestCase):
         self.assertIn(NEEDLE_PAGE, local)
         self.assertIn(NEEDLE_NO_DISK, local)
         self.assertIn(NEEDLE_GRADE, local)
+        self.assertIn(NEEDLE_PERIOD, local)
         for banned in BANNED:
             self.assertNotIn(banned, local)
 
