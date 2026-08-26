@@ -207,6 +207,28 @@ class SourceAndClaimTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "sources"):
                 accept.load_checks(path)
 
+    def test_host_authored_severity_is_exact_and_not_normalized(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            evidence = folder / "status.json"
+            evidence.write_text('{"on_time": 94, "total": 100}\n')
+            sources, problems = accept.validate_sources(
+                folder, [source_for(evidence)], folder / "report.md")
+            self.assertEqual(problems, [])
+            check = evidence_check()
+            check["severity"] = "medium"
+            kept, dropped = accept.validate_receipts(
+                REPORT, folder, [check], {"L1"}, folder / "report.md",
+                sources=sources, claim_labels={"L1": CLAIM_LABEL})
+            self.assertEqual(dropped, [])
+            self.assertEqual(kept[0]["severity"], "medium")
+            check["severity"] = "major"
+            kept, dropped = accept.validate_receipts(
+                REPORT, folder, [check], {"L1"}, folder / "report.md",
+                sources=sources, claim_labels={"L1": CLAIM_LABEL})
+            self.assertEqual(kept, [])
+            self.assertIn("check severity is unknown", dropped[0]["problems"])
+
     def test_source_digest_kind_and_retrieval_are_exact(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
@@ -267,6 +289,16 @@ class SourceAndClaimTests(unittest.TestCase):
         self.assertEqual(kept, [])
         self.assertIn("claim quote not found", " ".join(dropped[0]["problems"]))
 
+    def test_missing_inventory_classification_fails_closed(self) -> None:
+        row = claim()
+        row.pop("classification")
+        kept, dropped = accept.validate_claims(REPORT, [row])
+        self.assertEqual(kept, [])
+        self.assertEqual(
+            dropped[0]["problems"],
+            ["claim classification is missing or unknown"],
+        )
+
     def test_non_object_claim_fails_closed_with_exact_reason(self) -> None:
         kept, dropped = accept.validate_claims(REPORT, ["not-a-claim"])
         self.assertEqual(kept, [])
@@ -277,12 +309,13 @@ class SourceAndClaimTests(unittest.TestCase):
             "complete": True,
             "items": [{
                 "id": "INV1", "displayed": "$4.2M", "location": "line1",
-                "importance": "material",
+                "importance": "material", "classification": "material_claim",
             }],
         }
         ledger = [{
             "id": "L1", "quote": "A different visible sentence.",
             "inventory_ids": ["INV1"], "importance": "material",
+            "classification": "material_claim",
             "outcome": "not_checkable",
         }]
         self.assertFalse(hasattr(inventory, "item_matches_claim"))
@@ -378,6 +411,102 @@ class ReceiptTests(unittest.TestCase):
             kept, dropped = self.validate(folder, wrong, report=report)
             self.assertEqual(kept, [])
             self.assertIn("computed expression", " ".join(dropped[0]["problems"]))
+
+    def test_numeric_report_arithmetic_cannot_confirm_unequal_result(self) -> None:
+        report = (
+            "Revenue KPI $359,490.34. Segment Alpha $218,385.67. "
+            "Segment Beta $132,104.67."
+        )
+        check = {
+            "id": "C1",
+            "claim_id": "L1",
+            "type": "arithmetic",
+            "basis": "report",
+            "verdict": "confirmed",
+            "importance": "material",
+            "report_quote": report,
+            "public_receipt": {
+                "report_operand": {
+                    "label": "Total weekly revenue",
+                    "value": "$359,490.34",
+                    "location": "Revenue KPI and segment table Total row",
+                },
+                "decisive_operands": [
+                    {
+                        "label": "Segment Alpha weekly revenue",
+                        "value": "$218,385.67",
+                        "location": "Segment table, Segment Alpha row",
+                    },
+                    {
+                        "label": "Segment Beta weekly revenue",
+                        "value": "$132,104.67",
+                        "location": "Segment table, Segment Beta row",
+                    },
+                ],
+                "calculation": {
+                    "expression": "218385.67 + 132104.67",
+                    "result": "$350,490.34",
+                },
+                "explanation": (
+                    "The two segment values sum to a different amount than the total shown in the report."
+                ),
+            },
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            kept, dropped = self.validate(
+                pathlib.Path(raw), check, report=report, label="Total weekly revenue")
+        self.assertEqual(kept, [])
+        self.assertIn(
+            "confirmed report-basis arithmetic result does not equal the report operand",
+            dropped[0]["problems"],
+        )
+
+    def test_numeric_report_arithmetic_accepts_declared_contradiction(self) -> None:
+        report = (
+            "Revenue KPI $359,490.34. Segment Alpha $218,385.67. "
+            "Segment Beta $132,104.67."
+        )
+        check = {
+            "id": "C1",
+            "claim_id": "L1",
+            "type": "arithmetic",
+            "basis": "report",
+            "verdict": "contradicted",
+            "importance": "material",
+            "severity": "high",
+            "report_quote": report,
+            "public_receipt": {
+                "report_operand": {
+                    "label": "Total weekly revenue",
+                    "value": "$359,490.34",
+                    "location": "Revenue KPI and segment table Total row",
+                },
+                "decisive_operands": [
+                    {
+                        "label": "Segment Alpha weekly revenue",
+                        "value": "$218,385.67",
+                        "location": "Segment table, Segment Alpha row",
+                    },
+                    {
+                        "label": "Segment Beta weekly revenue",
+                        "value": "$132,104.67",
+                        "location": "Segment table, Segment Beta row",
+                    },
+                ],
+                "calculation": {
+                    "expression": "218385.67 + 132104.67",
+                    "result": "$350,490.34",
+                },
+                "explanation": (
+                    "The two segment values sum to a different amount than the total shown in both report locations."
+                ),
+            },
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            kept, dropped = self.validate(
+                pathlib.Path(raw), check, report=report, label="Total weekly revenue")
+        self.assertEqual(dropped, [])
+        self.assertEqual(kept[0]["verdict"], "contradicted")
 
     def test_not_checkable_requires_public_receipt_and_no_decisive_operands(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -515,7 +644,7 @@ class LedgerTests(unittest.TestCase):
         self.assertNotIn("found_by", updated[0])
         self.assertNotIn("verification_mode", updated[0])
 
-    def test_duplicate_semantic_outcomes_fail_closed_without_ranking(self) -> None:
+    def test_one_canonical_claim_cannot_have_mixed_outcomes(self) -> None:
         checks = [
             {"id": "C1", "claim_id": "L1", "verdict": "confirmed"},
             {"id": "C2", "claim_id": "L1", "verdict": "contradicted"},
@@ -523,6 +652,157 @@ class LedgerTests(unittest.TestCase):
         row = accept.attach_claim_outcomes([claim()], checks)[0]
         self.assertEqual(row["outcome"], "not_reached")
         self.assertIsNone(row["check_id"])
+
+    def test_explicit_structural_context_is_outside_material_ledger(self) -> None:
+        inv = {
+            "complete": True,
+            "items": [
+                {
+                    "id": "INV1", "displayed": "Weekly status", "quote": "Weekly status",
+                    "location": "line1", "importance": "unclassified",
+                },
+                {
+                    "id": "INV2", "displayed": "Owner 07", "quote": "Owner 07",
+                    "location": "line2", "importance": "unclassified",
+                },
+                {
+                    "id": "INV3", "displayed": "Week ending April 4, 2026",
+                    "quote": "Week ending April 4, 2026", "location": "line3",
+                    "importance": "unclassified",
+                },
+                {
+                    "id": "INV4", "displayed": "Revenue", "quote": "Revenue",
+                    "location": "line4", "importance": "unclassified",
+                },
+                {
+                    "id": "INV5", "displayed": "Data is current through April 4, 2026.",
+                    "quote": "Data is current through April 4, 2026.", "location": "line5",
+                    "importance": "unclassified",
+                },
+            ],
+        }
+        candidates = []
+        membership = []
+        for index, inventory_id in enumerate(("INV1", "INV2", "INV3", "INV4"), 1):
+            item = inv["items"][index - 1]
+            candidates.append({
+                "id": f"S{index}",
+                "quote": item["displayed"],
+                "classification": "structural_context",
+                "importance": "supporting",
+                "reason": "This visible item organizes the report and is not an analytical assertion.",
+                "inventory_ids": [inventory_id],
+            })
+            membership.append({
+                "partition_id": "report-shell",
+                "candidate_id": f"S{index}",
+                "canonical_claim_id": None,
+            })
+        candidates.append({
+            "id": "M1",
+            "quote": "Data is current through April 4, 2026.",
+            "public_label": "Reported data currency date",
+            "classification": "material_claim",
+            "importance": "material",
+            "inventory_ids": ["INV5"],
+        })
+        membership.append({
+            "partition_id": "report-shell",
+            "candidate_id": "M1",
+            "canonical_claim_id": "L1",
+        })
+        claims = [{
+            "id": "L1",
+            "quote": "Data is current through April 4, 2026.",
+            "public_label": "Reported data currency date",
+            "classification": "material_claim",
+            "importance": "material",
+            "inventory_ids": ["INV5"],
+            "member_refs": [{"partition_id": "report-shell", "candidate_id": "M1"}],
+        }]
+        coordinator = {
+            "partition_results": [{
+                "partition_id": "report-shell",
+                "candidates": candidates,
+            }],
+            "membership": membership,
+            "verifier_assignments": [{"verifier_id": "V1", "claim_ids": ["L1"]}],
+        }
+        handoff, problems = accept.validate_coordinator_handoff(
+            claims, coordinator, inv)
+        self.assertEqual(problems, [])
+        self.assertEqual(len(handoff["structural_context"]), 4)
+        self.assertEqual(handoff["material_claim_ids"], ["L1"])
+
+        grounded, discarded = accept.validate_claims(
+            " ".join(item["displayed"] for item in inv["items"]), claims)
+        self.assertEqual(discarded, [])
+        ledger = accept.attach_claim_outcomes(
+            grounded, [{"id": "C1", "claim_id": "L1", "verdict": "not_checkable"}])
+        discarded_claims = []
+        ledger = accept.apply_host_classifications(
+            ledger, discarded_claims, inv,
+            structural_context=handoff["structural_context"],
+        )
+        self.assertEqual(discarded_claims, [])
+        covered = inventory.cover(
+            inv, ledger, structural_context=handoff["structural_context"])
+        self.assertEqual(covered["missing"], [])
+        self.assertEqual(covered["material"], 1)
+        self.assertEqual([row["id"] for row in ledger], ["L1"])
+        self.assertTrue(all(
+            item["classification"] == "structural_context"
+            for item in inv["items"][:4]
+        ))
+
+    def test_duplicate_inventory_assignment_fails_closed(self) -> None:
+        inv = {
+            "complete": True,
+            "items": [{
+                "id": "INV1", "displayed": "Revenue was $10.",
+                "quote": "Revenue was $10.", "location": "line1",
+                "importance": "unclassified",
+            }],
+        }
+        claims = [
+            {
+                "id": "L1", "quote": "Revenue was $10.",
+                "public_label": "Reported revenue", "importance": "material",
+                "classification": "material_claim", "inventory_ids": ["INV1"],
+                "member_refs": [{"partition_id": "p1", "candidate_id": "A"}],
+            },
+            {
+                "id": "L2", "quote": "Revenue was $10.",
+                "public_label": "Second reported revenue", "importance": "material",
+                "classification": "material_claim", "inventory_ids": ["INV1"],
+                "member_refs": [{"partition_id": "p2", "candidate_id": "B"}],
+            },
+        ]
+        coordinator = {
+            "partition_results": [
+                {"partition_id": "p1", "candidates": [{
+                    "id": "A", "quote": "Revenue was $10.",
+                    "public_label": "Reported revenue", "importance": "material",
+                    "classification": "material_claim", "inventory_ids": ["INV1"],
+                }]},
+                {"partition_id": "p2", "candidates": [{
+                    "id": "B", "quote": "Revenue was $10.",
+                    "public_label": "Second reported revenue", "importance": "material",
+                    "classification": "material_claim", "inventory_ids": ["INV1"],
+                }]},
+            ],
+            "membership": [
+                {"partition_id": "p1", "candidate_id": "A", "canonical_claim_id": "L1"},
+                {"partition_id": "p2", "candidate_id": "B", "canonical_claim_id": "L2"},
+            ],
+            "verifier_assignments": [
+                {"verifier_id": "V1", "claim_ids": ["L1"]},
+                {"verifier_id": "V2", "claim_ids": ["L2"]},
+            ],
+        }
+        _handoff, problems = accept.validate_coordinator_handoff(
+            claims, coordinator, inv)
+        self.assertIn("inventory id 'INV1' is assigned more than once", problems)
 
     def test_supporting_provenance_stays_outside_material_ledger(self) -> None:
         inv = {
@@ -547,6 +827,35 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(inv["items"][0]["importance"], "supporting")
 
 
+class PresentationTests(unittest.TestCase):
+    def test_customer_presentation_requires_an_exact_host_action(self) -> None:
+        action = {
+            "id": "A1",
+            "text": "Review the delivery receipt before sharing the report.",
+            "report_quote": "On-time delivery was 94%.",
+            "check_ids": ["C1"],
+        }
+        accepted, problems = accept.validate_presentation(
+            {"presentation": {"summary": "", "actions": [action], "limits": []}},
+            REPORT, {"C1"},
+        )
+        self.assertEqual(problems, [])
+        self.assertEqual(accepted["actions"], [action])
+
+        for document in (
+            {},
+            {"presentation": {"summary": "", "actions": [], "limits": []}},
+            {"presentation": {
+                "summary": "", "actions": [action | {"id": "next"}], "limits": [],
+            }},
+        ):
+            with self.subTest(document=document):
+                accepted, problems = accept.validate_presentation(
+                    document, REPORT, {"C1"})
+                self.assertIsNone(accepted)
+                self.assertTrue(problems)
+
+
 class CliTests(unittest.TestCase):
     def test_cli_retains_public_label_and_exact_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -556,7 +865,34 @@ class CliTests(unittest.TestCase):
             evidence = folder / "status.json"
             evidence.write_text('{"on_time": 94, "total": 100}\n')
             claims = folder / "claims.json"
-            claims.write_text(json.dumps({"claims": [claim()]}))
+            canonical = claim() | {
+                "member_refs": [{"partition_id": "summary", "candidate_id": "K1"}],
+            }
+            claims.write_text(json.dumps({
+                "claims": [canonical],
+                "coordinator": {
+                    "partition_results": [{
+                        "partition_id": "summary",
+                        "candidates": [{
+                            "id": "K1",
+                            "quote": "On-time delivery was 94%.",
+                            "public_label": CLAIM_LABEL,
+                            "importance": "material",
+                            "classification": "material_claim",
+                            "inventory_ids": ["INV1"],
+                        }],
+                    }],
+                    "membership": [{
+                        "partition_id": "summary",
+                        "candidate_id": "K1",
+                        "canonical_claim_id": "L1",
+                    }],
+                    "verifier_assignments": [{
+                        "verifier_id": "V1",
+                        "claim_ids": ["L1"],
+                    }],
+                },
+            }))
             checks = folder / "checks.json"
             checks.write_text(json.dumps({
                 "sources": [source_for(evidence)], "checks": [evidence_check()],
@@ -574,8 +910,39 @@ class CliTests(unittest.TestCase):
                 sys.argv = argv
             self.assertEqual(code, 0)
             doc = json.loads(out.read_text())
+            self.assertEqual(doc["discarded_claims"], [])
+            self.assertEqual(doc["semantic_status"], "complete")
             self.assertEqual(doc["claims"][0]["public_label"], CLAIM_LABEL)
             self.assertEqual(doc["checks"][0]["public_receipt"], evidence_check()["public_receipt"])
+
+    def test_cli_records_missing_coordinator_as_a_fail_closed_repair_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            report = folder / "report.md"
+            report.write_text("On-time delivery was 94%.\n")
+            claims = folder / "claims.json"
+            claims.write_text(json.dumps({"claims": [claim()]}))
+            checks = folder / "checks.json"
+            checks.write_text(json.dumps({
+                "sources": [], "checks": [not_checkable_check()],
+            }))
+            out = folder / "receipts.json"
+            argv = sys.argv
+            sys.argv = [
+                "accept.py", "--report", str(report), "--claims", str(claims),
+                "--checks", str(checks), "--out", str(out),
+            ]
+            try:
+                code = accept.main()
+            finally:
+                sys.argv = argv
+            self.assertEqual(code, 0)
+            doc = json.loads(out.read_text())
+            self.assertEqual(doc["semantic_status"], "failed")
+            self.assertEqual(
+                doc["discarded_claims"][-1]["problems"],
+                ["coordinator handoff is missing or not an object"],
+            )
 
 
 if __name__ == "__main__":

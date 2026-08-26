@@ -25,9 +25,13 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 from inventory import claim_inventory_ids, cover, inventory_for  # noqa: E402
 from receipt_math import calculation_problem  # noqa: E402
-from severity import normalize_severity  # noqa: E402
 
-CLAIM_CLASSIFICATIONS = frozenset({"material_claim", "supporting_provenance"})
+CLAIM_CLASSIFICATIONS = frozenset({
+    "material_claim", "supporting_provenance", "structural_context",
+})
+CANONICAL_CLAIM_CLASSIFICATIONS = frozenset({
+    "material_claim", "supporting_provenance",
+})
 
 
 def load_known_verdicts(schema_path: pathlib.Path | None = None) -> frozenset:
@@ -546,6 +550,32 @@ def _value_in(value, candidates: list) -> bool:
     return False
 
 
+def _arithmetic_disposition_problem(finding: dict, report_operand: dict | None,
+                                    calculation: dict | None) -> str | None:
+    """Check only an explicitly declared numeric report arithmetic outcome."""
+    if (
+        finding.get("basis") != "report"
+        or finding.get("type") != "arithmetic"
+        or finding.get("verdict") not in {"confirmed", "contradicted"}
+        or not isinstance(report_operand, dict)
+        or not isinstance(calculation, dict)
+    ):
+        return None
+    report_value = parse_quantity(report_operand.get("value"))
+    result_value = parse_quantity(calculation.get("result"))
+    if report_value is None or result_value is None:
+        return None
+    if finding.get("verdict") == "confirmed" and report_value != result_value:
+        return (
+            "confirmed report-basis arithmetic result does not equal the report operand"
+        )
+    if finding.get("verdict") == "contradicted" and report_value == result_value:
+        return (
+            "contradicted report-basis arithmetic result equals the report operand"
+        )
+    return None
+
+
 def _validate_public_receipt(finding: dict, report: str,
                              receipt_updates: dict,
                              sources: dict[str, dict],
@@ -669,6 +699,11 @@ def _validate_public_receipt(finding: dict, report: str,
                 if math_problem:
                     problems.append(f"public_receipt.{math_problem}")
             canonical_calculation = {"expression": expression, "result": result}
+            if not expression_problem and result not in (None, "") and not math_problem:
+                disposition_problem = _arithmetic_disposition_problem(
+                    finding, report_operand, canonical_calculation)
+                if disposition_problem:
+                    problems.append(disposition_problem)
     if (
         verdict != "not_checkable"
         and basis == "report"
@@ -718,13 +753,13 @@ def validate_claims(report: str, proposed: list) -> tuple[list, list]:
         quote = claim.get("quote", "")
         public_label = str(claim.get("public_label") or "").strip()
         importance = claim.get("importance")
-        classification = claim.get("classification") or "material_claim"
+        classification = str(claim.get("classification") or "").strip()
         reason = str(claim.get("reason") or "").strip()
         if not cid:
             problems.append("claim has no id")
         elif cid in seen:
             problems.append(f"claim id {cid!r} is duplicated")
-        if classification not in CLAIM_CLASSIFICATIONS:
+        if classification not in CANONICAL_CLAIM_CLASSIFICATIONS:
             problems.append("claim classification is missing or unknown")
         if classification == "supporting_provenance":
             if importance not in {None, "supporting"}:
@@ -732,8 +767,10 @@ def validate_claims(report: str, proposed: list) -> tuple[list, list]:
             importance = "supporting"
             if not reason:
                 problems.append("supporting_provenance has no reason")
-        elif importance not in {"material", "supporting"}:
-            problems.append("claim importance is missing or unknown")
+        elif classification == "material_claim":
+            if importance != "material":
+                problems.append("material_claim requires importance material")
+            importance = "material"
         if not quote_in_text(str(quote), report):
             problems.append("claim quote not found in visible report text")
         quote_problem = _public_text_problem(quote)
@@ -748,7 +785,7 @@ def validate_claims(report: str, proposed: list) -> tuple[list, list]:
             "public_label": public_label,
             "importance": importance if importance in {"material", "supporting"} else "material",
             "classification": (
-                classification if classification in CLAIM_CLASSIFICATIONS
+                classification if classification in CANONICAL_CLAIM_CLASSIFICATIONS
                 else "material_claim"),
         }
         if reason:
@@ -766,6 +803,332 @@ def validate_claims(report: str, proposed: list) -> tuple[list, list]:
             seen.add(cid)
             grounded.append(row)
     return grounded, discarded
+
+
+def _listed_ids(raw, label: str, problems: list[str]) -> list[str]:
+    if not isinstance(raw, list) or not raw:
+        problems.append(f"{label} is missing or not a non-empty array")
+        return []
+    out = [str(value or "").strip() for value in raw]
+    if any(not value for value in out):
+        problems.append(f"{label} contains an empty id")
+    if len(out) != len(set(out)):
+        problems.append(f"{label} contains a duplicate id")
+    return [value for value in out if value]
+
+
+def _member_ref(raw, label: str, problems: list[str]) -> tuple[str, str] | None:
+    if not isinstance(raw, dict):
+        problems.append(f"{label} is not an object")
+        return None
+    partition_id = str(raw.get("partition_id") or "").strip()
+    candidate_id = str(raw.get("candidate_id") or "").strip()
+    if not partition_id or not candidate_id:
+        problems.append(f"{label} is missing partition_id or candidate_id")
+        return None
+    return partition_id, candidate_id
+
+
+def validate_coordinator_handoff(canonical_claims, coordinator,
+                                 inventory: dict) -> tuple[dict, list[str]]:
+    """Validate explicit worker membership and verifier ownership by ids only."""
+    handoff = {
+        "membership": [],
+        "structural_context": [],
+        "material_claim_ids": [],
+        "verifier_assignments": [],
+    }
+    problems: list[str] = []
+    if not isinstance(canonical_claims, list):
+        return handoff, ["canonical claims are not an array"]
+    if not isinstance(coordinator, dict):
+        return handoff, ["coordinator handoff is missing or not an object"]
+    partitions = coordinator.get("partition_results")
+    membership = coordinator.get("membership")
+    verifier_assignments = coordinator.get("verifier_assignments")
+    if not isinstance(partitions, list):
+        problems.append("coordinator.partition_results is not an array")
+        partitions = []
+    if not isinstance(membership, list):
+        problems.append("coordinator.membership is not an array")
+        membership = []
+    if not isinstance(verifier_assignments, list):
+        problems.append("coordinator.verifier_assignments is not an array")
+        verifier_assignments = []
+
+    inventory_rows = [
+        row for row in (inventory.get("items") or [])
+        if isinstance(row, dict) and row.get("id")
+    ] if isinstance(inventory, dict) else []
+    inventory_by_id = {str(row["id"]): row for row in inventory_rows}
+    if len(inventory_by_id) != len(inventory_rows):
+        problems.append("inventory ids are duplicated")
+
+    candidates: dict[tuple[str, str], dict] = {}
+    inventory_owner: dict[str, tuple[str, str]] = {}
+    partition_ids: set[str] = set()
+    for partition_index, partition in enumerate(partitions):
+        label = f"coordinator.partition_results[{partition_index}]"
+        if not isinstance(partition, dict):
+            problems.append(f"{label} is not an object")
+            continue
+        partition_id = str(partition.get("partition_id") or "").strip()
+        if not partition_id:
+            problems.append(f"{label}.partition_id is missing")
+            continue
+        if partition_id in partition_ids:
+            problems.append(f"partition id {partition_id!r} is duplicated")
+        partition_ids.add(partition_id)
+        rows = partition.get("candidates")
+        if not isinstance(rows, list):
+            problems.append(f"{label}.candidates is not an array")
+            continue
+        for candidate_index, candidate in enumerate(rows):
+            candidate_label = f"{label}.candidates[{candidate_index}]"
+            if not isinstance(candidate, dict):
+                problems.append(f"{candidate_label} is not an object")
+                continue
+            candidate_id = str(candidate.get("id") or "").strip()
+            key = (partition_id, candidate_id)
+            if not candidate_id:
+                problems.append(f"{candidate_label}.id is missing")
+                continue
+            if key in candidates:
+                problems.append(
+                    f"worker candidate {partition_id!r}/{candidate_id!r} is duplicated")
+                continue
+            classification = str(candidate.get("classification") or "").strip()
+            if classification not in CLAIM_CLASSIFICATIONS:
+                problems.append(
+                    f"worker candidate {partition_id!r}/{candidate_id!r} "
+                    "classification is missing or unknown")
+            importance = str(candidate.get("importance") or "").strip()
+            if classification == "material_claim" and importance != "material":
+                problems.append(
+                    f"worker candidate {partition_id!r}/{candidate_id!r} "
+                    "material_claim requires importance material")
+            if classification in {"supporting_provenance", "structural_context"} \
+                    and importance != "supporting":
+                problems.append(
+                    f"worker candidate {partition_id!r}/{candidate_id!r} "
+                    f"{classification} requires importance supporting")
+            if classification != "structural_context":
+                label_problem = _public_text_problem(
+                    candidate.get("public_label"), operand_label=True)
+                if label_problem:
+                    problems.append(
+                        f"worker candidate {partition_id!r}/{candidate_id!r} "
+                        f"public_label {label_problem}")
+            if classification == "supporting_provenance" \
+                    and not _substantive_explanation(candidate.get("reason")):
+                problems.append(
+                    f"worker candidate {partition_id!r}/{candidate_id!r} "
+                    "supporting_provenance reason is missing or not substantive")
+            raw_ids = candidate.get("inventory_ids")
+            ids = _listed_ids(
+                raw_ids,
+                f"worker candidate {partition_id!r}/{candidate_id!r} inventory_ids",
+                problems,
+            )
+            for inventory_id in ids:
+                if inventory_id not in inventory_by_id:
+                    problems.append(
+                        f"inventory id {inventory_id!r} is not in the inventory")
+                    continue
+                if inventory_id in inventory_owner:
+                    problems.append(
+                        f"inventory id {inventory_id!r} is assigned more than once")
+                else:
+                    inventory_owner[inventory_id] = key
+            if classification == "structural_context":
+                if len(ids) != 1:
+                    problems.append(
+                        f"worker candidate {partition_id!r}/{candidate_id!r} "
+                        "structural_context requires exactly one inventory id")
+                quote = normalize(str(candidate.get("quote") or ""))
+                item = inventory_by_id.get(ids[0]) if len(ids) == 1 else None
+                shown = normalize(str((item or {}).get("displayed") or ""))
+                if not quote or quote != shown:
+                    problems.append(
+                        f"worker candidate {partition_id!r}/{candidate_id!r} "
+                        "structural_context quote is not the exact inventory text")
+                if not _substantive_explanation(candidate.get("reason")):
+                    problems.append(
+                        f"worker candidate {partition_id!r}/{candidate_id!r} "
+                        "structural_context reason is missing or not substantive")
+            candidates[key] = {**candidate, "inventory_ids": ids}
+
+    for inventory_id in inventory_by_id:
+        if inventory_id not in inventory_owner:
+            problems.append(f"inventory id {inventory_id!r} is not assigned by a worker candidate")
+
+    assigned: dict[tuple[str, str], str | None] = {}
+    membership_rows: list[dict] = []
+    for index, row in enumerate(membership):
+        label = f"coordinator.membership[{index}]"
+        ref = _member_ref(row, label, problems)
+        if ref is None:
+            continue
+        if ref not in candidates:
+            problems.append(
+                f"membership references unknown worker candidate {ref[0]!r}/{ref[1]!r}")
+            continue
+        if ref in assigned:
+            problems.append(
+                f"worker candidate {ref[0]!r}/{ref[1]!r} is assigned more than once")
+            continue
+        canonical_id_raw = row.get("canonical_claim_id") if isinstance(row, dict) else None
+        canonical_id = (
+            str(canonical_id_raw).strip()
+            if canonical_id_raw not in (None, "") else None
+        )
+        candidate = candidates[ref]
+        if candidate.get("classification") == "structural_context":
+            if canonical_id is not None:
+                problems.append(
+                    f"structural worker candidate {ref[0]!r}/{ref[1]!r} "
+                    "must not name a canonical claim")
+            handoff["structural_context"].append({
+                "id": f"{ref[0]}:{ref[1]}",
+                "partition_id": ref[0],
+                "candidate_id": ref[1],
+                "quote": candidate.get("quote"),
+                "classification": "structural_context",
+                "importance": "supporting",
+                "reason": candidate.get("reason"),
+                "inventory_ids": list(candidate.get("inventory_ids") or []),
+            })
+        elif canonical_id is None:
+            problems.append(
+                f"worker candidate {ref[0]!r}/{ref[1]!r} has no canonical claim")
+        assigned[ref] = canonical_id
+        membership_rows.append({
+            "partition_id": ref[0],
+            "candidate_id": ref[1],
+            "canonical_claim_id": canonical_id,
+        })
+    for ref in candidates:
+        if ref not in assigned:
+            problems.append(
+                f"worker candidate {ref[0]!r}/{ref[1]!r} has no membership assignment")
+
+    canonical_by_id: dict[str, dict] = {}
+    for index, claim in enumerate(canonical_claims):
+        if not isinstance(claim, dict):
+            problems.append(f"canonical claims[{index}] is not an object")
+            continue
+        claim_id = str(claim.get("id") or "").strip()
+        if not claim_id:
+            problems.append(f"canonical claims[{index}].id is missing")
+            continue
+        if claim_id in canonical_by_id:
+            problems.append(f"canonical claim id {claim_id!r} is duplicated")
+            continue
+        canonical_by_id[claim_id] = claim
+
+    refs_by_claim: dict[str, list[tuple[str, str]]] = {}
+    for ref, canonical_id in assigned.items():
+        if canonical_id is None:
+            continue
+        if canonical_id not in canonical_by_id:
+            problems.append(f"membership references unknown canonical claim {canonical_id!r}")
+            continue
+        refs_by_claim.setdefault(canonical_id, []).append(ref)
+    for claim_id, claim in canonical_by_id.items():
+        classification = str(claim.get("classification") or "").strip()
+        if classification not in CANONICAL_CLAIM_CLASSIFICATIONS:
+            problems.append(
+                f"canonical claim {claim_id!r} classification is missing or unknown")
+        declared_refs_raw = claim.get("member_refs")
+        if not isinstance(declared_refs_raw, list) or not declared_refs_raw:
+            problems.append(f"canonical claim {claim_id!r} member_refs is missing or empty")
+            declared_refs = []
+        else:
+            declared_refs = []
+            for index, raw_ref in enumerate(declared_refs_raw):
+                ref = _member_ref(
+                    raw_ref, f"canonical claim {claim_id!r} member_refs[{index}]", problems)
+                if ref is not None:
+                    declared_refs.append(ref)
+            if len(declared_refs) != len(set(declared_refs)):
+                problems.append(f"canonical claim {claim_id!r} member_refs are duplicated")
+        actual_refs = refs_by_claim.get(claim_id, [])
+        if set(declared_refs) != set(actual_refs) or len(declared_refs) != len(actual_refs):
+            problems.append(
+                f"canonical claim {claim_id!r} member_refs do not match coordinator membership")
+        member_ids: list[str] = []
+        member_classes: set[str] = set()
+        member_labels: set[str] = set()
+        for ref in actual_refs:
+            candidate = candidates.get(ref) or {}
+            member_ids.extend(candidate.get("inventory_ids") or [])
+            member_classes.add(str(candidate.get("classification") or ""))
+            label = str(candidate.get("public_label") or "").strip()
+            if label:
+                member_labels.add(label)
+        declared_ids = _listed_ids(
+            claim.get("inventory_ids"),
+            f"canonical claim {claim_id!r} inventory_ids",
+            problems,
+        )
+        if set(declared_ids) != set(member_ids) or len(declared_ids) != len(member_ids):
+            problems.append(
+                f"canonical claim {claim_id!r} inventory_ids do not match its members")
+        if member_classes and member_classes != {classification}:
+            problems.append(
+                f"canonical claim {claim_id!r} classification does not match its members")
+        if classification in CANONICAL_CLAIM_CLASSIFICATIONS and str(
+            claim.get("public_label") or ""
+        ).strip() not in member_labels:
+            problems.append(
+                f"canonical claim {claim_id!r} public_label is not carried "
+                "from a member candidate")
+        if classification == "material_claim":
+            handoff["material_claim_ids"].append(claim_id)
+
+    verifier_seen: set[str] = set()
+    verifier_claim_counts: dict[str, int] = {}
+    clean_assignments: list[dict] = []
+    for index, assignment in enumerate(verifier_assignments):
+        label = f"coordinator.verifier_assignments[{index}]"
+        if not isinstance(assignment, dict):
+            problems.append(f"{label} is not an object")
+            continue
+        verifier_id = str(assignment.get("verifier_id") or "").strip()
+        if not verifier_id:
+            problems.append(f"{label}.verifier_id is missing")
+        elif verifier_id in verifier_seen:
+            problems.append(f"verifier id {verifier_id!r} is duplicated")
+        verifier_seen.add(verifier_id)
+        claim_ids = _listed_ids(
+            assignment.get("claim_ids"), f"{label}.claim_ids", problems)
+        for claim_id in claim_ids:
+            claim = canonical_by_id.get(claim_id)
+            if claim is None:
+                problems.append(
+                    f"verifier assignment references unknown canonical claim {claim_id!r}")
+                continue
+            if claim.get("classification") != "material_claim":
+                problems.append(
+                    f"verifier assignment references non-material canonical claim {claim_id!r}")
+                continue
+            verifier_claim_counts[claim_id] = verifier_claim_counts.get(claim_id, 0) + 1
+        clean_assignments.append({
+            "verifier_id": verifier_id,
+            "claim_ids": claim_ids,
+        })
+    for claim_id in handoff["material_claim_ids"]:
+        count = verifier_claim_counts.get(claim_id, 0)
+        if count == 0:
+            problems.append(
+                f"canonical material claim {claim_id!r} has no verifier assignment")
+        elif count > 1:
+            problems.append(
+                f"canonical material claim {claim_id!r} is assigned to more than one verifier")
+
+    handoff["membership"] = membership_rows
+    handoff["verifier_assignments"] = clean_assignments
+    return handoff, list(dict.fromkeys(problems))
 
 
 def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
@@ -822,12 +1185,10 @@ def validate_receipts(report: str, sandbox: pathlib.Path, proposed: list,
             "basis": basis,
             "importance": importance,
         })
-        if verdict == "contradicted":
-            finding["severity"] = normalize_severity(
-                finding.get("severity"), contradicted=True,
-                importance=importance or "material")
-        else:
-            finding["severity"] = None
+        severity = finding.get("severity")
+        if severity not in {None, "high", "medium", "low"}:
+            problems.append("check severity is unknown")
+        finding["severity"] = severity
         if not quote_in_text(finding.get("report_quote", ""), report):
             problems.append("report_quote not found in visible report text")
         if "report_quote_2" in finding:
@@ -1090,10 +1451,10 @@ def validate_presentation(doc, report: str,
                           accepted_ids: set[str] | None = None
                           ) -> tuple[dict | None, list[str]]:
     if not isinstance(doc, dict) or "presentation" not in doc:
-        return None, []
+        return None, ["presentation is missing"]
     pres = doc.get("presentation")
     if pres is None:
-        return None, []
+        return None, ["presentation is missing"]
     problems = []
     if not isinstance(pres, dict):
         return None, ["presentation is not an object"]
@@ -1128,8 +1489,12 @@ def validate_presentation(doc, report: str,
                 continue
             text = str(item.get("text") or "").strip()
             quote = str(item.get("report_quote") or "").strip()
+            item_id = str(item.get("id") or "")
             if not text or not quote:
                 problems.append(f"{label} is incomplete")
+                continue
+            if name == "actions" and not re.fullmatch(r"A[0-9]+", item_id):
+                problems.append(f"{label} id is invalid")
                 continue
             if not quote_in_text(quote, report):
                 problems.append(f"{label} report_quote not found in visible report text")
@@ -1140,11 +1505,15 @@ def validate_presentation(doc, report: str,
                 problems.append(id_problem)
                 continue
             bucket.append({
-                "id": str(item.get("id") or f"{name[:1].upper()}{index + 1}"),
+                "id": item_id or f"{name[:1].upper()}{index + 1}",
                 "text": text,
                 "report_quote": quote,
                 "check_ids": ids,
             })
+    if not cleaned_actions:
+        problems.append("presentation.actions has no accepted action")
+    elif len({row["id"] for row in cleaned_actions}) != len(cleaned_actions):
+        problems.append("presentation.actions ids are duplicated")
     if problems and not summary_text and not cleaned_actions and not cleaned_limits:
         return None, problems
     return {
@@ -1183,51 +1552,74 @@ def load_claims_bundle(path: pathlib.Path) -> tuple[list, dict]:
             meta["report_period"] = period.strip()
         if isinstance(date, str) and date.strip():
             meta["report_date"] = date.strip()
+        meta["coordinator"] = doc.get("coordinator")
         return doc["claims"], meta
     raise ValueError("claims file has no claims array")
 
 
 def apply_host_classifications(ledger: list, discarded_claims: list,
-                               inventory: dict) -> list:
-    """Apply host supporting_provenance. Code does not guess meaning from words."""
+                               inventory: dict, *,
+                               structural_context: list[dict] | None = None) -> list:
+    """Apply explicit host classifications; never derive them from content."""
     by_id = {
         str(item.get("id") or ""): item
         for item in (inventory.get("items") or [])
         if isinstance(item, dict) and item.get("id")
     }
     used: set[str] = set()
-    kept = []
-    for claim in ledger:
-        if claim.get("classification") != "supporting_provenance":
-            kept.append(claim)
-            continue
+    kept: list[dict] = []
+    assignments = [
+        *(row for row in ledger if isinstance(row, dict)),
+        *(row for row in (structural_context or []) if isinstance(row, dict)),
+    ]
+    structural_ids = {
+        id(row) for row in (structural_context or []) if isinstance(row, dict)
+    }
+    for claim in assignments:
         problems = []
+        classification = str(claim.get("classification") or "")
         ids = claim_inventory_ids(claim)
-        if len(ids) != 1:
-            problems.append("supporting_provenance requires exactly one inventory id")
-        else:
-            iid = ids[0]
+        if not ids:
+            problems.append(f"{classification or 'classification'} requires inventory ids")
+        if classification in {"supporting_provenance", "structural_context"} \
+                and len(ids) != 1:
+            problems.append(f"{classification} requires exactly one inventory id")
+        for iid in ids:
             item = by_id.get(iid)
             if item is None:
                 problems.append(f"inventory id {iid!r} is not in the inventory")
-            else:
+                continue
+            if iid in used:
+                problems.append(f"inventory id {iid!r} is assigned more than once")
+                continue
+            if classification in {"supporting_provenance", "structural_context"}:
                 shown = normalize(str(item.get("displayed") or item.get("quote") or ""))
                 quote = normalize(str(claim.get("quote") or ""))
                 if not quote or shown != quote:
                     problems.append(
-                        "supporting_provenance quote is not the exact inventory text")
-                if iid in used:
+                        f"{classification} quote is not the exact inventory text")
+                if not _substantive_explanation(claim.get("reason")):
                     problems.append(
-                        f"inventory id {iid!r} already has supporting_provenance")
-                if not problems:
-                    used.add(iid)
-                    item["importance"] = "supporting"
-                    claim["importance"] = "supporting"
+                        f"{classification} reason is missing or not substantive")
+        if classification == "material_claim" and claim.get("importance") != "material":
+            problems.append("material_claim requires importance material")
+        if classification in {"supporting_provenance", "structural_context"} \
+                and claim.get("importance") != "supporting":
+            problems.append(f"{classification} requires importance supporting")
         if problems:
             dropped = {**claim, "problems": problems}
             discarded_claims.append(dropped)
         else:
-            kept.append(claim)
+            for iid in ids:
+                used.add(iid)
+                item = by_id[iid]
+                item["classification"] = classification
+                item["importance"] = (
+                    "material" if classification == "material_claim" else "supporting")
+            claim["importance"] = (
+                "material" if classification == "material_claim" else "supporting")
+            if id(claim) not in structural_ids:
+                kept.append(claim)
     return kept
 
 
@@ -1313,17 +1705,6 @@ def main() -> int:
         )
         return 2
 
-    proposed_sources = list((checks_doc or {}).get("sources") or [])
-    accepted_sources, discarded_sources = validate_sources(
-        sandbox, proposed_sources, args.report)
-    grounded_claims, discarded_claims = validate_claims(text, proposed_claims)
-    claim_ids = {row["id"] for row in grounded_claims}
-    validated, discarded = validate_receipts(
-        text, sandbox, proposed, claim_ids, args.report,
-        sources=accepted_sources,
-        claim_labels={row["id"]: row["public_label"] for row in grounded_claims},
-        report_date=claims_meta.get("report_date"))
-    ledger = attach_claim_outcomes(grounded_claims, validated)
     inventory = None
     arithmetic_uses: list = []
     if args.findings is not None and args.findings.is_file():
@@ -1336,9 +1717,38 @@ def main() -> int:
             arithmetic_uses = []
     if not isinstance(inventory, dict):
         inventory = inventory_for(args.report)
-    ledger = apply_host_classifications(ledger, discarded_claims, inventory)
+
+    coordinator_handoff, coordinator_problems = validate_coordinator_handoff(
+        proposed_claims, claims_meta.get("coordinator"), inventory)
+    proposed_sources = list((checks_doc or {}).get("sources") or [])
+    accepted_sources, discarded_sources = validate_sources(
+        sandbox, proposed_sources, args.report)
+    grounded_claims, discarded_claims = validate_claims(text, proposed_claims)
+    if coordinator_problems:
+        discarded_claims.append({
+            "id": "coordinator",
+            "quote": "",
+            "public_label": "",
+            "importance": "supporting",
+            "classification": "structural_context",
+            "problems": coordinator_problems,
+        })
+    claim_ids = {row["id"] for row in grounded_claims}
+    validated, discarded = validate_receipts(
+        text, sandbox, proposed, claim_ids, args.report,
+        sources=accepted_sources,
+        claim_labels={row["id"]: row["public_label"] for row in grounded_claims},
+        report_date=claims_meta.get("report_date"))
+    ledger = attach_claim_outcomes(grounded_claims, validated)
+    ledger = apply_host_classifications(
+        ledger, discarded_claims, inventory,
+        structural_context=coordinator_handoff["structural_context"],
+    )
     validated, ledger = attach_arithmetic_uses(ledger, validated, arithmetic_uses)
-    inventory_cover = cover(inventory, ledger)
+    inventory_cover = cover(
+        inventory, ledger,
+        structural_context=coordinator_handoff["structural_context"],
+    )
     accepted_ids = {
         str(row.get("id") or "").strip() for row in validated if row.get("id")}
     presentation, presentation_problems = validate_presentation(
@@ -1375,7 +1785,10 @@ def main() -> int:
             1 for row in material_ledger
             if row.get("outcome") not in (None, "not_reached")
         ),
-        "semantic_status": semantic_status(ledger, validated),
+        "semantic_status": semantic_status(
+            ledger, validated,
+            error="coordinator handoff is invalid" if coordinator_problems else None,
+        ),
         "presentation": presentation,
         "presentation_problems": presentation_problems,
         "report_period": claims_meta.get("report_period"),
@@ -1384,6 +1797,8 @@ def main() -> int:
         "inventory_missing": inventory_cover["missing"],
         "extractor_checkable_fraction": inventory_cover["extractor_fraction"],
         "engine_checkable_fraction": inventory_cover["engine_fraction"],
+        "coordinator": coordinator_handoff,
+        "structural_context_count": len(coordinator_handoff["structural_context"]),
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(payload, indent=2) + "\n")

@@ -62,7 +62,7 @@ def _html_items(path: pathlib.Path) -> list[dict]:
     items: list[dict] = []
     seen: set[tuple] = set()
 
-    def add(kind: str, displayed: str, location: str, importance: str) -> None:
+    def add(kind: str, displayed: str, location: str) -> None:
         shown = re.sub(r"\s+", " ", displayed).strip()
         if not shown:
             return
@@ -75,7 +75,7 @@ def _html_items(path: pathlib.Path) -> list[dict]:
             "kind": kind,
             "displayed": shown,
             "location": location,
-            "importance": importance,
+            "importance": "unclassified",
             "quote": shown,
         })
 
@@ -85,7 +85,7 @@ def _html_items(path: pathlib.Path) -> list[dict]:
     for t_i, table in enumerate(tables.tables, start=1):
         for r_i, row in enumerate(table):
             for c_i, cell in enumerate(row):
-                add("table_cell", cell, f"table{t_i}/r{r_i + 1}/c{c_i + 1}", "material")
+                add("table_cell", cell, f"table{t_i}/r{r_i + 1}/c{c_i + 1}")
 
     class _Blocks(HTMLParser):
         BLOCKS = frozenset({
@@ -129,12 +129,12 @@ def _html_items(path: pathlib.Path) -> list[dict]:
     blocks.feed(raw)
     blocks.close()
     for index, shown in enumerate(blocks.blocks, 1):
-        add("html_block", shown, f"block{index}", "material")
+        add("html_block", shown, f"block{index}")
     return items
 
 
-def _bag_add(items: list, seen: set, kind: str, displayed: str, location: str,
-             importance: str = "material") -> None:
+def _bag_add(items: list, seen: set, kind: str, displayed: str,
+             location: str) -> None:
     shown = re.sub(r"\s+", " ", displayed).strip()
     if not shown:
         return
@@ -147,7 +147,7 @@ def _bag_add(items: list, seen: set, kind: str, displayed: str, location: str,
         "kind": kind,
         "displayed": shown,
         "location": location,
-        "importance": importance,
+        "importance": "unclassified",
         "quote": shown,
     })
 
@@ -162,7 +162,7 @@ def _md_items(path: pathlib.Path) -> list[dict]:
         shown = re.sub(r"^(?:#{1,6}|[-*])\s+", "", line).strip()
         if not shown:
             continue
-        _bag_add(items, seen, "md_line", shown, f"line{index}", "material")
+        _bag_add(items, seen, "md_line", shown, f"line{index}")
     return items
 
 
@@ -190,7 +190,7 @@ def _pdf_items(path: pathlib.Path) -> tuple[list[dict], str, str | None]:
             if not shown:
                 continue
             _bag_add(
-                items, seen, "pdf_line", shown, f"page{page_i}/line{line_i}", "material")
+                items, seen, "pdf_line", shown, f"page{page_i}/line{line_i}")
     visible = "\n".join(pages).strip()
     if not visible:
         return [], "", "no extractable PDF text"
@@ -243,7 +243,7 @@ def _xlsx_items(path: pathlib.Path) -> tuple[list[dict], str, str | None]:
                 lines.append(f"{sheet.title}!{cell.coordinate} {shown}")
                 _bag_add(
                     items, seen, "xlsx_cell", shown,
-                    f"{sheet.title}/{cell.coordinate}", "material")
+                    f"{sheet.title}/{cell.coordinate}")
     visible = "\n".join(lines)
     if not visible:
         return [], "", "no visible xlsx cells"
@@ -366,64 +366,102 @@ def claim_inventory_ids(claim: dict) -> list[str]:
     return []
 
 
-def cover(inventory: dict, claims: list) -> dict:
-    """Map material inventory items to claims by explicit inventory_ids.
-
-    Each material item is consumed at most once. No quote or value fuzzing is
-    used; only the ids supplied by the claim-taker establish coverage.
-    """
+def cover(inventory: dict, claims: list, *,
+          structural_context: list[dict] | None = None) -> dict:
+    """Reconcile explicit host classifications by inventory id only."""
     items = [
         item for item in (inventory.get("items") or [])
-        if item.get("importance") == "material"
+        if isinstance(item, dict)
     ]
     by_id = {str(item.get("id") or ""): item for item in items if item.get("id")}
     consumed: dict[str, dict] = {}
-    missing = []
-    accounted = 0
-    completed = 0
-    mapping = []
-    for claim in claims:
-        for iid in claim_inventory_ids(claim):
-            if iid in consumed:
-                continue
+    missing: list[dict] = []
+    mapping: list[dict] = []
+    assignments = list(claims) + list(structural_context or [])
+    for assignment in assignments:
+        assignment_id = str(
+            assignment.get("id")
+            or assignment.get("candidate_id")
+            or "structural_context"
+        )
+        classification = str(assignment.get("classification") or "")
+        outcome = assignment.get("outcome")
+        for iid in claim_inventory_ids(assignment):
             item = by_id.get(iid)
             if item is None:
-                continue
-            consumed[iid] = claim
-            accounted += 1
-            outcome = claim.get("outcome")
-            done = outcome in COMPLETED
-            if done:
-                completed += 1
-            else:
                 missing.append({
-                    "id": item.get("id"),
+                    "id": iid,
+                    "claim_id": assignment_id,
+                    "reason": "inventory id is not present",
+                })
+                continue
+            if iid in consumed:
+                missing.append({
+                    "id": iid,
                     "displayed": item.get("displayed"),
                     "location": item.get("location"),
-                    "claim_id": claim.get("id"),
-                    "outcome": outcome,
+                    "claim_id": assignment_id,
+                    "reason": "inventory id is consumed more than once",
+                })
+                continue
+            consumed[iid] = assignment
+            if (
+                item.get("importance") == "unclassified"
+                or item.get("classification") != classification
+            ):
+                missing.append({
+                    "id": iid,
+                    "displayed": item.get("displayed"),
+                    "location": item.get("location"),
+                    "claim_id": assignment_id,
+                    "reason": "inventory classification was not applied exactly",
                 })
             mapping.append({
-                "inventory_id": item.get("id"),
-                "claim_id": claim.get("id"),
+                "inventory_id": iid,
+                "claim_id": assignment_id,
+                "classification": classification,
                 "outcome": outcome,
             })
     for item in items:
         iid = str(item.get("id") or "")
         if iid and iid not in consumed:
             missing.append({
-                "id": item.get("id"),
+                "id": iid,
                 "displayed": item.get("displayed"),
                 "location": item.get("location"),
+                "reason": "inventory item has no host classification",
             })
-    n = len(items)
+    material_items = [
+        item for item in items
+        if item.get("classification") == "material_claim"
+        and item.get("importance") == "material"
+    ]
+    material_ids = {str(item.get("id") or "") for item in material_items}
+    accounted = sum(iid in consumed for iid in material_ids)
+    completed = sum(
+        iid in consumed and consumed[iid].get("outcome") in COMPLETED
+        for iid in material_ids
+    )
+    for iid in material_ids:
+        assignment = consumed.get(iid)
+        if assignment is not None and assignment.get("outcome") not in COMPLETED:
+            item = by_id[iid]
+            missing.append({
+                "id": iid,
+                "displayed": item.get("displayed"),
+                "location": item.get("location"),
+                "claim_id": assignment.get("id"),
+                "outcome": assignment.get("outcome"),
+                "reason": "material inventory item has no completed outcome",
+            })
+    n = len(material_items)
     return {
         "material": n,
         "accounted": accounted,
         "completed": completed,
         "missing": missing,
         "mapping": mapping,
-        "extractor_fraction": (accounted / n) if n else 0.0,
-        "engine_fraction": (completed / n) if n else 0.0,
+        "extractor_fraction": (accounted / n) if n else 1.0,
+        "engine_fraction": (completed / n) if n else 1.0,
         "inventory_complete": bool(inventory.get("complete")),
     }

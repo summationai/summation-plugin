@@ -60,6 +60,7 @@ class RoutingTests(unittest.TestCase):
             self.assertNotIn(needle, blob, needle)
         self.assertIn("grade-artifact.html", local)
         self.assertIn("Zero Summation login for the local grade", local)
+        self.assertIn("prompt that forbids questions cannot prove", local)
         self.assertNotIn("run the `validate` skill", local)
         self.assertIn("Do not start that path during the local grade", local)
 
@@ -102,21 +103,55 @@ class RoutingTests(unittest.TestCase):
         contract = json.loads(
             (SKILLS / "verify" / "references" / "role-contracts.json").read_text()
         )
-        claim_output = contract["claim_taker"]["output"]["claim_required"]
+        claim_output = contract["claim_taker"]["output"]["candidate_required"]
+        coordinator_input = contract["coordinator"]["input"]["candidate_required"]
         verifier_input = contract["evidence_verifier"]["input"]["claim_required"]
-        self.assertEqual(claim_output, verifier_input)
-        self.assertIn("public_label", claim_output)
+        coordinator_output = contract["coordinator"]["output"]["claim_required"]
+        self.assertEqual(claim_output, coordinator_input)
+        self.assertEqual(coordinator_output, verifier_input)
+        self.assertIn(
+            "public_label",
+            contract["claim_taker"]["output"]["material_claim_required"],
+        )
+        self.assertIn(
+            "reason",
+            contract["claim_taker"]["output"]["structural_context_required"],
+        )
         self.assertEqual(
             contract["claim_taker"]["input"]["inventory_item_required"],
-            ["id", "displayed", "location"],
+            ["id", "displayed", "location", "importance"],
+        )
+        self.assertIn(
+            "severity",
+            contract["evidence_verifier"]["output"]["check_required"],
         )
         native = contract["routes"]["native_subagents"]
         sequential = contract["routes"]["sequential"]
         self.assertTrue(native["primary"])
         self.assertFalse(sequential["primary"])
+        self.assertEqual(
+            native["stages"],
+            ["claim_taker", "coordinator", "evidence_verifier"],
+        )
         self.assertEqual(native["stages"], sequential["stages"])
         self.assertEqual(native["input_contracts"], sequential["input_contracts"])
         self.assertEqual(native["output_contracts"], sequential["output_contracts"])
+        self.assertEqual(
+            contract["evidence_verifier"]["input"]["claims_from"],
+            "coordinator.output.canonical_claims",
+        )
+        final_merge = contract["coordinator"]["final_merge"]
+        self.assertEqual(
+            final_merge["input"]["required"],
+            ["canonical_claims", "evidence_verifier_results"],
+        )
+        self.assertIn(
+            "presentation", final_merge["output"]["required"])
+        self.assertEqual(
+            final_merge["output"]["action_required"],
+            ["id", "text", "report_quote", "check_ids"],
+        )
+        self.assertIn("`presentation.actions` in the final merge", roles)
         live_status = contract["mechanical_outputs"]["verification.live_source"]
         self.assertEqual(live_status["input"], "accepted sources[].kind")
         self.assertEqual(

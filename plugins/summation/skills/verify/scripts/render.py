@@ -19,6 +19,28 @@ ROOT_VERDICTS = frozenset({
     "safe_to_share", "share_with_caveats", "fix_first", "unable_to_grade",
 })
 SOURCE_KINDS = frozenset({"supplied_file", "live_tool"})
+ROOT_LABELS = {
+    "safe_to_share": "Safe to share",
+    "share_with_caveats": "Share with caveats",
+    "fix_first": "Fix before sharing",
+    "unable_to_grade": "Unable to grade",
+}
+DISPOSITION_LABELS = {
+    "confirmed": "Confirmed",
+    "contradicted": "Contradicted",
+    "not_checkable": "Not checkable",
+    "changed_since_report": "Changed since the report",
+}
+SOURCE_KIND_LABELS = {
+    "supplied_file": "Supplied file",
+    "live_tool": "Live source",
+}
+ROOT_TONES = {
+    "safe_to_share": "safe",
+    "share_with_caveats": "warn",
+    "fix_first": "fix",
+    "unable_to_grade": "neutral",
+}
 REQUIRED = (
     "schema_version", "run_id", "generated_at", "source", "source_result",
     "verdict", "score", "findings", "evidence_checks", "evidence_findings",
@@ -64,6 +86,13 @@ _VERIFICATION_STATUSES = frozenset({
     "complete", "partial", "failed", "not_available", "not_requested",
     "not_run", "skipped",
 })
+
+
+def _fixed_label(mapping: dict[str, str], value: str, kind: str) -> str:
+    try:
+        return mapping[value]
+    except KeyError as exc:
+        raise SystemExit(f"render: unsupported {kind} {value!r}") from exc
 
 
 def _valid_iso_time(value) -> bool:
@@ -285,6 +314,9 @@ def _public_layer2(rows, *, sources: list[dict] | None = None) -> list[dict]:
             raise SystemExit(f"render: unsupported disposition {verdict!r}")
         if basis not in {"report", "evidence"}:
             raise SystemExit("render: accepted check basis is invalid")
+        severity = raw.get("severity")
+        if severity not in {None, "high", "medium", "low"}:
+            raise SystemExit("render: accepted check severity is invalid")
         receipt = raw.get("public_receipt")
         if not _publishable_receipt(
             receipt, verdict=verdict, basis=basis, source_ids=source_ids
@@ -294,7 +326,7 @@ def _public_layer2(rows, *, sources: list[dict] | None = None) -> list[dict]:
         row["id"] = check_id
         row["verdict"] = verdict
         row["basis"] = basis
-        row["severity"] = raw.get("severity") if verdict == "contradicted" else None
+        row["severity"] = severity
         row["public_receipt"] = json.loads(json.dumps(receipt))
         seen.add(check_id)
         out.append(row)
@@ -321,6 +353,37 @@ def _serialize_claim(row: dict) -> dict:
         out["check_id"] = None
     if not supporting and out.get("outcome") not in DISPOSITIONS:
         raise SystemExit("render: material claim has no accepted disposition")
+    return out
+
+
+def _public_actions(guidance: dict | None, *, check_ids: set[str]) -> list[dict]:
+    """Copy accepted host actions without authoring or rewriting their meaning."""
+    if not isinstance(guidance, dict):
+        raise SystemExit("render: accepted presentation is required")
+    proposed = guidance.get("actions")
+    if not isinstance(proposed, list) or not proposed:
+        raise SystemExit("render: accepted presentation needs at least one action")
+    out = []
+    seen: set[str] = set()
+    for raw in proposed:
+        if not isinstance(raw, dict):
+            raise SystemExit("render: accepted presentation action is not an object")
+        action_id = str(raw.get("id") or "")
+        text = str(raw.get("text") or "")
+        report_quote = str(raw.get("report_quote") or "")
+        cited = raw.get("check_ids")
+        if not re.fullmatch(r"A[0-9]+", action_id) or action_id in seen:
+            raise SystemExit("render: accepted presentation action id is invalid or duplicated")
+        if not _publishable_text(text) or not _publishable_text(report_quote):
+            raise SystemExit("render: accepted presentation action text is not publishable")
+        if (
+            not isinstance(cited, list)
+            or not cited
+            or any(str(value) not in check_ids for value in cited)
+        ):
+            raise SystemExit("render: accepted presentation action check ids are invalid")
+        out.append({"id": action_id, "text": text, "report_quote": report_quote})
+        seen.add(action_id)
     return out
 
 
@@ -463,7 +526,6 @@ def _serialize_verification(raw: dict, *, sources: list[dict]) -> dict:
 def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
                            layer2: list[dict] | None = None,
                            guidance: dict | None = None) -> dict:
-    del guidance
     if not isinstance(raw, dict):
         raise SystemExit("render: input is not a JSON object")
     retained_sources = _public_sources(raw.get("sources") or [])
@@ -473,6 +535,7 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
     material_public_checks = [
         row for row in public_checks if row.get("importance") == "material"]
     by_id = {row["id"]: row for row in material_public_checks}
+    actions = _public_actions(guidance, check_ids=set(by_id))
     if chosen != set(by_id):
         raise SystemExit("render: material claim and accepted check ids do not reconcile")
     for claim in material_claims:
@@ -508,7 +571,7 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
         ],
         "evidence_coverage": _evidence_coverage(raw, public_checks, retained_sources),
         "decision": None,
-        "actions": [],
+        "actions": actions,
         "decision_limits": [],
         "diagnostics": [],
         "checks": {
@@ -521,7 +584,10 @@ def artifact_from_findings(raw: dict, *, run_id: str, generated_at: str,
         "verification": verification,
         "limitations": [],
         "offer": {"text": "", "accepted": None},
-        "claims": [_serialize_claim(row) for row in (raw.get("claims") or [])],
+        "claims": [
+            _serialize_claim(row) for row in (raw.get("claims") or [])
+            if row.get("classification") != "structural_context"
+        ],
         "sources": retained_sources,
     }
     validate_artifact(artifact)
@@ -552,104 +618,262 @@ def _display(value) -> str:
     return str(value)
 
 
+def _display_date(value: str, *, field: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise SystemExit(f"render: {field} is not an ISO date or timestamp") from exc
+    return f"{parsed.strftime('%B')} {parsed.day}, {parsed.year}"
+
+
+def _card_html(check: dict, claim: dict, sources: dict[str, dict], *,
+               prominence: str) -> str:
+    receipt = check["public_receipt"]
+    report_operand = receipt["report_operand"]
+    disposition = _fixed_label(
+        DISPOSITION_LABELS, str(check["verdict"]), "disposition")
+    operands = [
+        '<div class="operand receipt-row" data-operand-role="report">'
+        f'<strong class="operand-label">{html.escape(report_operand["label"])}</strong>'
+        f'<span class="value">{html.escape(_display(report_operand["value"]))}</span>'
+        f'<span class="location">{html.escape(report_operand["location"])}</span>'
+        "</div>"
+    ]
+    for row in receipt.get("decisive_operands") or []:
+        operands.append(
+            '<div class="operand receipt-row" data-operand-role="decisive">'
+            f'<strong class="operand-label">{html.escape(row["label"])}</strong>'
+            f'<span class="value">{html.escape(_display(row["value"]))}</span>'
+            f'<span class="location">{html.escape(row["location"])}</span>'
+            "</div>"
+        )
+    calculation = ""
+    if receipt.get("calculation"):
+        expression = html.escape(receipt["calculation"]["expression"])
+        result = html.escape(_display(receipt["calculation"]["result"]))
+        calculation = (
+            '<div class="calculation"><span class="receipt-key">Calculation</span>'
+            f'<span class="calculation-line">{expression} = {result}</span></div>'
+        )
+    reconstruction = ""
+    if receipt.get("reconstruction_attempt"):
+        reconstruction = (
+            '<div class="reconstruction-attempt">'
+            '<span class="receipt-key">Reconstruction attempt</span>'
+            f'<p>{html.escape(receipt["reconstruction_attempt"])}</p></div>'
+        )
+    source_html = ""
+    source_id = str(receipt.get("source_id") or "")
+    if source_id:
+        source = sources.get(source_id)
+        if source is None:
+            raise SystemExit(f"render: card source {source_id!r} is not retained")
+        source_kind = _fixed_label(
+            SOURCE_KIND_LABELS, str(source["kind"]), "source kind")
+        retrieval = ""
+        if source["kind"] == "live_tool":
+            retrieval = (
+                '<span class="source-time">Retrieved '
+                f'{html.escape(source["retrieval"]["retrieved_at"])}</span>'
+            )
+        source_html = (
+            '<div class="card-source">'
+            '<span class="receipt-key">Source</span>'
+            f'<strong>{html.escape(source["label"])}</strong>'
+            f'<code>{html.escape(source["evidence_file"])}</code>'
+            f'<span>{html.escape(source_kind)}</span>{retrieval}</div>'
+        )
+    return (
+        '<article class="material-card" '
+        f'data-card-id="{html.escape(check["id"])}" '
+        f'data-disposition="{html.escape(check["verdict"])}" '
+        f'data-prominence="{html.escape(prominence)}">'
+        f'<span class="tag">{html.escape(disposition)}</span>'
+        f'<h3>{html.escape(report_operand["label"])}</h3>'
+        f'<div class="where">{html.escape(report_operand["location"])}</div>'
+        f'<blockquote class="claim-quote">{html.escape(claim["quote"])}</blockquote>'
+        '<div class="receipt"><h4>Receipt</h4>'
+        f'{"".join(operands)}{calculation}'
+        '<div class="receipt-explanation"><span class="receipt-key">Explanation</span>'
+        f'<p>{html.escape(receipt["explanation"])}</p></div>'
+        f'{reconstruction}{source_html}</div>'
+        "</article>"
+    )
+
+
+def _outcome_section(verdict: str, cards: list[str], *,
+                     technical_confirmed: int = 0) -> str:
+    if not cards:
+        return ""
+    label = _fixed_label(DISPOSITION_LABELS, verdict, "disposition")
+    count = len(cards)
+    noun = "outcome" if count == 1 else "outcomes"
+    technical = ""
+    if verdict == "confirmed" and technical_confirmed:
+        technical_noun = "outcome" if technical_confirmed == 1 else "outcomes"
+        verb = "is" if technical_confirmed == 1 else "are"
+        technical = (
+            '<p class="sectionlede technical-note">'
+            f'{technical_confirmed} lower-priority confirmed {technical_noun} '
+            f'{verb} available under Technical detail.</p>'
+        )
+    return (
+        f'<section class="outcome-section" data-outcome-section="{html.escape(verdict)}">'
+        f'<h2>{html.escape(label)}</h2>'
+        f'<p class="sectionlede">{count} {html.escape(label.lower())} {noun}.</p>'
+        f'{"".join(cards)}{technical}</section>'
+    )
+
+
 def html_of(artifact: dict) -> str:
-    """Render only accepted receipt fields, retained source labels, and enum tokens."""
+    """Lay accepted public fields into the locked customer hierarchy."""
     validate_artifact(artifact)
     sources = {str(row["id"]): row for row in artifact["sources"]}
-    material_ids = {
-        str(row.get("check_id") or "") for row in artifact["claims"]
+    claims_by_check = {
+        str(row.get("check_id") or ""): row for row in artifact["claims"]
         if row.get("classification") != "supporting_provenance"
         and row.get("importance") != "supporting"
     }
-    cards = []
+    prominent: dict[str, list[str]] = {key: [] for key in DISPOSITIONS}
+    technical_confirmed: list[str] = []
     for check in artifact["evidence_checks"]:
-        if check["id"] not in material_ids:
+        claim = claims_by_check.get(str(check["id"]))
+        if claim is None:
             continue
-        receipt = check["public_receipt"]
-        report_operand = receipt["report_operand"]
-        operands = [
-            (
-                '<div class="operand" data-operand-role="report">'
-                f'<strong>{html.escape(report_operand["label"])}</strong>'
-                f'<span class="value">{html.escape(_display(report_operand["value"]))}</span>'
-                f'<span class="location">{html.escape(report_operand["location"])}</span>'
-                "</div>"
-            )
-        ]
-        for row in receipt.get("decisive_operands") or []:
-            operands.append(
-                '<div class="operand" data-operand-role="decisive">'
-                f'<strong>{html.escape(row["label"])}</strong>'
-                f'<span class="value">{html.escape(_display(row["value"]))}</span>'
-                f'<span class="location">{html.escape(row["location"])}</span>'
-                "</div>"
-            )
-        calculation = ""
-        if receipt.get("calculation"):
-            calculation = (
-                '<p class="calculation">'
-                f'{html.escape(receipt["calculation"]["expression"])} = '
-                f'{html.escape(_display(receipt["calculation"]["result"]))}'
-                "</p>"
-            )
-        reconstruction = ""
-        if receipt.get("reconstruction_attempt"):
-            reconstruction = (
-                '<p class="reconstruction-attempt">'
-                f'{html.escape(receipt["reconstruction_attempt"])}'
-                "</p>"
-            )
-        source = ""
-        source_id = str(receipt.get("source_id") or "")
-        if source_id:
-            row = sources[source_id]
-            source = (
-                f'<div class="source" data-source-id="{html.escape(source_id)}">'
-                f'<span>{html.escape(row["label"])}</span>'
-                f'<code>{html.escape(row["kind"])}</code>'
-                "</div>"
-            )
-        cards.append(
-            '<article class="material-card" '
-            f'data-card-id="{html.escape(check["id"])}" '
-            f'data-disposition="{html.escape(check["verdict"])}">'
-            f'<h2>{html.escape(report_operand["label"])}</h2>'
-            f'{"".join(operands)}'
-            f'{calculation}'
-            f'<p class="explanation">{html.escape(receipt["explanation"])}</p>'
-            f'{reconstruction}{source}'
-            "</article>"
+        is_technical = (
+            check["verdict"] == "confirmed"
+            and check.get("severity") not in {"high", "medium"}
         )
+        placement = "technical" if is_technical else "prominent"
+        card = _card_html(check, claim, sources, prominence=placement)
+        if is_technical:
+            technical_confirmed.append(card)
+        else:
+            prominent[check["verdict"]].append(card)
+
     counts = artifact["evidence_coverage"]
-    count_nodes = "".join(
-        f'<li data-count-for="{name}"><code>{name}</code><span>{counts[name]}</span></li>'
-        for name in (
-            "confirmed", "contradicted", "not_checkable", "changed_since_report"
+    stat_order = (
+        ("contradicted", "red"),
+        ("confirmed", "green"),
+        ("changed_since_report", "amber"),
+        ("not_checkable", "gray"),
+    )
+    stats = "".join(
+        f'<div class="stat {tone}" data-count-for="{html.escape(verdict)}">'
+        f'<div class="n num">{counts[verdict]}</div>'
+        f'<div class="l">{html.escape(_fixed_label(DISPOSITION_LABELS, verdict, "disposition"))}</div>'
+        '<div class="s">material outcomes</div></div>'
+        for verdict, tone in stat_order
+    )
+    sections = "".join(
+        _outcome_section(
+            verdict,
+            prominent[verdict],
+            technical_confirmed=len(technical_confirmed),
+        )
+        for verdict in (
+            "contradicted", "confirmed", "changed_since_report", "not_checkable"
         )
     )
-    source_nodes = "".join(
-        f'<li data-source-id="{html.escape(row["id"])}">'
-        f'<span>{html.escape(row["label"])}</span><code>{html.escape(row["kind"])}</code></li>'
-        for row in artifact["sources"]
+    source = artifact["source"]
+    filename = str(source["path"])
+    generated = _display_date(artifact["generated_at"], field="generated_at")
+    period = str(source.get("period_label") or "Not stated")
+    report_date = (
+        _display_date(str(source["report_date"]), field="source.report_date")
+        if source.get("report_date") else "Not stated"
     )
+    root_verdict = str(artifact["verdict"])
+    root_label = _fixed_label(ROOT_LABELS, root_verdict, "root verdict")
+    root_tone = _fixed_label(ROOT_TONES, root_verdict, "root tone")
+    material_total = int(counts["validated_outcomes"])
+    material_noun = "outcome" if material_total == 1 else "outcomes"
+    count_sentence = (
+        f'This review covers {material_total} material {material_noun}: '
+        f'{counts["confirmed"]} confirmed, {counts["contradicted"]} contradicted, '
+        f'{counts["not_checkable"]} not checkable, and '
+        f'{counts["changed_since_report"]} changed since the report.'
+    )
+    live_ran = artifact["verification"]["live_source"]["status"] == "complete"
+    live_text = "Ran" if live_ran else "Did not run"
+    technical_cards = (
+        '<div class="technical-cards">' + "".join(technical_confirmed) + "</div>"
+        if technical_confirmed else '<div class="technical-cards"></div>'
+    )
+    cited = len({
+        str((row.get("public_receipt") or {}).get("source_id") or "")
+        for row in artifact["evidence_checks"]
+        if (row.get("public_receipt") or {}).get("source_id")
+    })
+    actions = artifact.get("actions") or []
+    if not actions:
+        raise SystemExit("render: accepted customer action is missing")
+    if len(actions) == 1:
+        next_content = html.escape(actions[0]["text"])
+    else:
+        next_content = "<ul>" + "".join(
+            f'<li>{html.escape(row["text"])}</li>' for row in actions
+        ) + "</ul>"
+    receipt_noun = "receipt" if material_total == 1 else "receipts"
+    css = """
+:root{--ink:#191b1e;--ink-2:#4b5158;--ink-3:#787f87;--paper:#fdfdfc;--panel:#f4f4f1;--line:#e3e3de;--red:#b42318;--red-soft:#fdf0ee;--green:#1a7f4b;--green-soft:#eef7f1;--amber:#9a5b0b;--amber-soft:#fbf4e8;--gray:#5d646c;--gray-soft:#f0f1f2}
+*{box-sizing:border-box;margin:0;padding:0;min-width:0}
+html{-webkit-text-size-adjust:100%;overflow-x:hidden}
+body{font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--ink);background:var(--paper);padding:0 24px 64px;overflow-x:hidden}
+.page{width:100%;max-width:730px;margin:0 auto}.num{font-variant-numeric:tabular-nums}
+header{display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;padding:24px 0 14px;border-bottom:1px solid var(--line)}
+.wordmark{font-weight:700;font-size:15px}.wordmark span{color:var(--ink-3);font-weight:500}.runmeta{font-size:13px;color:var(--ink-3)}
+.verdict{padding:40px 0 8px}.chip{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.06em;padding:4px 10px;border-radius:4px;margin-bottom:14px}
+.chip.fix{background:var(--red-soft);color:var(--red);border:1px solid #ecc8c3}.chip.safe{background:var(--green-soft);color:var(--green);border:1px solid #c6e2d2}.chip.warn{background:var(--amber-soft);color:var(--amber);border:1px solid #ecd9b8}.chip.neutral{background:var(--gray-soft);color:var(--gray);border:1px solid var(--line)}
+h1{font-size:31px;line-height:1.15;letter-spacing:-.015em;font-weight:700;max-width:30ch;text-wrap:balance}.verdict p{margin-top:12px;font-size:16px;color:var(--ink-2);max-width:62ch;text-wrap:pretty}
+.file{font-size:13px;color:var(--ink-3);margin-top:16px;display:flex;gap:6px 14px;flex-wrap:wrap}.file code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel);padding:2px 6px;border-radius:4px;color:var(--ink-2);overflow-wrap:anywhere}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:30px 0 0;background:#fff}
+.stat{padding:16px 18px 14px;border-left:1px solid var(--line)}.stat:first-child{border-left:none}.stat .n{font-size:26px;font-weight:700;letter-spacing:-.02em}.stat .l{font-size:13px;font-weight:600;margin-top:2px}.stat .s{font-size:12px;color:var(--ink-3);margin-top:2px;text-wrap:balance}.stat.red .l{color:var(--red)}.stat.green .l{color:var(--green)}.stat.amber .l{color:var(--amber)}.stat.gray .l{color:var(--gray)}
+section{margin-top:44px}h2{font-size:18px;letter-spacing:-.01em;margin-bottom:6px}.sectionlede{font-size:14px;color:var(--ink-2);margin-bottom:16px;max-width:62ch}.technical-note{margin:12px 0 0}
+.material-card{width:100%;border:1px solid var(--line);border-left:3px solid var(--gray);border-radius:8px;background:#fff;padding:20px 22px;overflow-wrap:anywhere;break-inside:avoid;page-break-inside:avoid}.material-card+.material-card{margin-top:12px}
+.material-card[data-disposition="contradicted"]{border-left-color:var(--red)}.material-card[data-disposition="confirmed"]{border-left-color:var(--green)}.material-card[data-disposition="changed_since_report"]{border-left-color:var(--amber)}
+.tag{font-size:11.5px;font-weight:700;letter-spacing:.06em;border-radius:4px;display:inline-block;padding:3px 8px;margin-bottom:10px;background:var(--gray-soft);color:var(--gray)}
+.material-card[data-disposition="contradicted"] .tag{background:var(--red-soft);color:var(--red)}.material-card[data-disposition="confirmed"] .tag{background:var(--green-soft);color:var(--green)}.material-card[data-disposition="changed_since_report"] .tag{background:var(--amber-soft);color:var(--amber)}
+.material-card h3{font-size:16px;text-wrap:balance}.where{font-size:13px;color:var(--ink-3);margin-top:2px;overflow-wrap:anywhere;word-break:break-word}.claim-quote{font-size:14px;color:var(--ink-2);margin-top:12px;padding-left:12px;border-left:2px solid var(--line);white-space:normal;overflow-wrap:anywhere}
+.receipt{margin-top:16px;border-top:1px dashed var(--line);padding-top:12px}.receipt h4{font-size:13px;margin-bottom:8px}.operand{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.65fr) minmax(0,1.5fr);gap:8px 14px;padding:7px 0;font-size:13px;align-items:start}.operand+.operand{border-top:1px solid var(--line)}.operand-label{font-weight:600}.value{font-variant-numeric:tabular-nums;font-weight:600}.location{color:var(--ink-3);overflow-wrap:anywhere;word-break:break-word;white-space:normal}
+.receipt-key{display:block;color:var(--ink-3);font-size:12px;font-weight:600}.calculation,.receipt-explanation,.reconstruction-attempt,.card-source{margin-top:12px;font-size:13px}.calculation-line{display:block;margin-top:3px;font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.receipt-explanation p,.reconstruction-attempt p{margin-top:3px;color:var(--ink-2);max-width:62ch}.card-source{display:flex;gap:5px 10px;align-items:baseline;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px}.card-source .receipt-key{width:100%}.card-source code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel);padding:1px 5px;border-radius:3px;overflow-wrap:anywhere}.source-time{color:var(--ink-3)}
+.scope{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 26px;margin-top:8px;font-size:13px}.scope div{color:var(--ink-3);text-wrap:pretty}.scope b{display:block;color:var(--ink);font-weight:600;font-size:13.5px}
+.next{margin-top:34px;background:var(--panel);border-radius:8px;padding:16px 20px;font-size:14px;color:var(--ink-2)}.next b{color:var(--ink)}
+details{margin-top:26px;font-size:13px;color:var(--ink-3)}details summary{cursor:pointer;font-weight:600;color:var(--ink-2)}.technical-cards{margin-top:14px}.technical-cards:empty{display:none}
+footer{margin-top:52px;border-top:1px solid var(--line);padding-top:18px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink-3)}
+@media(max-width:40rem){body{padding:0 16px 48px}.verdict{padding-top:30px}h1{font-size:27px}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.stat{border-top:1px solid var(--line)}.stat:nth-child(-n+2){border-top:none}.stat:nth-child(3){border-left:none}.material-card{padding:18px 16px}.operand{grid-template-columns:minmax(0,1fr);gap:2px}.operand .value{margin-top:2px}.operand .location{margin-top:2px}.scope{grid-template-columns:minmax(0,1fr)}}
+@media print{body{padding:0;background:#fff}.material-card,.stats{break-inside:avoid;page-break-inside:avoid}.next{border:1px solid var(--line)}details.technical-detail>summary{display:none}details.technical-detail:not([open])>.technical-cards{display:block!important}footer{margin-top:28px}}
+"""
     return (
-        "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>grade-artifact</title><style>"
-        "body{font-family:system-ui,sans-serif;max-width:70rem;margin:2rem auto;padding:0 1rem}"
-        ".counts,.sources{display:flex;gap:1rem;flex-wrap:wrap;list-style:none;padding:0}"
-        ".counts li,.sources li{display:flex;gap:.5rem}"
-        ".material-card{border:1px solid #bbb;border-radius:.5rem;padding:1rem;margin:1rem 0}"
-        ".operand{display:grid;grid-template-columns:minmax(12rem,1fr) 1fr 2fr;gap:1rem;padding:.35rem 0}"
-        ".source{display:flex;gap:.5rem}.calculation{font-family:ui-monospace,monospace}"
-        "</style></head>"
-        f'<body><main data-schema-version="{SCHEMA_VERSION}" '
-        f'data-verdict="{html.escape(artifact["verdict"])}">'
-        f'<code class="verdict">{html.escape(artifact["verdict"])}</code>'
-        f'<ul class="counts">{count_nodes}</ul>'
-        f'<section class="material-cards">{"".join(cards)}</section>'
-        f'<ul class="sources">{source_nodes}</ul>'
-        "</main></body></html>\n"
+        '<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<title>Verification: {html.escape(filename)}</title><style>{css}</style></head>'
+        f'<body><main class="page" data-schema-version="{SCHEMA_VERSION}" '
+        f'data-verdict="{html.escape(root_verdict)}">'
+        '<header><div class="wordmark">Summation <span>/ Verify</span></div>'
+        f'<div class="runmeta num">Generated {html.escape(generated)}</div></header>'
+        '<div class="verdict">'
+        f'<span class="chip {html.escape(root_tone)}">Verification result</span>'
+        f'<h1>{html.escape(root_label)}</h1>'
+        f'<p>{html.escape(count_sentence)}</p>'
+        '<div class="file">'
+        f'<span>Report examined: <code>{html.escape(filename)}</code></span>'
+        f'<span>Period: {html.escape(period)}</span>'
+        f'<span>Report date: {html.escape(report_date)}</span></div></div>'
+        f'<div class="stats" role="group" aria-label="Verification results">{stats}</div>'
+        f'{sections}'
+        '<section class="technical-scope"><h2>Technical scope</h2><div class="scope">'
+        f'<div><b>Material outcomes</b>{material_total} accepted {receipt_noun}</div>'
+        f'<div><b>Retained sources</b>{len(artifact["sources"])} retained; {cited} cited</div>'
+        f'<div><b>Live source</b>{html.escape(live_text)}</div>'
+        f'<div><b>Report format</b>{html.escape(source["format"])}</div>'
+        '</div></section>'
+        f'<div class="next"><b>Next:</b> {next_content}</div>'
+        '<details class="technical-detail"><summary>Technical detail</summary>'
+        f'{technical_cards}</details>'
+        '<footer><div>Checked by Summation Verify</div>'
+        f'<div class="num">Run {html.escape(artifact["run_id"])} · {html.escape(generated)}</div>'
+        '</footer></main></body></html>\n'
     )
 
 
@@ -682,6 +906,11 @@ def ungraded_reason(raw: dict, has_receipts: bool,
         return "accepted receipt ledger contains discarded rows"
     if receipts.get("discarded_sources"):
         return "retained source metadata did not validate"
+    if receipts.get("presentation_problems"):
+        return "accepted customer presentation did not validate"
+    presentation = receipts.get("presentation")
+    if not isinstance(presentation, dict) or not presentation.get("actions"):
+        return "accepted customer presentation is missing an action"
     inventory = raw.get("inventory") or {}
     if not inventory.get("complete"):
         return "report inventory is incomplete"
@@ -799,7 +1028,8 @@ def main() -> int:
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         artifact = artifact_from_findings(
-            raw, run_id=run_id, generated_at=generated_at, layer2=checks)
+            raw, run_id=run_id, generated_at=generated_at, layer2=checks,
+            guidance=receipts.get("presentation"))
         page = html_of(artifact)
         from artifact_audit import audit_public_artifact  # noqa: E402
         problems = audit_public_artifact(artifact, page)

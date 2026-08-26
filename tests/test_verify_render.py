@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import html as html_lib
 import importlib.util
 import json
 import pathlib
@@ -68,7 +69,7 @@ def public_receipt(label: str, report_value, *, source_id: str | None = "status-
 
 
 def accepted_check(index: int, verdict: str = "confirmed", *,
-                   basis: str = "evidence") -> dict:
+                   basis: str = "evidence", severity: str | None = None) -> dict:
     label = f"Reported metric {index}"
     receipt = public_receipt(label, index, source_id=(
         "status-snapshot" if basis == "evidence" else None))
@@ -110,7 +111,10 @@ def accepted_check(index: int, verdict: str = "confirmed", *,
         "basis": basis,
         "verdict": verdict,
         "importance": "material",
-        "severity": "high" if verdict == "contradicted" else None,
+        "severity": (
+            severity if severity is not None
+            else "high" if verdict == "contradicted" else None
+        ),
         "public_receipt": receipt,
     }
 
@@ -184,12 +188,23 @@ def raw_for(checks: list[dict], *, sources: list[dict] | None = None,
     }
 
 
+def guidance_for(checks: list[dict], *, text: str | None = None) -> dict:
+    return {
+        "actions": [{
+            "id": "A1",
+            "text": text or "Review the material receipts before sharing the report.",
+            "report_quote": "Visible report claim 1.",
+            "check_ids": [checks[0]["id"]],
+        }],
+    }
+
+
 def make_artifact(checks: list[dict], *, sources: list[dict] | None = None,
                   supporting: bool = False) -> dict:
     raw = raw_for(checks, sources=sources, supporting=supporting)
     return render.artifact_from_findings(
         raw, run_id="unit-render", generated_at="2026-08-25T13:10:00Z",
-        layer2=checks,
+        layer2=checks, guidance=guidance_for(checks),
     )
 
 
@@ -216,7 +231,7 @@ class PublicLayerTests(unittest.TestCase):
             "evidence_heading", "_verification_public", "location_line",
             "public_explanation", "_public_claim", "_combined_verdict",
             "public_verdict", "customer_verdict", "CONFIRM_CARDS",
-            "GROUNDED_OUTCOMES",
+            "GROUNDED_OUTCOMES", "ROOT_PRESENTATION", "SECTION_PRESENTATION",
         ):
             self.assertFalse(hasattr(render, name), name)
 
@@ -315,6 +330,7 @@ class LedgerTests(unittest.TestCase):
         art = render.artifact_from_findings(
             raw, run_id="machine", generated_at="2026-08-25T13:10:00Z",
             layer2=[accepted_check(1, "contradicted")],
+            guidance=guidance_for([accepted_check(1, "contradicted")]),
         )
         self.assertEqual(art["findings"], [])
         self.assertEqual(art["diagnostics"], [])
@@ -347,7 +363,7 @@ class HtmlTests(unittest.TestCase):
             self.assertEqual(page.count(f'data-card-id="{check["id"]}"'), 1)
             tag = next(tag for tag in tags if f'data-card-id="{check["id"]}"' in tag)
             self.assertEqual(tag.count(f'data-disposition="{check["verdict"]}"'), 1)
-        self.assertEqual(page.count("data-disposition="), len(checks))
+        self.assertEqual(sum(tag.count("data-disposition=") for tag in tags), len(checks))
         self.assertEqual(audit._card_identity_problems(art, page), [])
 
     def test_missing_duplicate_or_mismatched_card_identity_fails(self) -> None:
@@ -366,8 +382,99 @@ class HtmlTests(unittest.TestCase):
         for mutated in mutations:
             self.assertTrue(audit._card_identity_problems(art, mutated))
 
-    def test_html_shows_exact_receipt_fields_and_no_public_fallback_sentences(self) -> None:
-        check = accepted_check(1)
+    def test_customer_law_audit_rejects_visible_protocol_tokens_and_flat_page(self) -> None:
+        art = make_artifact([
+            accepted_check(1, "confirmed", severity="high"),
+            accepted_check(2, "contradicted"),
+        ])
+        page = render.html_of(art)
+        self.assertEqual(audit._customer_html_problems(art, page), [])
+        for mutation in (
+            page.replace("Summation", "safe_to_share Summation", 1),
+            page.replace("Verification: report.md", "grade-artifact", 1),
+            page.replace('class="tag"', 'class="missing-tag"', 1),
+            page.replace('class="next"', 'class="not-next"', 1),
+        ):
+            self.assertTrue(audit._customer_html_problems(art, mutation))
+
+    def test_customer_hierarchy_uses_fixed_plain_english_labels(self) -> None:
+        checks = [
+            accepted_check(1, "confirmed", severity="high"),
+            accepted_check(2, "confirmed"),
+            accepted_check(3, "contradicted"),
+            accepted_check(4, "not_checkable"),
+            accepted_check(5, "changed_since_report"),
+        ]
+        raw = raw_for(checks)
+        raw["source"]["period_label"] = "Week ending April 4, 2026"
+        raw["source"]["report_date"] = "2026-04-04"
+        art = render.artifact_from_findings(
+            raw, run_id="customer-laws", generated_at="2026-08-25T13:10:00Z",
+            layer2=checks, guidance=guidance_for(checks),
+        )
+        page = render.html_of(art)
+        visible = html_lib.unescape(re.sub(
+            r"<(?:style|script)[^>]*>.*?</(?:style|script)>|<[^>]+>",
+            " ", page, flags=re.I | re.S,
+        ))
+        self.assertIn("<title>Verification: report.md</title>", page)
+        for text in (
+            "Summation <span>/ Verify</span>", "Fix before sharing",
+            "Verification results", "Contradicted", "Confirmed",
+            "Changed since the report", "Not checkable",
+            "Report examined:", "report.md", "Week ending April 4, 2026",
+            "Generated August 25, 2026", "Next:", "Technical detail",
+            "Technical scope",
+        ):
+            self.assertIn(text, page)
+        self.assertEqual(page.count('class="next"'), 1)
+        for token in (
+            "safe_to_share", "share_with_caveats", "fix_first",
+            "unable_to_grade", "live_tool", "supplied_file",
+            "not_checkable", "changed_since_report", "not_run",
+            "Layer 1", "Layer 2",
+        ):
+            self.assertNotIn(token, visible)
+
+    def test_next_action_is_exact_host_copy_not_a_python_template(self) -> None:
+        check = accepted_check(1, severity="high")
+        action = "Correct the displayed weekly total, then ask Verify to check it again."
+        art = render.artifact_from_findings(
+            raw_for([check]), run_id="host-action",
+            generated_at="2026-08-25T13:10:00Z", layer2=[check],
+            guidance=guidance_for([check], text=action),
+        )
+        page = render.html_of(art)
+        self.assertEqual(art["actions"][0]["text"], action)
+        self.assertIn(f"<b>Next:</b> {action}", page)
+        for canned in (
+            "Keep this verification receipt with the report",
+            "Resolve the caveated outcomes below",
+            "Correct the contradicted outcomes below",
+            "Complete the missing verification work",
+        ):
+            self.assertNotIn(canned, page)
+
+    def test_prominence_comes_only_from_accepted_verdict_and_severity(self) -> None:
+        prominent = accepted_check(1, "confirmed", severity="medium")
+        technical = accepted_check(2, "confirmed", severity="low")
+        contradiction = accepted_check(3, "contradicted")
+        page = render.html_of(make_artifact([prominent, technical, contradiction]))
+        details_at = page.index('<details class="technical-detail"')
+        self.assertLess(page.index('data-card-id="C1"'), details_at)
+        self.assertGreater(page.index('data-card-id="C2"'), details_at)
+        self.assertLess(page.index('data-card-id="C3"'), details_at)
+        self.assertIn('data-prominence="prominent"', page)
+        self.assertIn('data-prominence="technical"', page)
+        for check in (prominent, technical, contradiction):
+            start = page.index(f'data-card-id="{check["id"]}"')
+            end = page.index("</article>", start)
+            card = page[start:end]
+            self.assertIn(check["public_receipt"]["explanation"], card)
+            self.assertIn("Visible report claim", card)
+
+    def test_html_shows_only_agent_authored_card_meaning_and_complete_receipt(self) -> None:
+        check = accepted_check(1, severity="high")
         check["public_receipt"]["calculation"] = {
             "expression": "94 / 100 * 100", "result": "94%",
         }
@@ -384,27 +491,162 @@ class HtmlTests(unittest.TestCase):
         art = make_artifact([check])
         page = render.html_of(art)
         for text in (
-            "Reported metric 1", "On-time deliveries", "Total deliveries",
+            "Visible report claim 1.", "Reported metric 1",
+            "Report summary, displayed value", "On-time deliveries", "Total deliveries",
             "94 / 100 * 100 = 94%", check["public_receipt"]["explanation"],
-            "Project status snapshot", "supplied_file",
+            "Project status snapshot", "status.json", "Supplied file",
         ):
             self.assertIn(text, page)
         for fallback in (
-            "Supplied recorded evidence", "Actual live query", "What ran",
-            "No semantic review status was recorded", "Claim</",
+            "The figure matches the source", "The claim matches your evidence",
+            "Checked by a program", "receipts.json", "findings.json",
         ):
             self.assertNotIn(fallback, page)
 
-    def test_source_kind_is_the_exact_retained_enum_token(self) -> None:
+        mutated = copy.deepcopy(art)
+        mutated["claims"][0]["quote"] = "Agent changed the exact claim quote."
+        receipt = mutated["evidence_checks"][0]["public_receipt"]
+        receipt["report_operand"]["label"] = "Agent-authored replacement title"
+        mutated["claims"][0]["public_label"] = "Agent-authored replacement title"
+        receipt["report_operand"]["location"] = "Agent-authored public location"
+        receipt["explanation"] = (
+            "The agent authored this replacement explanation from the accepted evidence."
+        )
+        changed = render.html_of(mutated)
+        for text in (
+            "Agent changed the exact claim quote.",
+            "Agent-authored replacement title",
+            "Agent-authored public location",
+            receipt["explanation"],
+        ):
+            self.assertIn(text, changed)
+
+    def test_each_evidence_card_has_one_local_source_row_and_unused_sources_do_not_render(self) -> None:
+        used = retained_source(kind="live_tool")
+        unused = {
+            "id": "unused-source", "kind": "supplied_file",
+            "label": "Unused retained snapshot", "evidence_file": "unused.json",
+            "result_sha256": "c" * 64,
+        }
+        art = make_artifact([accepted_check(1, severity="high")], sources=[used, unused])
+        page = render.html_of(art)
+        self.assertEqual(page.count('class="card-source"'), 1)
+        for text in (
+            "Project status snapshot", "status.json", "Live source",
+            "2026-08-25T13:10:00Z",
+        ):
+            self.assertIn(text, page)
+        for text in ("Unused retained snapshot", "unused.json"):
+            self.assertNotIn(text, page)
+        self.assertNotIn('class="sources"', page)
+
+    def test_sources_are_card_local_without_trailing_duplicates(self) -> None:
+        checks = [accepted_check(index, severity="high") for index in range(1, 6)]
+        page = render.html_of(make_artifact(checks, sources=[retained_source()]))
+        self.assertEqual(page.count('class="card-source"'), 5)
+        for check in checks:
+            start = page.index(f'data-card-id="{check["id"]}"')
+            end = page.index("</article>", start)
+            self.assertEqual(page[start:end].count('class="card-source"'), 1)
+        self.assertNotIn('class="sources"', page)
+        self.assertNotIn("Unused retained sources", page)
+
+    def test_structural_context_never_renders_a_material_card(self) -> None:
+        check = accepted_check(1, severity="high")
+        raw = raw_for([check], supporting=True)
+        raw["claims"].append({
+            "id": "STRUCT1", "quote": "Weekly status report",
+            "public_label": "Weekly status report", "importance": "supporting",
+            "classification": "structural_context",
+            "reason": "This accepted occurrence is the report title and has no assertion.",
+            "outcome": None, "check_id": None, "inventory_ids": ["INV-STRUCT"],
+        })
+        art = render.artifact_from_findings(
+            raw, run_id="strip-structural", generated_at="2026-08-25T13:10:00Z",
+            layer2=[check], guidance=guidance_for([check]),
+        )
+        page = render.html_of(art)
+        self.assertNotIn("STRUCT1", json.dumps(art))
+        self.assertNotIn("Weekly status report", page)
+        self.assertEqual(page.count('data-card-id="'), 1)
+
+    def test_run_status_is_mechanical_scope_not_a_claim_outcome(self) -> None:
+        static = render.html_of(make_artifact(
+            [accepted_check(1, severity="high")], sources=[retained_source()]))
+        live = render.html_of(make_artifact(
+            [accepted_check(1, severity="high")],
+            sources=[retained_source(kind="live_tool")],
+        ))
+        self.assertIn("Live source</b>Did not run", static)
+        self.assertIn("Live source</b>Ran", live)
+        visible = re.sub(r"<[^>]+>", " ", static + live)
+        self.assertNotIn('data-disposition="not_run"', static + live)
+        self.assertNotIn("not_run", visible)
+        for status in ("complete", "partial", "failed", "skipped"):
+            self.assertNotRegex(visible, rf"Run status\s*{status}")
+
+    def test_customer_copy_maps_enum_tokens_without_changing_protocol_fields(self) -> None:
+        checks = [
+            accepted_check(1, "confirmed", severity="high"),
+            accepted_check(2, "contradicted"),
+            accepted_check(3, "not_checkable"),
+            accepted_check(4, "changed_since_report"),
+        ]
+        art = make_artifact(checks, sources=[retained_source(kind="live_tool")])
+        page = render.html_of(art)
+        visible = html_lib.unescape(re.sub(
+            r"<(?:style|script)[^>]*>.*?</(?:style|script)>|<[^>]+>",
+            " ", page, flags=re.I | re.S,
+        ))
+        for text in (
+            "Fix before sharing", "Confirmed", "Contradicted", "Not checkable",
+            "Changed since the report", "Live source",
+        ):
+            self.assertIn(text, visible)
+        for token in (
+            "fix_first", "not_checkable", "changed_since_report",
+            "live_tool", "not_run",
+        ):
+            self.assertNotIn(token, visible)
+        self.assertEqual(art["verdict"], "fix_first")
+        self.assertEqual(
+            [row["verdict"] for row in art["evidence_checks"]],
+            ["confirmed", "contradicted", "not_checkable", "changed_since_report"],
+        )
+        self.assertIn('data-verdict="fix_first"', page)
+        for check in checks:
+            self.assertIn(f'data-disposition="{check["verdict"]}"', page)
+
+    def test_source_kind_uses_fixed_customer_label_not_protocol_token(self) -> None:
         static = make_artifact([accepted_check(1)], sources=[retained_source()])
         static_page = render.html_of(static)
-        self.assertIn("supplied_file", static_page)
-        self.assertNotIn("live_tool", static_page)
+        self.assertIn("Supplied file", static_page)
         live_source = retained_source(kind="live_tool")
         live = make_artifact([accepted_check(1)], sources=[live_source])
         live_page = render.html_of(live)
-        self.assertIn("live_tool", live_page)
-        self.assertNotIn("Supplied recorded evidence", live_page)
+        self.assertIn("Live source", live_page)
+        visible = re.sub(r"<[^>]+>", " ", static_page + live_page)
+        self.assertNotIn("supplied_file", visible)
+        self.assertNotIn("live_tool", visible)
+
+    def test_fixed_label_maps_are_total_and_exact(self) -> None:
+        self.assertEqual(render.ROOT_LABELS, {
+            "safe_to_share": "Safe to share",
+            "share_with_caveats": "Share with caveats",
+            "fix_first": "Fix before sharing",
+            "unable_to_grade": "Unable to grade",
+        })
+        self.assertEqual(render.DISPOSITION_LABELS, {
+            "confirmed": "Confirmed",
+            "contradicted": "Contradicted",
+            "not_checkable": "Not checkable",
+            "changed_since_report": "Changed since the report",
+        })
+        self.assertEqual(render.SOURCE_KIND_LABELS, {
+            "supplied_file": "Supplied file", "live_tool": "Live source",
+        })
+        with self.assertRaises(SystemExit):
+            render._fixed_label(render.DISPOSITION_LABELS, "unknown", "disposition")
 
     def test_static_source_cannot_be_retyped_live_without_live_metadata(self) -> None:
         source = retained_source()
@@ -430,7 +672,7 @@ class SchemaAndSerializationTests(unittest.TestCase):
         raw["verification"]["live_source"]["status"] = "failed"
         art = render.artifact_from_findings(
             raw, run_id="supplied", generated_at="2026-08-25T13:10:00Z",
-            layer2=[accepted_check(1)],
+            layer2=[accepted_check(1)], guidance=guidance_for([accepted_check(1)]),
         )
         self.assertEqual(
             art["verification"]["live_source"],
@@ -443,7 +685,7 @@ class SchemaAndSerializationTests(unittest.TestCase):
         raw["verification"]["live_source"]["status"] = "not_run"
         art = render.artifact_from_findings(
             raw, run_id="live", generated_at="2026-08-25T13:10:00Z",
-            layer2=[accepted_check(1)],
+            layer2=[accepted_check(1)], guidance=guidance_for([accepted_check(1)]),
         )
         self.assertEqual(
             art["verification"]["live_source"],
@@ -455,7 +697,7 @@ class SchemaAndSerializationTests(unittest.TestCase):
         raw["verification"]["live_source"]["status"] = "complete"
         art = render.artifact_from_findings(
             raw, run_id="static", generated_at="2026-08-25T13:10:00Z",
-            layer2=[accepted_check(1)],
+            layer2=[accepted_check(1)], guidance=guidance_for([accepted_check(1)]),
         )
         self.assertEqual(art["verification"]["live_source"]["status"], "not_run")
 
@@ -498,14 +740,20 @@ class SchemaAndSerializationTests(unittest.TestCase):
         raw["claims"][0]["arithmetic_inventory_ids"] = ["INV1"]
         art = render.artifact_from_findings(
             raw, run_id="private", generated_at="2026-08-25T13:10:00Z",
-            layer2=[check],
+            layer2=[check], guidance=guidance_for([check]),
         )
         blob = json.dumps(art)
         for forbidden in (
-            "report_quote", "evidence_json", "date_receipt", "/metric",
+            "evidence_json", "date_receipt", "/metric",
             "arithmetic_inventory_ids", "found_by", "verification_mode",
         ):
             self.assertNotIn(forbidden, blob)
+        self.assertNotIn(
+            check["report_quote"],
+            json.dumps(art["evidence_checks"]),
+        )
+        self.assertEqual(
+            art["actions"][0]["report_quote"], "Visible report claim 1.")
 
 
 if __name__ == "__main__":

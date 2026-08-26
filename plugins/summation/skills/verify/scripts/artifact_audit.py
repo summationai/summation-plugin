@@ -39,6 +39,11 @@ _CREDENTIAL = re.compile(
     re.I,
 )
 _BEARER = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.I)
+_VISIBLE_PROTOCOL_TOKENS = (
+    "safe_to_share", "share_with_caveats", "fix_first", "unable_to_grade",
+    "live_tool", "supplied_file", "not_checkable", "changed_since_report",
+    "not_run",
+)
 
 
 def _walk(value, path: str = "$", *, keys: bool = False):
@@ -58,6 +63,10 @@ def _walk(value, path: str = "$", *, keys: bool = False):
 def _forbidden_key_problems(artifact: dict) -> list[str]:
     problems = []
     for path, key in _walk(artifact, keys=True):
+        if key == "report_quote" and re.fullmatch(
+            r"\$\.actions\[[0-9]+\]\.report_quote", path
+        ):
+            continue
         if key in FORBIDDEN_KEYS:
             problems.append(f"public artifact contains forbidden field {path}")
     return problems
@@ -225,7 +234,10 @@ def _ledger_problems(artifact: dict) -> list[str]:
         problems.append("source independence token does not match retained sources")
     if artifact.get("source_result") is not None:
         problems.append("source_result entered output outside retained source metadata")
-    for name in ("actions", "decision_limits", "limitations"):
+    actions = artifact.get("actions")
+    if not isinstance(actions, list) or not actions:
+        problems.append("accepted customer actions are missing")
+    for name in ("decision_limits", "limitations"):
         if artifact.get(name):
             problems.append(f"{name} contains copy outside public receipts")
     if artifact.get("decision") is not None:
@@ -286,6 +298,149 @@ def _card_identity_problems(artifact: dict, page: str) -> list[str]:
     return problems
 
 
+def _visible_text(page: str) -> str:
+    without_hidden_code = re.sub(
+        r"<(?:style|script)[^>]*>.*?</(?:style|script)>",
+        " ", page, flags=re.I | re.S,
+    )
+    return re.sub(r"\s+", " ", re.sub(
+        r"<[^>]+>", " ", html_lib.unescape(without_hidden_code)))
+
+
+def _customer_html_problems(artifact: dict, page: str) -> list[str]:
+    """Check the locked customer hierarchy without inventing claim meaning."""
+    problems: list[str] = []
+    visible = _visible_text(page)
+    for token in _VISIBLE_PROTOCOL_TOKENS:
+        if token in visible:
+            problems.append(f"visible customer text contains protocol token {token}")
+    for token in ("Layer 1", "Layer 2", "L1", "L2"):
+        if re.search(rf"(?<![A-Za-z0-9]){re.escape(token)}(?![A-Za-z0-9])", visible, re.I):
+            problems.append(f"visible customer text contains internal token {token}")
+
+    filename = str((artifact.get("source") or {}).get("path") or "")
+    expected_title = f"<title>Verification: {html_lib.escape(filename)}</title>"
+    if expected_title not in page:
+        problems.append("customer title does not name the report filename")
+    if "Summation <span>/ Verify</span>" not in page:
+        problems.append("Summation / Verify header is missing")
+    root_verdict = str(artifact.get("verdict") or "")
+    root_label = render.ROOT_LABELS.get(root_verdict)
+    if root_label is None or root_label not in visible:
+        problems.append("plain-English root verdict is missing")
+    if page.count('class="stats"') != 1:
+        problems.append("customer scoreboard is missing or duplicated")
+    if page.count('class="next"') != 1:
+        problems.append("customer Next block is missing or duplicated")
+    else:
+        next_match = re.search(r'<div class="next">(.*?)</div>', page, re.S)
+        for action in artifact.get("actions") or []:
+            text = html_lib.escape(str(action.get("text") or ""))
+            if next_match is None or text not in next_match.group(1):
+                problems.append("customer Next block omits an accepted action")
+                break
+    if "Technical scope" not in visible:
+        problems.append("technical scope is missing")
+    if page.count('<details class="technical-detail"') != 1:
+        problems.append("Technical detail disclosure is missing or duplicated")
+    if 'class="sources"' in page:
+        problems.append("page-level source list must not render")
+    if re.search(r"https?://", page, re.I):
+        problems.append("customer page contains a network asset or link")
+    if re.search(r"\b(?:animation|transition)\s*:", page, re.I):
+        problems.append("customer page contains motion CSS")
+    if "@media(max-width:40rem)" not in page:
+        problems.append("40rem customer breakpoint is missing")
+    if "@media print" not in page or not re.search(
+        r"\.material-card,.stats\{[^}]*break-inside:avoid", page
+    ):
+        problems.append("print card and scoreboard integrity rule is missing")
+
+    claims_by_check = {
+        str(row.get("check_id") or ""): row
+        for row in artifact.get("claims") or []
+        if isinstance(row, dict)
+        and row.get("classification") != "supporting_provenance"
+        and row.get("importance") != "supporting"
+    }
+    sources = {
+        str(row.get("id") or ""): row
+        for row in artifact.get("sources") or [] if isinstance(row, dict)
+    }
+    details_at = page.find('<details class="technical-detail"')
+    for check in artifact.get("evidence_checks") or []:
+        if not isinstance(check, dict):
+            continue
+        check_id = str(check.get("id") or "")
+        claim = claims_by_check.get(check_id)
+        if claim is None:
+            continue
+        pattern = re.compile(
+            rf'<article class="material-card"[^>]*\bdata-card-id="{re.escape(html_lib.escape(check_id))}"[^>]*>(.*?)</article>',
+            re.S,
+        )
+        matches = list(pattern.finditer(page))
+        if len(matches) != 1:
+            continue
+        match = matches[0]
+        card = match.group(0)
+        receipt = check.get("public_receipt") or {}
+        report_operand = receipt.get("report_operand") or {}
+        expected_text = [
+            claim.get("quote"), report_operand.get("label"),
+            report_operand.get("value"), report_operand.get("location"),
+            receipt.get("explanation"),
+        ]
+        for operand in receipt.get("decisive_operands") or []:
+            expected_text.extend([
+                operand.get("label"), operand.get("value"), operand.get("location")])
+        for value in expected_text:
+            shown = html_lib.escape(render._display(value))
+            if shown not in card:
+                problems.append(f"material card {check_id} omits an accepted receipt field")
+                break
+        label = render.DISPOSITION_LABELS.get(str(check.get("verdict") or ""))
+        if label is None or f'<span class="tag">{html_lib.escape(label)}</span>' not in card:
+            problems.append(f"material card {check_id} has no exact visible disposition badge")
+        expected_prominence = (
+            "technical" if check.get("verdict") == "confirmed"
+            and check.get("severity") not in {"high", "medium"}
+            else "prominent"
+        )
+        if f'data-prominence="{expected_prominence}"' not in card:
+            problems.append(f"material card {check_id} is in the wrong customer group")
+        if expected_prominence == "technical":
+            if details_at < 0 or match.start() < details_at:
+                problems.append(f"technical confirmation {check_id} is outside Technical detail")
+        else:
+            section = re.search(
+                rf'<section class="outcome-section" data-outcome-section="{re.escape(str(check.get("verdict") or ""))}">(.*?)</section>',
+                page, re.S,
+            )
+            if section is None or f'data-card-id="{html_lib.escape(check_id)}"' not in section.group(1):
+                problems.append(f"prominent card {check_id} is outside its outcome section")
+        source_id = str(receipt.get("source_id") or "")
+        source_rows = card.count('class="card-source"')
+        if source_id:
+            source = sources.get(source_id)
+            if source_rows != 1 or source is None:
+                problems.append(f"evidence card {check_id} has no single local source row")
+            elif any(
+                html_lib.escape(str(value)) not in card for value in (
+                    source.get("label"), source.get("evidence_file"),
+                    render.SOURCE_KIND_LABELS.get(str(source.get("kind") or ""), ""),
+                )
+            ):
+                problems.append(f"evidence card {check_id} source row is incomplete")
+            elif source.get("kind") == "live_tool" and html_lib.escape(str(
+                (source.get("retrieval") or {}).get("retrieved_at") or ""
+            )) not in card:
+                problems.append(f"live evidence card {check_id} omits retrieval time")
+        elif source_rows:
+            problems.append(f"report-basis card {check_id} has an undeclared source row")
+    return list(dict.fromkeys(problems))
+
+
 def audit_public_artifact(artifact: dict, page: str) -> list[str]:
     problems = []
     try:
@@ -300,6 +455,7 @@ def audit_public_artifact(artifact: dict, page: str) -> list[str]:
     problems.extend(_ledger_problems(artifact))
     problems.extend(_privacy_problems(artifact, page))
     problems.extend(_card_identity_problems(artifact, page))
+    problems.extend(_customer_html_problems(artifact, page))
     try:
         expected_page = render.html_of(artifact)
     except Exception as exc:

@@ -135,9 +135,7 @@ def findings_doc(report: pathlib.Path, findings: list[dict], *, html: bool,
             "items": [],
             "reason": intake_error,
         }
-    material_n = sum(
-        1 for item in inventory.get("items") or []
-        if item.get("importance") == "material")
+    material_n = 0
     reader = inventory.get("reader") or (
         "html" if html else report.suffix.lower().lstrip("."))
     return {

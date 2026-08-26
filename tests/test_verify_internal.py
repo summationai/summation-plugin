@@ -54,7 +54,7 @@ class InternalCheckTests(unittest.TestCase):
             item for item in inv["items"]
             if str(item.get("displayed") or "").lower().startswith("source snapshot")]
         self.assertTrue(source)
-        self.assertTrue(all(item.get("importance") == "material" for item in source))
+        self.assertTrue(all(item.get("importance") == "unclassified" for item in source))
         self.assertEqual(internal.check_inventory(inv), [])
 
     def test_pdf_twin_emits_mismatch_without_a_verdict(self) -> None:
@@ -98,7 +98,7 @@ class SourceSnapshotInventoryTests(unittest.TestCase):
         "Source snapshot: conversion lagged target",
     )
 
-    def test_inventories_all_source_snapshot_lines_as_material(self) -> None:
+    def test_inventories_all_source_snapshot_lines_as_unclassified(self) -> None:
         self.assertFalse(hasattr(inventory, "source_snapshot_importance"))
         with tempfile.TemporaryDirectory() as raw:
             path = pathlib.Path(raw) / "report.md"
@@ -109,7 +109,7 @@ class SourceSnapshotInventoryTests(unittest.TestCase):
             for line in self.LINES:
                 self.assertIn(line, by_shown)
                 item = by_shown[line]
-                self.assertEqual(item["importance"], "material")
+                self.assertEqual(item["importance"], "unclassified")
                 self.assertTrue(item.get("id"))
                 self.assertTrue(item.get("location"))
                 ids.append(item["id"])

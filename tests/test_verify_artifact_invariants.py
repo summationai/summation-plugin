@@ -157,8 +157,8 @@ class RenderedTextMutationTests(unittest.TestCase):
     def test_injected_fallback_copy_fails_exact_serialization(self) -> None:
         artifact, page = valid_artifact_pair()
         mutated = page.replace(
-            '<section class="material-cards">',
-            '<section class="material-cards"><p>Supplied recorded evidence</p>',
+            '<section class="technical-scope">',
+            '<p>Supplied recorded evidence</p><section class="technical-scope">',
             1,
         )
         problems = audit.audit_public_artifact(artifact, mutated)
@@ -202,10 +202,14 @@ class ContractCutoverTests(unittest.TestCase):
         artifact, _page = valid_artifact_pair()
         blob = str(artifact)
         for forbidden in (
-            "report_quote", "report_quote_2", "evidence_json", "date_receipt",
+            "report_quote_2", "evidence_json", "date_receipt",
             "found_by", "verification_mode", "used_for_internal_arithmetic",
         ):
             self.assertNotIn(forbidden, blob)
+        self.assertNotIn(
+            "report_quote", str(artifact["evidence_checks"]),
+        )
+        self.assertTrue(all("report_quote" in row for row in artifact["actions"]))
 
 
 if __name__ == "__main__":

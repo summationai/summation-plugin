@@ -127,10 +127,11 @@ class EvidenceAndCoverageTests(unittest.TestCase):
             "2026-04-04",
             "2026-08-23",
             "Later recorded metric 1",
-            "supplied_file",
+            "Supplied file",
             check["public_receipt"]["reconstruction_attempt"],
         ):
             self.assertIn(text, page)
+        self.assertNotIn("supplied_file", artifact_audit._visible_text(page))
         self.assertEqual(
             artifact["verification"]["live_source"],
             {"status": "not_run", "detail": None},

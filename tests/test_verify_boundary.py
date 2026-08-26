@@ -135,7 +135,11 @@ def public_artifact(checks: list[dict], *, source_kind: str = "supplied_file") -
     }
     return render.artifact_from_findings(
         raw, run_id="boundary-cards",
-        generated_at="2026-08-25T13:10:00Z", layer2=checks)
+        generated_at="2026-08-25T13:10:00Z", layer2=checks,
+        guidance={"actions": [{
+            "id": "A1", "text": "Review the accepted receipts before sharing.",
+            "report_quote": claims[0]["quote"], "check_ids": [checks[0]["id"]],
+        }]})
 
 
 class SourceContractTests(unittest.TestCase):
@@ -286,6 +290,10 @@ class SchemaContractTests(unittest.TestCase):
             run_id="schema-emission",
             generated_at="2026-08-25T13:10:00Z",
             layer2=[check],
+            guidance={"actions": [{
+                "id": "A1", "text": "Review the accepted receipt before sharing.",
+                "report_quote": "Active projects: 12", "check_ids": ["C-REPORT"],
+            }]},
         )
         expected = "grade-artifact/public-receipt-v1"
         self.assertEqual(render.SCHEMA_VERSION, expected)
@@ -849,13 +857,15 @@ class RendererBoundaryTests(unittest.TestCase):
         check = evidence_check()
         static_art = public_artifact([check])
         static_page = render.html_of(static_art)
-        self.assertIn("supplied_file", static_page)
+        self.assertIn("Supplied file", static_page)
         self.assertNotIn("Actual live query", static_page)
+        self.assertNotIn("supplied_file", artifact_audit._visible_text(static_page))
 
         live_art = public_artifact([check], source_kind="live_tool")
         live_page = render.html_of(live_art)
-        self.assertIn("live_tool", live_page)
+        self.assertIn("Live source", live_page)
         self.assertNotIn("Supplied recorded evidence", live_page)
+        self.assertNotIn("live_tool", artifact_audit._visible_text(live_page))
         self.assertEqual(
             live_art["verification"]["live_source"],
             {"status": "complete", "detail": None},

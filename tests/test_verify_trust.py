@@ -16,6 +16,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 from test_verify_render import (  # noqa: E402
     accepted_check,
+    guidance_for,
     make_artifact,
     raw_for,
     render,
@@ -40,6 +41,8 @@ def accepted_ledger(checks: list[dict]) -> dict:
         "discarded": [],
         "discarded_claims": [],
         "discarded_sources": [],
+        "presentation": guidance_for(checks),
+        "presentation_problems": [],
     }
 
 
@@ -105,6 +108,7 @@ class PublicBoundaryTests(unittest.TestCase):
             run_id="trust-machine-copy",
             generated_at="2026-08-25T13:10:00Z",
             layer2=[check],
+            guidance=guidance_for([check]),
         )
         page = render.html_of(artifact)
         blob = json.dumps(artifact) + page

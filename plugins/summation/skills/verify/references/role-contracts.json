@@ -1,32 +1,97 @@
 {
-  "contract_version": "verify-role-handoff/public-receipt-v1",
+  "contract_version": "verify-role-handoff/coordinator-v1",
+  "classifications": [
+    "material_claim",
+    "supporting_provenance",
+    "structural_context"
+  ],
   "claim_taker": {
     "input": {
       "required": ["partition_id", "visible_text", "inventory", "report_metadata"],
-      "inventory_item_required": ["id", "displayed", "location"]
+      "inventory_item_required": ["id", "displayed", "location", "importance"]
     },
     "output": {
-      "required": ["partition_id", "claims"],
+      "required": ["partition_id", "candidates"],
+      "candidate_required": [
+        "id",
+        "quote",
+        "importance",
+        "classification",
+        "inventory_ids"
+      ],
+      "material_claim_required": ["public_label"],
+      "supporting_provenance_required": ["public_label", "reason"],
+      "structural_context_required": ["reason"]
+    }
+  },
+  "coordinator": {
+    "input": {
+      "required": [
+        "partition_results",
+        "inventory",
+        "report_metadata",
+        "internal_candidates"
+      ],
+      "candidate_required": [
+        "id",
+        "quote",
+        "importance",
+        "classification",
+        "inventory_ids"
+      ]
+    },
+    "output": {
+      "required": [
+        "canonical_claims",
+        "membership",
+        "structural_context",
+        "verifier_assignments"
+      ],
       "claim_required": [
         "id",
         "quote",
         "public_label",
         "importance",
         "classification",
+        "inventory_ids",
+        "member_refs"
+      ],
+      "membership_required": ["partition_id", "candidate_id", "canonical_claim_id"],
+      "structural_context_required": [
+        "id",
+        "partition_id",
+        "candidate_id",
+        "quote",
+        "importance",
+        "classification",
+        "reason",
         "inventory_ids"
-      ]
+      ],
+      "verifier_assignment_required": ["verifier_id", "claim_ids"]
+    },
+    "final_merge": {
+      "input": {
+        "required": ["canonical_claims", "evidence_verifier_results"]
+      },
+      "output": {
+        "required": ["sources", "checks", "presentation"],
+        "presentation_required": ["actions"],
+        "action_required": ["id", "text", "report_quote", "check_ids"]
+      }
     }
   },
   "evidence_verifier": {
     "input": {
       "required": ["partition_id", "visible_text", "claims", "sources"],
+      "claims_from": "coordinator.output.canonical_claims",
       "claim_required": [
         "id",
         "quote",
         "public_label",
         "importance",
         "classification",
-        "inventory_ids"
+        "inventory_ids",
+        "member_refs"
       ]
     },
     "output": {
@@ -38,6 +103,7 @@
         "basis",
         "verdict",
         "importance",
+        "severity",
         "public_receipt"
       ],
       "public_receipt_required": [
@@ -58,15 +124,31 @@
   "routes": {
     "native_subagents": {
       "primary": true,
-      "stages": ["claim_taker", "evidence_verifier"],
-      "input_contracts": ["claim_taker.input", "evidence_verifier.input"],
-      "output_contracts": ["claim_taker.output", "evidence_verifier.output"]
+      "stages": ["claim_taker", "coordinator", "evidence_verifier"],
+      "input_contracts": [
+        "claim_taker.input",
+        "coordinator.input",
+        "evidence_verifier.input"
+      ],
+      "output_contracts": [
+        "claim_taker.output",
+        "coordinator.output",
+        "evidence_verifier.output"
+      ]
     },
     "sequential": {
       "primary": false,
-      "stages": ["claim_taker", "evidence_verifier"],
-      "input_contracts": ["claim_taker.input", "evidence_verifier.input"],
-      "output_contracts": ["claim_taker.output", "evidence_verifier.output"]
+      "stages": ["claim_taker", "coordinator", "evidence_verifier"],
+      "input_contracts": [
+        "claim_taker.input",
+        "coordinator.input",
+        "evidence_verifier.input"
+      ],
+      "output_contracts": [
+        "claim_taker.output",
+        "coordinator.output",
+        "evidence_verifier.output"
+      ]
     }
   }
 }

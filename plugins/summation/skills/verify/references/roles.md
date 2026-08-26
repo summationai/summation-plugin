@@ -1,12 +1,14 @@
 # Verify agent roles
 
-Use these roles to keep semantic judgment explicit and reviewable. The coordinator owns the final files and the single repair pass.
+Use these roles to keep semantic judgment explicit and reviewable. The coordinator owns the final files, complete membership, canonicalization, and the single repair pass. Raw inventory begins unclassified.
 
 ## Coordinator
 
-Partition the report by logical section, worksheet, or slide. Give each worker only its bounded visible text, inventory ids, and approved source records. Assign stable, non-overlapping claim and check id ranges.
+Partition the report by logical section, worksheet, or slide. Give each claim-taker only its bounded visible text, neutral inventory ids, and report metadata. Assign stable, non-overlapping candidate id ranges. Claim-takers do not receive approved evidence sources.
 
-Merge and deduplicate by exact claim id, check id, inventory id, and source id. Resolve cross-section claims yourself. Do not merge two populations because their labels sound similar. Carry each accepted claim's `public_label` unchanged into the evidence-verifier input; do not rename it during merge. Retain one source record per exact raw result and digest. Run `accept.py`, return every exact discard reason to the responsible role once, merge the repair, then render.
+Receive all partition results together with the complete neutral inventory, report metadata, and opaque internal candidate facts. Declare canonical claims plus exact membership from worker candidate ids and inventory occurrence ids. Repeated labels, values, locations, formulas, or prose are not merge instructions. Decide claim importance and same-population membership yourself. The code validates only that every worker candidate and every inventory occurrence is consumed exactly once, every reference exists, and each material canonical claim has one evidence-verifier assignment.
+
+Carry each canonical claim's `public_label` unchanged into the evidence-verifier input. Do not rename it during merge. One canonical assertion receives one outcome and one HTML card. If a KPI total and a table total are two occurrences of the same assertion, include both occurrences in one canonical claim; do not create confirmed and contradicted aliases. Keep `structural_context` in the private coordinator handoff only. After evidence-verifier results return, author the customer `presentation.actions` in the final merge. Each action has an `A` plus digits id, exact customer action text, an exact visible report quote, and the accepted check ids that support it. The renderer copies that text into the one Next block and never authors a recommendation. Run `accept.py`, return every exact discard reason to the responsible role once, merge the repair, then render.
 
 ## Claim-taker
 
@@ -16,18 +18,24 @@ Input:
 - its inventory rows and exact inventory ids; and
 - report period metadata when visible.
 
-Output only claims and their claim-handoff metadata. For each claim, return the exact visible quote, stable claim id, material or supporting classification, importance, exact inventory ids, and `public_label`, an explicit public-safe claim label. Inventory rows use their raw `displayed` text and internal `location`; the claim output carries only the selected stable ids. The label is the reader-facing name handed to the evidence verifier for `public_receipt.report_operand.label`; it is not a verdict and is not a substitute for the evidence verifier's complete `public_receipt`. Decide which statements are load-bearing and which displayed values belong to the same claim or population. Do not issue evidence verdicts. Do not use speaker notes, hidden metadata, or text outside the assigned section.
+Output only classified candidates and their handoff metadata. Classify every assigned inventory occurrence exactly once as `material_claim`, `supporting_provenance`, or `structural_context`; missing classification fails closed. For a material candidate, return the exact visible quote, stable candidate id, `importance: material`, exact inventory ids, and `public_label`, an explicit public-safe claim label. For supporting provenance, return its exact quote, ids, `importance: supporting`, public-safe label, and substantive reason. For structural context, return exactly one inventory id, its exact visible quote, `importance: supporting`, and a substantive reason. Structural context produces no check or card and is stripped before public serialization.
+
+Inventory rows use their raw `displayed` text and internal `location`; the candidate output carries only selected stable ids. A `public_label` is the reader-facing name handed through the coordinator to `public_receipt.report_operand.label`; it is not a verdict and is not a substitute for the evidence verifier's complete `public_receipt`. Decide which statements are load-bearing and which displayed values belong to the same claim or population. Do not issue evidence verdicts. Do not use speaker notes, hidden metadata, or text outside the assigned partition.
 
 ## Evidence verifier
 
 Input:
 
-- bounded accepted claims;
+- only canonical claims assigned from the coordinator output;
 - the relevant visible report text;
 - approved retained source files or approved read-only tools; and
 - exact internal candidates for those claim inventory ids.
 
-The claim input is the coordinator's unchanged claim-taker output, including `public_label`. Output checks plus retained `sources` records. Decide whether the evidence answers each claim, then author the semantic verdict, explicit public locations, decisive operands, substantive explanation, and public-safe source label. Copy the claim's `public_label` exactly into `public_receipt.report_operand.label`. Keep internal pointers and raw coordinates only in grounding fields. For an evidence-basis decisive check, link one retained `source_id`. For a report-basis decisive check, omit it. Every material disposition, including `not_checkable`, needs a complete `public_receipt`; `not_checkable` has no decisive operands.
+The claim input is the coordinator's unchanged canonical output, including `public_label` and opaque membership. Output checks plus retained `sources` records. Decide whether the evidence answers each claim, then author the semantic verdict, severity, explicit public locations, decisive operands, substantive explanation, and public-safe source label. Copy the claim's `public_label` exactly into `public_receipt.report_operand.label`. Keep internal pointers and raw coordinates only in grounding fields. For an evidence-basis decisive check, link one retained `source_id`. For a report-basis decisive check, omit it. Every material disposition, including `not_checkable`, needs a complete `public_receipt`; `not_checkable` has no decisive operands.
+
+For an explicit report-basis arithmetic check, the declared verdict must agree with the recomputed values: differing report and calculation results cannot be `confirmed`, and equal values cannot be `contradicted`. Code rejects the row and never rewrites it. Arithmetic-use values do not become confirmations.
+
+Severity is an agent-authored customer-priority field, not a machine finding. Contradicted, changed-since-report, and not-checkable outcomes remain prominent. A confirmed outcome with `high` or `medium` severity remains prominent; a confirmed outcome with `low` or null severity appears under Technical detail. Every material outcome remains a complete, identified, customer-accessible receipt card in either location.
 
 Save every tool result before use. A live result records the exact retrieval time, tool, and safe arguments. A supplied file has no live retrieval metadata. Do not turn an internal candidate or arithmetic-use marker into a confirmation.
 
@@ -35,7 +43,7 @@ The evidence verifier authors retained source records, verdicts, labels, and rec
 
 ## Host support
 
-Use native subagents as the primary path when the host supports them. The coordinator remains the only writer of merged run files. If native subagents are unavailable, perform claim-taking and evidence verification sequentially with the same input schema and the same output schema. Both routes use the identical stage contracts in [role-contracts.json](role-contracts.json); only the execution topology changes.
+Use native subagents as the primary path when the host supports them. The coordinator remains the only writer of merged run files. Claim-takers run on bounded partitions, then the coordinator consumes every partition output, then evidence verifiers receive canonical claims only. If native subagents are unavailable, perform the same claim-taker, coordinator, and evidence-verifier stages sequentially with the same input schema and the same output schema. Both routes use the identical stage contracts in [role-contracts.json](role-contracts.json); only the execution topology changes.
 
 The reference JSON is a routing and handoff contract, not execution proof. A later host run must establish whether its native or sequential route followed the contract.
 

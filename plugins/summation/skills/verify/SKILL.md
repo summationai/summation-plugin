@@ -13,13 +13,15 @@ If they named a report that already lives in Summation and there is no disk file
 
 1. Before any grading: `command -v uv` succeeds, or `python3 -c "import jsonschema"` succeeds. If neither, resolve that with the user now. Do not start a long run that dies at render.
 2. Ask which file. If they already attached one, use it.
-3. Run `extract.py` first. Read `inventory` in `findings.json` and `report-visible.txt`. Then write `claims.json`. Cover every material inventory item plus every other load-bearing claim. Each claim names the exact inventory ids it covers; code does not match ids by similar text or values. Set `classification` to `material_claim` or `supporting_provenance`. A missing classification is `material_claim`. Every claim needs `public_label`, an explicit public-safe name for its report operand. Quotes are exact normalized visible text. `report_period` is the display string. `report_date` is ISO `YYYY-MM-DD`. Leave either field out when the report does not name a period. Do not write claims from PowerPoint speaker notes. Example: `{"report_period": "week ending April 4, 2026", "report_date": "2026-04-04", "claims": [{"id": "L1", "quote": "exact visible text", "public_label": "Reported active projects", "importance": "material", "classification": "material_claim", "inventory_ids": ["INV1"]}]}`.
+3. Run `extract.py` first. Read the neutral `inventory` in `findings.json` and `report-visible.txt`. Every raw item begins `unclassified`; code does not infer meaning from prose, tags, labels, keys, locations, formulas, or value overlap. Claim-takers classify every assigned occurrence exactly once as `material_claim`, `supporting_provenance`, or `structural_context`. Missing, duplicate, or uncovered classification fails closed. Then the coordinator receives every partition result, the complete inventory, report metadata, and opaque internal candidates. It declares canonical claims plus exact candidate and inventory membership. Code checks membership by ids only. Evidence verifiers receive canonical claims only. `report_period` is the visible display string. `report_date` is ISO `YYYY-MM-DD`; omit either when the report does not state it. Do not write claims from PowerPoint speaker notes.
 4. If a nearby `evidence/` folder exists, ask once whether to use it. Do not scan their whole disk.
 5. If GitHub, Snowflake, Slack, or similar tools are already connected in this session, ask once whether to query them. Save raw tool results as files under the run `evidence/` folder. Do not ask them to sign in to Summation to get evidence.
 6. State duration, then work:
    - File plus local evidence only: about 2–5 minutes.
    - Also using connections already in this session: about 10–15 minutes.
 7. Then stay quiet except for brief progress. Do not narrate layers, error codes, tenant IDs, or check names.
+
+A host or runner prompt that forbids questions cannot prove this first-two-minutes route. It must allow the file, nearby-evidence, connected-source consent, and duration questions above.
 
 ### Optional local source wrapper
 
@@ -44,7 +46,7 @@ run/
   report/          original file
   report-visible.txt   extract.py writes this
   evidence/        unchanged tool results and user files
-  claims.json      you write this after inventory: every load-bearing claim
+  claims.json      coordinator handoff: partitions, canonical claims, membership
   checks.json      you write this after evidence
   findings.json    extract.py writes this
   receipts.json    accept.py writes this
@@ -68,7 +70,7 @@ uv run "$VERIFY/scripts/extract.py" \
 
 If `uv` is missing, run `python3` on `extract.py` only when `pypdf`, `openpyxl`, and `python-pptx` already import. Do not `pip install` without asking. Do not call OfficeCLI or Poppler.
 
-Then write `claims.json` and `checks.json`. Every material inventory id must have one accepted completed outcome. Confirm every claim that you can prove from the report itself: arithmetic, rank order, percentages, displayed values, and internal consistency. Use `basis: report` and `verdict: confirmed` for those claims. External evidence is not required for them. `not_checkable` is only for a fact that needs an external source and has no grounded evidence. Convert every unresolved material claim to an honest `not_checkable` result before `render.py`. Do not leave `not_reached` rows. A remaining material `not_checkable` claim prevents `safe_to_share`.
+Then write the coordinator handoff in `claims.json` and evidence-verifier results in `checks.json`. Every canonical material claim must have exactly one accepted completed outcome. A report-basis check may use explicit arithmetic, rank, percentage, or consistency operands selected by the agent. The code recomputes only the declared mechanics; the presence of a displayed value or machine candidate never confirms a claim. `not_checkable` is only for a fact that needs an external source and has no grounded evidence. Convert every unresolved material claim to an honest `not_checkable` result before `render.py`. Do not leave `not_reached` rows. A remaining material `not_checkable` claim prevents `safe_to_share`.
 
 If the report is HTML, Markdown, or plain text:
 
@@ -110,13 +112,15 @@ If `uv` is missing and `jsonschema` already imports, run `python3` on `render.py
 
 The host agent owns claim importance, same-population decisions, semantic verdicts, public operand labels and locations, explanations, whether evidence answers a claim, and public-safe source labels. `accept.py` owns file and digest checks, pointer resolution, exact values and dates, restricted arithmetic recomputation, source-link validation, and ledger reconciliation. It never turns a candidate or arithmetic input into a semantic outcome. `render.py` copies accepted public fields; it does not infer labels, explanations, source mode, or verdicts.
 
-If `render.py` exits 2 because a material inventory item is missing or a claim is `not_reached`, repair that claim and run `accept.py` then `render.py` again.
+If `accept.py` or `render.py` exits 2 because classification, coordinator membership, or a material outcome is incomplete, repair the exact rejected handoff once and run `accept.py` then `render.py` again.
 
-Read every `Source snapshot:` inventory line in full. If the line names only source identity or an extraction date, write `classification: supporting_provenance` with the exact inventory id, exact quote, `importance: supporting`, and a reason. If it states a status, quality, completeness, KPI, count, comparison, or other analytical result, write `classification: material_claim` and grade it as material. Code does not classify these lines from word lists. A missing classification stays material. `supporting_provenance` accounts for its inventory id but never enters material totals, the unverified list, or confirmed analytical results.
+Read every inventory occurrence in full. The claim-taker, not Python, decides whether it is a material assertion, supporting provenance, or structural context. `material_claim` requires exact ids, exact quote, `importance: material`, and a public-safe label. `supporting_provenance` requires exact ids, exact quote, `importance: supporting`, public-safe label, and a substantive reason; it remains outside material totals. `structural_context` requires exactly one inventory id, its exact quote, `importance: supporting`, and a substantive reason. It creates no check or card and is stripped before public artifact serialization. A missing classification fails closed.
 
 ## Agent roles
 
-On hosts with native subagents, use the coordinator, claim-taker, and evidence-verifier roles as the primary path. Partition work by logical report section, worksheet, or slide. Claim-takers return `public_label` with their bounded claims. The coordinator carries that field unchanged into the evidence-verifier input. Evidence verifiers author every complete receipt and verdict and copy `public_label` to `public_receipt.report_operand.label`. On hosts without native subagents, perform the same claim-taker and evidence-verifier roles sequentially with identical input and output contracts. Never start a hidden `claude -p`, a second login, or another unaudited agent process. See [references/roles.md](references/roles.md) for the role rules and [references/role-contracts.json](references/role-contracts.json) for the exact handoff fields. These contracts do not claim that a host route has executed.
+On hosts with native subagents, use claim-takers, the coordinator, and evidence verifiers as the primary path. Claim-takers receive bounded report partitions and neutral inventory. The coordinator receives all partition outputs and declares canonical claims plus exact opaque membership. Evidence verifiers receive canonical claims only, author every complete receipt, verdict, severity, and retained source record, and copy `public_label` to `public_receipt.report_operand.label`. On hosts without native subagents, perform the same three roles sequentially with identical input and output contracts. Never start a hidden `claude -p`, a second login, or another unaudited agent process. See [references/roles.md](references/roles.md) for the role rules and [references/role-contracts.json](references/role-contracts.json) for the exact handoff fields. These contracts do not claim that a host route has executed.
+
+The `claims` array in `claims.json` is the coordinator's canonical claim output. Its sibling `coordinator` object contains `partition_results`, `membership`, and `verifier_assignments`; `accept.py` derives the private structural-context ledger from those exact memberships. Every worker candidate and inventory occurrence appears in one membership path only. One canonical assertion produces one outcome and one customer card. Repeated occurrences of the same assertion may be members of one canonical claim; matching text or values alone never causes that merge.
 
 ## You write checks.json
 
@@ -177,7 +181,7 @@ After evidence, write one outcome per claim you actually checked. Each row names
 }
 ```
 
-`presentation` is optional. Put it on the checks file next to the `checks` array. Every summary, action, and limit names the accepted check ids that support it. `accept.py` keeps a statement when every `report_quote` is visible text and every named id is a grounded check.
+`presentation` is required for customer HTML. Put it on the checks file next to the `checks` array. After the evidence-verifier results return, the coordinator's final merge authors at least one `actions` row for the single Next block. Every summary, action, and limit names the accepted check ids that support it. An action id is `A` followed by digits, its text is the exact customer action sentence, and its `report_quote` is visible report text. `accept.py` keeps a statement only when every quote is exact visible text and every named id is a grounded check. `render.py` copies accepted action text; it never selects or writes a recommendation.
 
 - `verdict`: `confirmed` | `contradicted` | `not_checkable`. `changed_since_report` is a last resort (see live source below). Never omit it.
 - `type`: `semantic` | `staleness` | `internal` | `logic` | `arithmetic` | `units` | `selection`.
@@ -191,6 +195,8 @@ After evidence, write one outcome per claim you actually checked. Each row names
 - Accepted retained source metadata mechanically sets `verification.live_source`: at least one validated `live_tool` source emits `status: complete`; otherwise it emits `status: not_run`. Its public `detail` is always null. The host still authors the source records, verdicts, labels, and receipts; it does not author this derived status.
 - `not_checkable` needs a public report operand, public location, and substantive explanation. It has no decisive operands and no calculation.
 - The renderer puts the accepted check `id` and `verdict` on each material card as exact `data-card-id` and `data-disposition` attributes. Do not author aliases for these fields.
+- The host-authored `severity` controls only confirmation placement in the approved page hierarchy. Contradicted, changed-since-report, and not-checkable cards stay prominent. Confirmed cards with `high` or `medium` severity stay prominent; confirmed cards with `low` or null severity remain complete and customer-accessible under Technical detail. The renderer does not infer this priority from prose or values.
+- Customer card titles, locations, explanations, and claim quotes come directly from the accepted claim and `public_receipt`. Outcome grouping comes only from the accepted verdict and host-authored severity. The Next sentence comes only from the accepted coordinator presentation action. Fixed total maps translate only the exact root verdict, disposition, and retained source-kind enums into customer labels. Run status stays in Technical scope, uses customer wording rather than a raw status token, and never becomes a claim card.
 
 ### Data-currency dates
 
