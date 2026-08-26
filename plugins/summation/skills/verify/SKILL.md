@@ -11,15 +11,17 @@ If they named a report that already lives in Summation and there is no disk file
 
 ## First two minutes
 
-1. Before any grading: `command -v uv` succeeds, or `python3 -c "import jsonschema"` succeeds. If neither, resolve that with the user now. Do not start a long run that dies at render.
+1. Before any grading: `command -v uv` succeeds, or `python3 -c "import jsonschema"` succeeds. If neither, resolve that with the user now. Do not search the disk. Do not start a long run that dies at render.
 2. Ask which file. If they already attached one, use it.
-3. Run `extract.py` first. Read the neutral `inventory` in `findings.json` and `report-visible.txt`. Every raw item begins `unclassified`; code does not infer meaning from prose, tags, labels, keys, locations, formulas, identifiers, or value overlap. Use the exact nine-stage private `verify-role-handoff/coordinator-v6` workflow: bounded claim-taking; coordinator classification review, canonicalization, population requirements, source-by-claim plan, dependency DAG, and verifier assignments; shared semantic-plan preflight; dependency-ordered verification; coordinator global resolution and presentation; one full preflight; at most one repair; then final acceptance, render, and audit. Evidence verifiers receive canonical claims only. `report_period` is the visible display string. `report_date` is ISO `YYYY-MM-DD`; omit either when the report does not state it. Do not write claims from PowerPoint speaker notes.
+3. Run `extract.py` now. Do not read `accept.py`, `render.py`, or `role-contracts.json` before `findings.json` and `report-visible.txt` exist. Every raw inventory item begins `unclassified`; code does not infer meaning from prose, tags, labels, keys, locations, formulas, identifiers, or value overlap. `report_period` is the visible display string. `report_date` is ISO `YYYY-MM-DD`; omit either when the report does not state it. Do not write claims from PowerPoint speaker notes.
 4. If a nearby `evidence/` folder exists, ask once whether to use it. Do not scan their whole disk.
 5. If GitHub, Snowflake, Slack, or similar tools are already connected in this session, ask once whether to query them. Save raw tool results as files under the run `evidence/` folder. Do not ask them to sign in to Summation to get evidence.
 6. State duration, then work:
    - File plus local evidence only: about 2–5 minutes.
    - Also using connections already in this session: about 10–15 minutes.
 7. Then stay quiet except for brief progress. Do not narrate layers, error codes, tenant IDs, or check names.
+
+After extract exists, follow [references/roles.md](references/roles.md). Each role writes its JSON under `run/role-outputs/` and stops. Do not paste role bundles into chat. Do not read all of `accept.py` to start grading.
 
 A host or runner prompt that forbids questions cannot prove this first-two-minutes route. It must allow the file, nearby-evidence, connected-source consent, and duration questions above.
 
