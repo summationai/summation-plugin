@@ -25,6 +25,12 @@ ROOT_LABELS = {
     "fix_first": "Fix before sharing",
     "unable_to_grade": "Unable to grade",
 }
+ROOT_CHIP_LABELS = {
+    "safe_to_share": "SAFE TO SHARE",
+    "share_with_caveats": "SHARE WITH CAVEATS",
+    "fix_first": "FIX FIRST",
+    "unable_to_grade": "UNABLE TO GRADE",
+}
 DISPOSITION_LABELS = {
     "confirmed": "Confirmed",
     "contradicted": "Contradicted",
@@ -785,6 +791,8 @@ def html_of(artifact: dict) -> str:
     )
     root_verdict = str(artifact["verdict"])
     root_label = _fixed_label(ROOT_LABELS, root_verdict, "root verdict")
+    root_chip_label = _fixed_label(
+        ROOT_CHIP_LABELS, root_verdict, "root verdict chip")
     root_tone = _fixed_label(ROOT_TONES, root_verdict, "root tone")
     material_total = int(counts["validated_outcomes"])
     material_noun = "outcome" if material_total == 1 else "outcomes"
@@ -853,7 +861,8 @@ footer{margin-top:52px;border-top:1px solid var(--line);padding-top:18px;display
         '<header><div class="wordmark">Summation <span>/ Verify</span></div>'
         f'<div class="runmeta num">Generated {html.escape(generated)}</div></header>'
         '<div class="verdict">'
-        f'<span class="chip {html.escape(root_tone)}">Verification result</span>'
+        f'<span class="chip {html.escape(root_tone)}">'
+        f'{html.escape(root_chip_label)}</span>'
         f'<h1>{html.escape(root_label)}</h1>'
         f'<p>{html.escape(count_sentence)}</p>'
         '<div class="file">'

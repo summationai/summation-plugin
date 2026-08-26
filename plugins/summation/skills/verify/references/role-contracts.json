@@ -1,5 +1,5 @@
 {
-  "contract_version": "verify-role-handoff/coordinator-v1",
+  "contract_version": "verify-role-handoff/coordinator-v2",
   "classifications": [
     "material_claim",
     "supporting_provenance",
@@ -67,7 +67,19 @@
         "reason",
         "inventory_ids"
       ],
+      "supporting_provenance_required": ["reason"],
       "verifier_assignment_required": ["verifier_id", "claim_ids"]
+    },
+    "preflight": {
+      "runs_before": "acceptance",
+      "repair_passes": 1,
+      "returns": ["status", "repair_reasons", "coordinator"],
+      "validates": [
+        "complete_unique_opaque_membership",
+        "substantive_supporting_provenance_reason",
+        "substantive_structural_context_reason",
+        "public_numeric_calculation_result"
+      ]
     },
     "final_merge": {
       "input": {
@@ -92,7 +104,8 @@
         "classification",
         "inventory_ids",
         "member_refs"
-      ]
+      ],
+      "supporting_provenance_required": ["reason"]
     },
     "output": {
       "required": ["partition_id", "sources", "checks"],
@@ -110,7 +123,11 @@
         "report_operand",
         "decisive_operands",
         "explanation"
-      ]
+      ],
+      "calculation": {
+        "required": ["expression", "result"],
+        "result": "public_numeric_value"
+      }
     }
   },
   "mechanical_outputs": {

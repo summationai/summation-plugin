@@ -179,6 +179,78 @@ class CoordinatorContractTests(unittest.TestCase):
             problems,
         )
 
+    def test_canonical_supporting_provenance_requires_a_substantive_reason(self) -> None:
+        inv = inventory()
+        inv["items"] = [inv["items"][0]]
+        row = {
+            "partition_results": [{
+                "partition_id": "source-note",
+                "candidates": [{
+                    "id": "S1",
+                    "quote": "Revenue $359,490.34",
+                    "public_label": "Revenue source note",
+                    "importance": "supporting",
+                    "classification": "supporting_provenance",
+                    "reason": (
+                        "This occurrence identifies provenance for the displayed "
+                        "revenue value."
+                    ),
+                    "inventory_ids": ["INV-KPI"],
+                }],
+            }],
+            "membership": [{
+                "partition_id": "source-note",
+                "candidate_id": "S1",
+                "canonical_claim_id": "S-SOURCE",
+            }],
+            "verifier_assignments": [],
+        }
+        canonical = [{
+            "id": "S-SOURCE",
+            "quote": "Revenue $359,490.34",
+            "public_label": "Revenue source note",
+            "importance": "supporting",
+            "classification": "supporting_provenance",
+            "inventory_ids": ["INV-KPI"],
+            "member_refs": [{
+                "partition_id": "source-note", "candidate_id": "S1",
+            }],
+        }]
+        _handoff, problems = accept.validate_coordinator_handoff(
+            canonical, row, inv)
+        self.assertIn(
+            "canonical claim 'S-SOURCE' supporting_provenance reason is missing "
+            "or not substantive",
+            problems,
+        )
+        canonical[0]["reason"] = (
+            "This canonical record retains the report's visible provenance context."
+        )
+        _handoff, problems = accept.validate_coordinator_handoff(
+            canonical, row, inv)
+        self.assertEqual(problems, [])
+
+    def test_preflight_returns_exact_numeric_calculation_repair_reason(self) -> None:
+        checks = [{
+            "id": "C-TOTAL",
+            "public_receipt": {
+                "calculation": {
+                    "expression": "218385.67 + 132104.67",
+                    "result": "1 project",
+                },
+            },
+        }]
+        _handoff, problems = accept.coordinator_preflight(
+            claims(), coordinator(), inventory(), checks)
+        self.assertEqual(problems, [
+            "evidence-verifier check 'C-TOTAL' "
+            "public_receipt.calculation.result is not a public numeric value",
+        ])
+        checks[0]["public_receipt"]["calculation"]["result"] = "$350,490.34"
+        _handoff, problems = accept.coordinator_preflight(
+            claims(), coordinator(), inventory(), checks)
+        self.assertEqual(problems, [])
+
     def test_explicit_structural_title_cannot_become_a_canonical_card(self) -> None:
         inv = inventory()
         inv["items"].append({

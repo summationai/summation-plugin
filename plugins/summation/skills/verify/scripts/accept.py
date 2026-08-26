@@ -24,7 +24,7 @@ _SCRIPTS = pathlib.Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 from inventory import claim_inventory_ids, cover, inventory_for  # noqa: E402
-from receipt_math import calculation_problem  # noqa: E402
+from receipt_math import calculation_problem, public_number  # noqa: E402
 
 CLAIM_CLASSIFICATIONS = frozenset({
     "material_claim", "supporting_provenance", "structural_context",
@@ -688,18 +688,32 @@ def _validate_public_receipt(finding: dict, report: str,
             expression_problem = _public_text_problem(expression)
             if expression_problem:
                 problems.append(f"public_receipt.calculation.expression {expression_problem}")
+            numeric_result = public_number(result)
             if result in (None, "") or isinstance(result, bool):
                 problems.append("public_receipt.calculation.result is missing")
             elif isinstance(result, str):
                 result_problem = _public_text_problem(result)
                 if result_problem:
                     problems.append(f"public_receipt.calculation.result {result_problem}")
-            if not expression_problem and result not in (None, ""):
+            if result not in (None, "") and numeric_result is None:
+                problems.append(
+                    "public_receipt.calculation.result is not a public numeric value")
+            math_problem = None
+            if (
+                not expression_problem
+                and result not in (None, "")
+                and numeric_result is not None
+            ):
                 math_problem = calculation_problem(expression, result, decisive)
                 if math_problem:
                     problems.append(f"public_receipt.{math_problem}")
             canonical_calculation = {"expression": expression, "result": result}
-            if not expression_problem and result not in (None, "") and not math_problem:
+            if (
+                not expression_problem
+                and result not in (None, "")
+                and numeric_result is not None
+                and not math_problem
+            ):
                 disposition_problem = _arithmetic_disposition_problem(
                     finding, report_operand, canonical_calculation)
                 if disposition_problem:
@@ -765,8 +779,9 @@ def validate_claims(report: str, proposed: list) -> tuple[list, list]:
             if importance not in {None, "supporting"}:
                 problems.append("supporting_provenance requires importance supporting")
             importance = "supporting"
-            if not reason:
-                problems.append("supporting_provenance has no reason")
+            if not _substantive_explanation(reason):
+                problems.append(
+                    "supporting_provenance reason is missing or not substantive")
         elif classification == "material_claim":
             if importance != "material":
                 problems.append("material_claim requires importance material")
@@ -1077,6 +1092,11 @@ def validate_coordinator_handoff(canonical_claims, coordinator,
         if member_classes and member_classes != {classification}:
             problems.append(
                 f"canonical claim {claim_id!r} classification does not match its members")
+        if classification == "supporting_provenance" \
+                and not _substantive_explanation(claim.get("reason")):
+            problems.append(
+                f"canonical claim {claim_id!r} supporting_provenance reason "
+                "is missing or not substantive")
         if classification in CANONICAL_CLAIM_CLASSIFICATIONS and str(
             claim.get("public_label") or ""
         ).strip() not in member_labels:
@@ -1128,6 +1148,38 @@ def validate_coordinator_handoff(canonical_claims, coordinator,
 
     handoff["membership"] = membership_rows
     handoff["verifier_assignments"] = clean_assignments
+    return handoff, list(dict.fromkeys(problems))
+
+
+def coordinator_preflight(canonical_claims, coordinator, inventory: dict,
+                          proposed_checks) -> tuple[dict, list[str]]:
+    """Return exact host-handoff repair reasons before grounding acceptance."""
+    handoff, problems = validate_coordinator_handoff(
+        canonical_claims, coordinator, inventory)
+    if not isinstance(proposed_checks, list):
+        problems.append("evidence-verifier checks are not an array")
+        proposed_checks = []
+    for index, raw in enumerate(proposed_checks):
+        if not isinstance(raw, dict):
+            problems.append(
+                f"evidence-verifier checks[{index}] is not an object")
+            continue
+        check_id = str(raw.get("id") or "").strip() or f"index {index}"
+        receipt = raw.get("public_receipt")
+        calculation = (
+            receipt.get("calculation") if isinstance(receipt, dict) else None
+        )
+        if calculation is None:
+            continue
+        if not isinstance(calculation, dict):
+            problems.append(
+                f"evidence-verifier check {check_id!r} "
+                "public_receipt.calculation is not an object")
+            continue
+        if public_number(calculation.get("result")) is None:
+            problems.append(
+                f"evidence-verifier check {check_id!r} "
+                "public_receipt.calculation.result is not a public numeric value")
     return handoff, list(dict.fromkeys(problems))
 
 
@@ -1667,6 +1719,10 @@ def main() -> int:
     ap.add_argument("--evidence-dir", type=pathlib.Path, default=None)
     ap.add_argument("--report-text", type=pathlib.Path, default=None)
     ap.add_argument("--findings", type=pathlib.Path, default=None)
+    ap.add_argument(
+        "--preflight-only", action="store_true",
+        help="validate role handoffs and return exact repair reasons before acceptance",
+    )
     args = ap.parse_args()
 
     if not args.report.is_file():
@@ -1718,8 +1774,22 @@ def main() -> int:
     if not isinstance(inventory, dict):
         inventory = inventory_for(args.report)
 
-    coordinator_handoff, coordinator_problems = validate_coordinator_handoff(
-        proposed_claims, claims_meta.get("coordinator"), inventory)
+    coordinator_handoff, coordinator_problems = coordinator_preflight(
+        proposed_claims, claims_meta.get("coordinator"), inventory, proposed)
+    if args.preflight_only:
+        preflight = {
+            "status": "failed" if coordinator_problems else "complete",
+            "repair_reasons": coordinator_problems,
+            "coordinator": coordinator_handoff,
+        }
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(preflight, indent=2) + "\n")
+        print(
+            f"preflight: {len(coordinator_problems)} repair reason(s)"
+        )
+        for reason in coordinator_problems:
+            print(f"  REPAIR {reason}")
+        return 2 if coordinator_problems else 0
     proposed_sources = list((checks_doc or {}).get("sources") or [])
     accepted_sources, discarded_sources = validate_sources(
         sandbox, proposed_sources, args.report)

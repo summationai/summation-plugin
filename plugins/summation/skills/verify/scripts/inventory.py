@@ -87,49 +87,41 @@ def _html_items(path: pathlib.Path) -> list[dict]:
             for c_i, cell in enumerate(row):
                 add("table_cell", cell, f"table{t_i}/r{r_i + 1}/c{c_i + 1}")
 
-    class _Blocks(HTMLParser):
-        BLOCKS = frozenset({
-            "h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "caption",
-            "dt", "dd", "blockquote",
-        })
+    class _Occurrences(HTMLParser):
+        """Collect each visible body text occurrence without assigning meaning."""
 
         def __init__(self) -> None:
             super().__init__()
-            self.blocks: list[str] = []
-            self._parts: list[str] | None = None
-            self._skip = 0
+            self.occurrences: list[str] = []
+            self._hidden = 0
             self._table = 0
 
         def handle_starttag(self, tag, attrs):
             tag = tag.lower()
-            if tag in {"script", "style"}:
-                self._skip += 1
+            if tag in {"head", "script", "style", "template"}:
+                self._hidden += 1
             elif tag == "table":
                 self._table += 1
-            elif not self._skip and not self._table and tag in self.BLOCKS:
-                self._parts = []
 
         def handle_endtag(self, tag):
             tag = tag.lower()
-            if tag in {"script", "style"} and self._skip:
-                self._skip -= 1
+            if tag in {"head", "script", "style", "template"} and self._hidden:
+                self._hidden -= 1
             elif tag == "table" and self._table:
                 self._table -= 1
-            elif tag in self.BLOCKS and self._parts is not None:
-                shown = re.sub(r"\s+", " ", "".join(self._parts)).strip()
-                if shown:
-                    self.blocks.append(shown)
-                self._parts = None
 
         def handle_data(self, data):
-            if not self._skip and not self._table and self._parts is not None:
-                self._parts.append(data)
+            if self._hidden or self._table:
+                return
+            shown = re.sub(r"\s+", " ", data).strip()
+            if shown:
+                self.occurrences.append(shown)
 
-    blocks = _Blocks()
-    blocks.feed(raw)
-    blocks.close()
-    for index, shown in enumerate(blocks.blocks, 1):
-        add("html_block", shown, f"block{index}")
+    occurrences = _Occurrences()
+    occurrences.feed(raw)
+    occurrences.close()
+    for index, shown in enumerate(occurrences.occurrences, 1):
+        add("html_text", shown, f"text{index}")
     return items
 
 

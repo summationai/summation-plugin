@@ -452,6 +452,48 @@ class ReceiptContractTests(unittest.TestCase):
                 discarded[0]["problems"],
             )
 
+    def test_calculation_result_must_be_a_numeric_public_value(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            report = folder / "report.md"
+            report.write_text("Two projects plus three projects total five projects.")
+            claim = {
+                "id": "L1", "quote": "five projects",
+                "public_label": "Reported project total",
+                "importance": "material", "classification": "material_claim",
+                "inventory_ids": ["INV1"],
+            }
+            check = {
+                "id": "C1", "claim_id": "L1", "type": "arithmetic",
+                "basis": "report", "verdict": "confirmed",
+                "importance": "material",
+                "report_quote": "Two projects plus three projects total five projects.",
+                "public_receipt": {
+                    "report_operand": {
+                        "label": "Reported project total", "value": 5,
+                        "location": "Project summary total",
+                    },
+                    "decisive_operands": [
+                        {"label": "First project count", "value": 2,
+                         "location": "Project summary first count"},
+                        {"label": "Second project count", "value": 3,
+                         "location": "Project summary second count"},
+                    ],
+                    "calculation": {"expression": "2 + 3", "result": "five projects"},
+                    "explanation": (
+                        "The two displayed project counts add to the reported total."
+                    ),
+                },
+            }
+            kept, discarded = accept.validate_receipts(
+                report.read_text(), folder, [check], {"L1"}, report,
+                sources=[], claim_labels={"L1": claim["public_label"]})
+        self.assertEqual(kept, [])
+        self.assertIn(
+            "public_receipt.calculation.result is not a public numeric value",
+            discarded[0]["problems"],
+        )
+
     def test_temporal_receipt_requires_exact_later_value_and_date(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)

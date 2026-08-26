@@ -392,6 +392,7 @@ class HtmlTests(unittest.TestCase):
         for mutation in (
             page.replace("Summation", "safe_to_share Summation", 1),
             page.replace("Verification: report.md", "grade-artifact", 1),
+            page.replace("FIX FIRST", "Verification result", 1),
             page.replace('class="tag"', 'class="missing-tag"', 1),
             page.replace('class="next"', 'class="not-next"', 1),
         ):
@@ -419,7 +420,7 @@ class HtmlTests(unittest.TestCase):
         ))
         self.assertIn("<title>Verification: report.md</title>", page)
         for text in (
-            "Summation <span>/ Verify</span>", "Fix before sharing",
+            "Summation <span>/ Verify</span>", "FIX FIRST", "Fix before sharing",
             "Verification results", "Contradicted", "Confirmed",
             "Changed since the report", "Not checkable",
             "Report examined:", "report.md", "Week ending April 4, 2026",
@@ -645,6 +646,18 @@ class HtmlTests(unittest.TestCase):
         self.assertEqual(render.SOURCE_KIND_LABELS, {
             "supplied_file": "Supplied file", "live_tool": "Live source",
         })
+        self.assertEqual(render.ROOT_CHIP_LABELS, {
+            "safe_to_share": "SAFE TO SHARE",
+            "share_with_caveats": "SHARE WITH CAVEATS",
+            "fix_first": "FIX FIRST",
+            "unable_to_grade": "UNABLE TO GRADE",
+        })
+        for verdict, label in render.ROOT_CHIP_LABELS.items():
+            artifact = make_artifact([accepted_check(1)])
+            artifact["verdict"] = verdict
+            page = render.html_of(artifact)
+            self.assertIn(f">{label}</span>", page)
+            self.assertNotIn(">Verification result</span>", page)
         with self.assertRaises(SystemExit):
             render._fixed_label(render.DISPOSITION_LABELS, "unknown", "disposition")
 

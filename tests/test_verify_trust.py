@@ -60,6 +60,28 @@ class InventoryAndRefusalTests(unittest.TestCase):
             by_text["On hand: 42 units."]["id"],
         )
 
+    def test_html_full_inventories_kpi_and_table_occurrences_separately(self) -> None:
+        report = ROOT / "tests" / "fixtures" / "verify" / "weekly-sales-snapshot.html"
+        first = inventory.inventory_for(report)["items"]
+        second = inventory.inventory_for(report)["items"]
+
+        self.assertEqual(first, second)
+        self.assertEqual(len({row["id"] for row in first}), len(first))
+        outside = [row for row in first if row["kind"] == "html_text"]
+        table = [row for row in first if row["kind"] == "table_cell"]
+        self.assertTrue({"$359,490.34", "Revenue", "10,481", "Units"} <= {
+            row["displayed"] for row in outside
+        })
+        self.assertTrue({"$359,490.34", "$367,290.32", "Total"} <= {
+            row["displayed"] for row in table
+        })
+        tile_total = next(
+            row for row in outside if row["displayed"] == "$359,490.34")
+        table_total = next(
+            row for row in table if row["displayed"] == "$359,490.34")
+        self.assertNotEqual(tile_total["id"], table_total["id"])
+        self.assertTrue(all(row["importance"] == "unclassified" for row in first))
+
     def test_unreadable_pdf_inventory_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             report = pathlib.Path(raw) / "broken.pdf"

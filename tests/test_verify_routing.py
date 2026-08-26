@@ -118,6 +118,22 @@ class RoutingTests(unittest.TestCase):
             contract["claim_taker"]["output"]["structural_context_required"],
         )
         self.assertEqual(
+            contract["coordinator"]["output"]["supporting_provenance_required"],
+            ["reason"],
+        )
+        self.assertEqual(
+            contract["evidence_verifier"]["input"]["supporting_provenance_required"],
+            ["reason"],
+        )
+        self.assertEqual(
+            contract["evidence_verifier"]["output"]["calculation"]["result"],
+            "public_numeric_value",
+        )
+        self.assertEqual(
+            contract["coordinator"]["preflight"]["repair_passes"], 1)
+        self.assertEqual(
+            contract["coordinator"]["preflight"]["runs_before"], "acceptance")
+        self.assertEqual(
             contract["claim_taker"]["input"]["inventory_item_required"],
             ["id", "displayed", "location", "importance"],
         )

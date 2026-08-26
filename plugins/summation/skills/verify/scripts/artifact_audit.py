@@ -328,6 +328,11 @@ def _customer_html_problems(artifact: dict, page: str) -> list[str]:
     root_label = render.ROOT_LABELS.get(root_verdict)
     if root_label is None or root_label not in visible:
         problems.append("plain-English root verdict is missing")
+    root_chip = render.ROOT_CHIP_LABELS.get(root_verdict)
+    if root_chip is None or not re.search(
+        rf'<span class="chip [^"]+">{re.escape(root_chip)}</span>', page
+    ):
+        problems.append("verdict-specific customer chip is missing")
     if page.count('class="stats"') != 1:
         problems.append("customer scoreboard is missing or duplicated")
     if page.count('class="next"') != 1:

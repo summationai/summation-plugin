@@ -857,6 +857,39 @@ class PresentationTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_cli_preflight_returns_exact_repair_reasons_before_acceptance(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            report = folder / "report.md"
+            report.write_text("On-time delivery was 94%.\n")
+            claims = folder / "claims.json"
+            claims.write_text(json.dumps({"claims": [claim()]}))
+            checks = folder / "checks.json"
+            bad = not_checkable_check()
+            bad["public_receipt"]["calculation"] = {
+                "expression": "1 + 1", "result": "two projects",
+            }
+            checks.write_text(json.dumps({"sources": [], "checks": [bad]}))
+            out = folder / "preflight.json"
+            argv = sys.argv
+            sys.argv = [
+                "accept.py", "--preflight-only", "--report", str(report),
+                "--claims", str(claims), "--checks", str(checks),
+                "--out", str(out),
+            ]
+            try:
+                code = accept.main()
+            finally:
+                sys.argv = argv
+            self.assertEqual(code, 2)
+            doc = json.loads(out.read_text())
+            self.assertEqual(doc["status"], "failed")
+            self.assertEqual(doc["repair_reasons"], [
+                "coordinator handoff is missing or not an object",
+                "evidence-verifier check 'C1' "
+                "public_receipt.calculation.result is not a public numeric value",
+            ])
+
     def test_cli_retains_public_label_and_exact_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
