@@ -22,7 +22,7 @@ When a shell is available, day-to-day data work goes through **sumcli** (full su
 
 1. Pick the surface: shell available → **sumcli**; shell-less → MCP.  
 2. Auth: CLI → `sumcli auth whoami` (401 → `sumcli auth login`); MCP → **`whoami`** (if needed → **signin** skill).  
-3. Prefer a domain skill: `start`, `opportunities`, `report`, `validate`, `query`, `catalog`, `schedule`, `connect`, `diagnose`.  
+3. Prefer a domain skill: `start`, `opportunities`, `report`, `verify`, `query`, `catalog`, `schedule`, `connect`, `diagnose`.  
 4. Else: sumcli commands (discover live: `sumcli | jq '.result.resources'`) or MCP tools (below). Speak in outcomes to the user.  
 5. Auth errors → `sumcli auth login` / signin; never ask for tokens in chat.
 

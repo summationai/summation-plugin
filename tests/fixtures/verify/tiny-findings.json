@@ -1,0 +1,835 @@
+{
+  "engine": {
+    "name": "coldverify",
+    "version": "1.0.0",
+    "offline": true,
+    "checks_registered": 84,
+    "families": [
+      "direction_polarity",
+      "internal_arithmetic",
+      "period_integrity",
+      "rounding",
+      "selection_honesty",
+      "template_hygiene",
+      "ungrounded_claims",
+      "units_scale"
+    ]
+  },
+  "source": {
+    "path": "tiny-fixture/reports/2026-04-04-weekly-sales-snapshot.html",
+
+    "format": "html",
+    "sha256": "c908e569c7bdcf7b5bd3c7108677ad08d3401636ab4234ad8e2d7a3a8204a02b",
+    "period_label": "Week ending 2026-04-04"
+  },
+  "timings": {
+    "elapsed_ms": 5,
+    "time_to_first_finding_ms": 0
+  },
+  "coverage": {
+    "claims_in_ledger": 11,
+    "claims_found_reported": 11,
+    "claims_reached_by_a_check": 11,
+    "engine_checkable_fraction": 1.0,
+    "extractor_checkable_fraction": 0.7273,
+    "checks_registered": 84,
+    "checks_with_findings": 3,
+    "checks_found_nothing": 81,
+    "checks_errored": 0,
+    "flood_threshold": 10,
+    "findings_collapsed": [],
+    "schema_validated": true
+  },
+  "headline": {
+    "tier_definition": {
+      "D": "high severity: an internal contradiction the document cannot explain away",
+      "C": "medium severity: a defect that needs an author decision or a source to settle",
+      "B": "low severity: a coverage or hygiene gap, not a wrong number",
+      "note": "SPEC.md item 4.8 names 'tier-D defects' without defining the scale; this mapping is the engine's stated definition."
+    },
+    "tier_d_defects": 1,
+    "tier_d_per_100_claims": 9.090909090909092,
+    "findings_total": 3,
+    "findings_by_tier": {
+      "B": 2,
+      "C": 0,
+      "D": 1
+    },
+    "findings_by_family": {
+      "direction_polarity": 0,
+      "internal_arithmetic": 1,
+      "period_integrity": 0,
+      "rounding": 0,
+      "selection_honesty": 0,
+      "template_hygiene": 1,
+      "ungrounded_claims": 0,
+      "units_scale": 1
+    }
+  },
+  "findings": [
+    {
+      "check_id": "ari_total_footing",
+      "family": "internal_arithmetic",
+      "severity": "high",
+      "tier": "D",
+      "confidence": "medium",
+      "overturnable_by": "metric_layer",
+      "evidence_class": "arithmetic",
+      "claim_ids": [
+        "c0008",
+        "c0004",
+        "c0006"
+      ],
+      "statement": "Revenue is shown as $359,490.34 but its 2 components sum to 350,490.34, a gap of 9,000 against a rounding allowance of only 0.015.",
+      "location": "table-01/Total/Revenue",
+      "detail": {
+        "stated": 359490.34,
+        "computed": 350490.34,
+        "discrepancy": 9000.0,
+        "single_value_band": 0.005,
+        "summed_band": 0.015,
+        "band_verdict": "fail"
+      }
+    },
+    {
+      "check_id": "tpl_detector_error_recorded",
+      "family": "template_hygiene",
+      "severity": "low",
+      "tier": "B",
+      "confidence": "low",
+      "overturnable_by": null,
+      "evidence_class": "coverage",
+      "claim_ids": [],
+      "statement": "3 extraction pass(es) do not apply to a html document (ocr, pdf_text_layer, xlsx_sheets), which is expected and is recorded so the run's coverage can be read in full.",
+      "location": "extraction_report",
+      "detail": {
+        "aggregate_key": "detectors_inapplicable_to_this_format",
+        "detectors": [
+          "pdf_text_layer",
+          "ocr",
+          "xlsx_sheets"
+        ],
+        "source_format": "html"
+      }
+    },
+    {
+      "check_id": "uni_unit_unknown",
+      "family": "units_scale",
+      "severity": "low",
+      "tier": "B",
+      "confidence": "low",
+      "overturnable_by": null,
+      "evidence_class": "coverage",
+      "claim_ids": [
+        "c0001",
+        "c0003"
+      ],
+      "statement": "2 figures have no unit recorded, so unit and scale checks cannot reach them.",
+      "location": "heading",
+      "detail": {
+        "claim_ids": [
+          "c0001",
+          "c0003"
+        ]
+      }
+    }
+  ],
+  "findings_truncated": false,
+  "checks_run": [
+    {
+      "check_id": "ari_cross_partition_total_disagreement",
+      "family": "internal_arithmetic",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "Two tables that partition the same metric and period do not total the same amount."
+    },
+    {
+      "check_id": "ari_delta_consistency",
+      "family": "internal_arithmetic",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A stated absolute or point change does not equal the difference between the two levels the ledger holds for the same metric."
+    },
+    {
+      "check_id": "ari_delta_direction_vs_levels",
+      "family": "internal_arithmetic",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A percent change and the two levels behind it point in opposite directions."
+    },
+    {
+      "check_id": "ari_double_counting",
+      "family": "internal_arithmetic",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "One component is claimed by two different totals in the same table column, so it is counted twice."
+    },
+    {
+      "check_id": "ari_orphan_component",
+      "family": "internal_arithmetic",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A component sits in a column that has a total, but no total claims it."
+    },
+    {
+      "check_id": "ari_percent_change_consistency",
+      "family": "internal_arithmetic",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A stated percent change does not match the two levels it is drawn from, after first-order propagation of both levels' rounding envelopes."
+    },
+    {
+      "check_id": "ari_percent_of_total",
+      "family": "internal_arithmetic",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A stated share of total does not equal the component divided by the total, after propagating both rounding envelopes through the quotient."
+    },
+    {
+      "check_id": "ari_self_referential_total",
+      "family": "internal_arithmetic",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A total lists itself among its own components."
+    },
+    {
+      "check_id": "ari_shares_sum_to_100",
+      "family": "internal_arithmetic",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A set of composition shares does not sum to 100 within the summed rounding envelope of the shares."
+    },
+    {
+      "check_id": "ari_sign_convention",
+      "family": "internal_arithmetic",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "The rendered value carries a negative convention that the parsed value does not, or the reverse."
+    },
+    {
+      "check_id": "ari_subtotal_chain",
+      "family": "internal_arithmetic",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A total agrees with its immediate subtotals but not with the components those subtotals are built from."
+    },
+    {
+      "check_id": "ari_total_footing",
+      "family": "internal_arithmetic",
+      "outcome": "found",
+      "count": 1,
+      "elapsed_ms": 0,
+      "description": "A total or subtotal differs from its components by more than the propagated rounding envelope of the whole set."
+    },
+    {
+      "check_id": "ari_total_footing_precision",
+      "family": "internal_arithmetic",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A total's discrepancy against its components exceeds the total's own display envelope but stays inside the summed envelope of the parts: the column does not foot at the precision shown."
+    },
+    {
+      "check_id": "ari_unparseable_value",
+      "family": "internal_arithmetic",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A displayed value could not be parsed to a number, so nothing about it is checkable."
+    },
+    {
+      "check_id": "dir_contradictory_words",
+      "family": "direction_polarity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "One claim carries both a growth word and a decline word."
+    },
+    {
+      "check_id": "dir_direction_sign_mismatch",
+      "family": "direction_polarity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A growth word sits on a negative move, or a decline word sits on a positive move."
+    },
+    {
+      "check_id": "dir_flat_but_moved",
+      "family": "direction_polarity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A metric is called flat while the move is larger than the display could hide."
+    },
+    {
+      "check_id": "dir_moved_but_zero",
+      "family": "direction_polarity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A movement word sits on a change that rounds to zero at the precision shown."
+    },
+    {
+      "check_id": "dir_polarity_improved",
+      "family": "direction_polarity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A metric is described as improved while it moved in the direction its polarity calls worse."
+    },
+    {
+      "check_id": "dir_polarity_missing_for_judgement",
+      "family": "direction_polarity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A metric is judged as improved or worsened but carries no polarity, so the judgement is unverifiable."
+    },
+    {
+      "check_id": "dir_polarity_worsened",
+      "family": "direction_polarity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A metric is described as worsened while it moved in the direction its polarity calls better."
+    },
+    {
+      "check_id": "dir_prose_vs_table_direction",
+      "family": "direction_polarity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A prose sentence asserts a direction that the table cell for the same metric contradicts."
+    },
+    {
+      "check_id": "gnd_causal_marker_unsupported",
+      "family": "ungrounded_claims",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A causal assertion has no cause and effect pair of claims behind it."
+    },
+    {
+      "check_id": "gnd_claim_without_period",
+      "family": "ungrounded_claims",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A flow figure carries no period, so it cannot be tied to a window."
+    },
+    {
+      "check_id": "gnd_comparative_without_number",
+      "family": "ungrounded_claims",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A comparative or superlative sentence carries no figure at all."
+    },
+    {
+      "check_id": "gnd_confidence_basis_mismatch",
+      "family": "ungrounded_claims",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A claim's declared confidence level does not follow from its evidence basis."
+    },
+    {
+      "check_id": "gnd_forward_looking_figure",
+      "family": "ungrounded_claims",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A figure sits inside a forward-looking statement. Recorded for context only: a forecast is a decision, not a defect."
+    },
+    {
+      "check_id": "gnd_prose_number_not_extracted",
+      "family": "ungrounded_claims",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A prose block states a figure that is not present as any claim, so the figure is outside every check the engine can run."
+    },
+    {
+      "check_id": "gnd_superlative_uncheckable",
+      "family": "ungrounded_claims",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A superlative has no comparable sibling values in the ledger, so it cannot be tested even in principle."
+    },
+    {
+      "check_id": "gnd_unsourced_figure",
+      "family": "ungrounded_claims",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A figure in a format that supports per-cell traceability carries no source reference."
+    },
+    {
+      "check_id": "per_base_equals_period",
+      "family": "period_integrity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A comparison names a base period identical to the claim's own period."
+    },
+    {
+      "check_id": "per_comparison_length_mismatch",
+      "family": "period_integrity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A comparison sets two windows of different lengths against each other."
+    },
+    {
+      "check_id": "per_document_period_absent_from_claims",
+      "family": "period_integrity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "The document states a period that no claim covers."
+    },
+    {
+      "check_id": "per_end_after_extraction",
+      "family": "period_integrity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 1,
+      "description": "A window ends after the document was extracted, so it covers data that did not exist yet."
+    },
+    {
+      "check_id": "per_kind_label_mismatch",
+      "family": "period_integrity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A period's declared kind does not match the shape of its label."
+    },
+    {
+      "check_id": "per_label_vs_length",
+      "family": "period_integrity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A period label states a window length that the recorded length contradicts."
+    },
+    {
+      "check_id": "per_length_vs_dates",
+      "family": "period_integrity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A window's recorded length does not match its start and end dates."
+    },
+    {
+      "check_id": "per_mixed_periods_in_column",
+      "family": "period_integrity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "One table column mixes periods, so its rows are not comparable."
+    },
+    {
+      "check_id": "per_mixed_periods_in_total",
+      "family": "period_integrity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A total adds components covering different periods."
+    },
+    {
+      "check_id": "per_same_value_across_window_lengths",
+      "family": "period_integrity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "One figure is attributed to two windows of different lengths, so the same number is presented as covering both."
+    },
+    {
+      "check_id": "per_yoy_alignment_365",
+      "family": "period_integrity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A trailing-window year-over-year comparison is shifted 365 days, which breaks day-of-week alignment."
+    },
+    {
+      "check_id": "per_yoy_alignment_missing",
+      "family": "period_integrity",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A trailing-window year-over-year comparison does not record its alignment, so whether day-of-week was preserved is unknown."
+    },
+    {
+      "check_id": "rnd_delta_below_resolution",
+      "family": "rounding",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A stated change is smaller than the rounding envelope of the levels it was computed from, so it is noise from the display."
+    },
+    {
+      "check_id": "rnd_display_disagrees_with_value",
+      "family": "rounding",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "Rounding the parsed value at its own displayed precision does not reproduce the rendered figure."
+    },
+    {
+      "check_id": "rnd_envelope_inconsistent",
+      "family": "rounding",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "The extractor's declared rounding envelope does not follow from the displayed precision and scale."
+    },
+    {
+      "check_id": "rnd_inconsistent_precision_in_column",
+      "family": "rounding",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "One table column shows the same unit at more than one precision."
+    },
+    {
+      "check_id": "rnd_precision_exceeds_components",
+      "family": "rounding",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A total is displayed to a finer precision than any of its components, claiming accuracy its inputs do not carry."
+    },
+    {
+      "check_id": "rnd_precision_indeterminable",
+      "family": "rounding",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A figure has no displayed precision, so no tolerance band can be built for it."
+    },
+    {
+      "check_id": "rnd_spurious_precision",
+      "family": "rounding",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A count or a large-scale figure is shown to a precision the underlying quantity cannot have."
+    },
+    {
+      "check_id": "rnd_threshold_crossing",
+      "family": "rounding",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A value below a threshold is displayed as a number that reaches it, so the display asserts an attainment the value does not support."
+    },
+    {
+      "check_id": "sel_declared_scale_contradicted",
+      "family": "units_scale",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A table declares a scale that its values do not honour."
+    },
+    {
+      "check_id": "sel_declared_scope_contradicted",
+      "family": "selection_honesty",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A table declares a scope that its own rows contradict."
+    },
+    {
+      "check_id": "sel_declared_sort_violated",
+      "family": "selection_honesty",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A table declares a sort order that its rows do not follow."
+    },
+    {
+      "check_id": "sel_inconsistent_filters",
+      "family": "selection_honesty",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "Two figures for the same metric and period state different filters but are presented as comparable."
+    },
+    {
+      "check_id": "sel_row_count_mismatch",
+      "family": "selection_honesty",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A table's declared row count does not match the rows the ledger holds for it."
+    },
+    {
+      "check_id": "sel_superlative_false",
+      "family": "selection_honesty",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A superlative names a value that is not the extreme of its comparable set."
+    },
+    {
+      "check_id": "sel_top_n_count_mismatch",
+      "family": "selection_honesty",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A table promising a top or bottom N does not contain N rows."
+    },
+    {
+      "check_id": "sel_top_n_not_extremes",
+      "family": "selection_honesty",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A top or bottom N table omits a value from elsewhere in the document that belongs in it."
+    },
+    {
+      "check_id": "tpl_detector_error_recorded",
+      "family": "template_hygiene",
+      "outcome": "found",
+      "count": 1,
+      "elapsed_ms": 0,
+      "description": "An extraction detector reported an error or an unsupported format, so part of the document was never read."
+    },
+    {
+      "check_id": "tpl_duplicate_location",
+      "family": "template_hygiene",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "Two claims occupy the same table cell, so the extraction or the document has a duplicated figure."
+    },
+    {
+      "check_id": "tpl_duplicate_prose_block",
+      "family": "template_hygiene",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "Two prose blocks carry identical text."
+    },
+    {
+      "check_id": "tpl_empty_table_row",
+      "family": "template_hygiene",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A table row carries no values at all beyond its own row number, so it is an unfilled template row that shipped."
+    },
+    {
+      "check_id": "tpl_empty_value_rendered",
+      "family": "template_hygiene",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A figure position renders as a dash, blank or n/a rather than a number."
+    },
+    {
+      "check_id": "tpl_extraction_report_incomplete",
+      "family": "template_hygiene",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "The extraction report omits a coverage field, so what the extractor attempted cannot be told from what it found."
+    },
+    {
+      "check_id": "tpl_placeholder_text",
+      "family": "template_hygiene",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "Placeholder or template markup survived into the delivered document."
+    },
+    {
+      "check_id": "tpl_repeated_sentence_across_sections",
+      "family": "template_hygiene",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "The same sentence appears in more than one section."
+    },
+    {
+      "check_id": "tpl_spreadsheet_error_value",
+      "family": "template_hygiene",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A spreadsheet error string was rendered as a figure."
+    },
+    {
+      "check_id": "tpl_stale_period_reference",
+      "family": "template_hygiene",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "Prose names a period that no figure in the document covers, which is the signature of text carried over from a previous run."
+    },
+    {
+      "check_id": "tpl_unreadable_charts",
+      "family": "template_hygiene",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "Charts in the document could not be read, so their figures are outside every check."
+    },
+    {
+      "check_id": "uni_basis_points_magnitude",
+      "family": "units_scale",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A basis-points figure has a magnitude that reads as percent, or a percent figure has a magnitude that reads as basis points."
+    },
+    {
+      "check_id": "uni_cross_partition_scale_disagreement",
+      "family": "units_scale",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "Two tables that partition the same metric and period disagree by a factor of a thousand, so one of them did not honour its declared scale."
+    },
+    {
+      "check_id": "uni_currency_code_absent",
+      "family": "units_scale",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A currency figure carries no currency code."
+    },
+    {
+      "check_id": "uni_magnitude_vs_declared_scale",
+      "family": "units_scale",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A figure declares a large scale but carries a value too small for that scale to have been applied."
+    },
+    {
+      "check_id": "uni_mixed_currency_in_total",
+      "family": "units_scale",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A currency total sums components in more than one currency."
+    },
+    {
+      "check_id": "uni_mixed_units_in_column",
+      "family": "units_scale",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "One table column mixes units, so its values cannot be read against each other."
+    },
+    {
+      "check_id": "uni_mixed_units_in_total",
+      "family": "units_scale",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A total sums components of more than one unit."
+    },
+    {
+      "check_id": "uni_percent_symbol_vs_unit",
+      "family": "units_scale",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A percent sign is rendered on a figure whose unit is not a percentage, or the reverse."
+    },
+    {
+      "check_id": "uni_percent_vs_points",
+      "family": "units_scale",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A move in a percent-unit metric is stated as a percent change when it is a point change, or the reverse."
+    },
+    {
+      "check_id": "uni_ratio_rendered_as_percent",
+      "family": "units_scale",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A ratio between 0 and 1 is rendered as if it were already a percentage."
+    },
+    {
+      "check_id": "uni_same_value_conflicting_units",
+      "family": "units_scale",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "The same movement is stated in points in one place and in percent in another, so one of the two is the wrong unit."
+    },
+    {
+      "check_id": "uni_scale_inferred",
+      "family": "units_scale",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A figure's scale came from its magnitude rather than from a declaration."
+    },
+    {
+      "check_id": "uni_scale_not_honoured",
+      "family": "units_scale",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "The rendered digits multiplied by the declared scale do not give the parsed value."
+    },
+    {
+      "check_id": "uni_unit_form_mismatch",
+      "family": "units_scale",
+      "outcome": "found_nothing",
+      "count": 0,
+      "elapsed_ms": 0,
+      "description": "A claim's unit and its comparison form disagree: a percent unit carrying a point change, or a points unit carrying a percent change."
+    },
+    {
+      "check_id": "uni_unit_unknown",
+      "family": "units_scale",
+      "outcome": "found",
+      "count": 1,
+      "elapsed_ms": 0,
+      "description": "A figure's unit is unknown or absent, which puts it outside the unit checks."
+    }
+  ],
+  "not_checkable": [
+    {
+      "check_id": "ari_percent_change_consistency",
+      "reason": "the two levels behind this percent change are not asserted by the document and cannot be resolved unambiguously",
+      "claim_ids": [
+        "c0010"
+      ]
+    },
+    {
+      "check_id": "dir_direction_sign_mismatch",
+      "reason": "the change is rendered as an unsigned magnitude, so the direction word is the only statement of direction and there is nothing to contradict",
+      "claim_ids": [
+        "c0010"
+      ]
+    },
+    {
+      "check_id": "uni_percent_vs_points",
+      "reason": "the two levels behind this change are not both resolvable, so the point change and the percent change cannot be told apart",
+      "claim_ids": [
+        "c0010"
+      ]
+    }
+  ]
+}

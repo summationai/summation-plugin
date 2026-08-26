@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verification: march-marketing-recap.html</title>
+<style>
+  :root{
+    --ink:#191b1e; --ink-2:#4b5158; --ink-3:#787f87;
+    --paper:#fdfdfc; --panel:#f4f4f1; --line:#e3e3de;
+    --red:#b42318; --red-soft:#fdf0ee;
+    --green:#1a7f4b; --green-soft:#eef7f1;
+    --amber:#9a5b0b; --amber-soft:#fbf4e8;
+    --gray:#5d646c; --gray-soft:#f0f1f2;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  body{font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    color:var(--ink);background:var(--paper);padding:0 24px 64px}
+  .page{max-width:730px;margin:0 auto}
+  .num{font-variant-numeric:tabular-nums}
+  .sample{background:#1c1e21;color:#fff;font-size:12px;letter-spacing:.03em;
+    text-align:center;padding:7px 12px;border-radius:0 0 8px 8px}
+  header{display:flex;justify-content:space-between;align-items:baseline;
+    padding:24px 0 14px;border-bottom:1px solid var(--line)}
+  .wordmark{font-weight:700;font-size:15px}
+  .wordmark span{color:var(--ink-3);font-weight:500}
+  .runmeta{font-size:13px;color:var(--ink-3)}
+  .verdict{padding:40px 0 8px}
+  .chip{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.08em;
+    padding:4px 10px;border-radius:4px;margin-bottom:14px}
+  .chip.fix{background:var(--red-soft);color:var(--red);border:1px solid #ecc8c3}
+  .chip.safe{background:var(--green-soft);color:var(--green);border:1px solid #c6e2d2}
+  .chip.warn{background:var(--amber-soft);color:var(--amber);border:1px solid #ecd9b8}
+  h1{font-size:31px;line-height:1.15;letter-spacing:-.015em;font-weight:700;max-width:30ch;text-wrap:balance}
+  .verdict p{margin-top:12px;font-size:16px;color:var(--ink-2);max-width:60ch;text-wrap:pretty}
+  .file{font-size:13px;color:var(--ink-3);margin-top:16px}
+  .file code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel);
+    padding:2px 6px;border-radius:4px;color:var(--ink-2);white-space:nowrap}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);
+    border-radius:8px;overflow:hidden;margin:30px 0 0;background:#fff}
+  .stat{padding:16px 18px 14px;border-left:1px solid var(--line)}
+  .stat:first-child{border-left:none}
+  .stat .n{font-size:26px;font-weight:700;letter-spacing:-.02em}
+  .stat .l{font-size:13px;font-weight:600;margin-top:2px}
+  .stat .s{font-size:12px;color:var(--ink-3);margin-top:2px;text-wrap:balance}
+  .stat .n.na{font-size:14px;color:var(--ink-3);font-weight:600;padding:12px 0 6px}
+  .stat.red .l{color:var(--red)} .stat.green .l{color:var(--green)}
+  .stat.amber .l{color:var(--amber)} .stat.gray .l{color:var(--gray)}
+  section{margin-top:44px}
+  h2{font-size:18px;letter-spacing:-.01em;margin-bottom:6px}
+  .sectionlede{font-size:14px;color:var(--ink-2);margin-bottom:16px;max-width:62ch}
+  .card{border:1px solid var(--line);border-radius:8px;background:#fff;padding:20px 22px}
+  .card + .card{margin-top:12px}
+  .card .tag{font-size:11.5px;font-weight:700;letter-spacing:.07em;border-radius:4px;
+    display:inline-block;padding:3px 8px;margin-bottom:10px}
+  .card.err{border-left:3px solid var(--red)}
+  .card.err .tag{background:var(--red-soft);color:var(--red)}
+  .card.ok{border-left:3px solid var(--green)}
+  .card.ok .tag{background:var(--green-soft);color:var(--green)}
+  .card.chg{border-left:3px solid var(--amber)}
+  .card.chg .tag{background:var(--amber-soft);color:var(--amber)}
+  .card h3{font-size:16px;text-wrap:balance}
+  .card .where{font-size:13px;color:var(--ink-3);margin-top:2px}
+  .card p{font-size:14px;color:var(--ink-2);margin-top:10px;max-width:62ch}
+  table.math{margin-top:14px;border-collapse:collapse;font-size:14px;width:100%;max-width:380px}
+  table.math td{padding:5px 0}
+  table.math td.v{text-align:right;padding-left:24px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  table.math tr.sum td{border-top:1px solid var(--line);font-weight:600}
+  table.math tr.bad td{color:var(--red);font-weight:700}
+  table.math tr.bad td:first-child{font-weight:600}
+  .receipt{margin-top:14px;border-top:1px dashed var(--line);padding-top:12px;
+    display:grid;grid-template-columns:110px 1fr;row-gap:6px;column-gap:14px;font-size:13px}
+  .receipt .k{color:var(--ink-3)}
+  .receipt .q{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+  .receipt .q code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel);
+    padding:1px 5px;border-radius:3px}
+  .machine{font-size:12px;color:var(--ink-3);font-weight:600;margin-top:10px}
+  .compare{display:flex;gap:12px;margin-top:14px;flex-wrap:wrap}
+  .compare .box{flex:1;min-width:150px;border:1px solid var(--line);border-radius:6px;padding:12px 14px}
+  .compare .box .bl{font-size:12px;color:var(--ink-3)}
+  .compare .box .bv{font-size:20px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+  ul.plain{list-style:none;margin-top:4px}
+  ul.plain li{padding:12px 0;border-bottom:1px solid var(--line);font-size:14px;color:var(--ink-2)}
+  ul.plain li:last-child{border-bottom:none}
+  ul.plain li strong{color:var(--ink)}
+  ul.plain .w{display:block;max-width:66ch}
+  .scope{display:flex;gap:26px;flex-wrap:wrap;margin-top:8px;font-size:13px}
+  .scope div{color:var(--ink-3);max-width:200px;text-wrap:pretty}
+  .scope b{display:block;color:var(--ink);font-weight:600;font-size:13.5px}
+  .next{margin-top:34px;background:var(--panel);border-radius:8px;padding:16px 20px;
+    font-size:14px;color:var(--ink-2)}
+  .next b{color:var(--ink)}
+  details{margin-top:26px;font-size:13px;color:var(--ink-3)}
+  details summary{cursor:pointer;font-weight:600;color:var(--ink-2)}
+  details p{margin:8px 0;max-width:70ch}
+  details ul{margin:8px 0 0 18px}
+  details li{margin-top:6px;max-width:70ch}
+  details code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel);
+    padding:1px 5px;border-radius:3px}
+  footer{margin-top:52px;border-top:1px solid var(--line);padding-top:18px;
+    display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;
+    font-size:13px;color:var(--ink-3)}
+  @media (max-width:640px){
+    .stats{grid-template-columns:repeat(2,1fr)}
+    .stat:nth-child(3){border-left:none}
+    .stat{border-top:1px solid var(--line)}
+    .stat:nth-child(-n+2){border-top:none}
+    table.math{max-width:none}
+    table.math td.v{padding-left:12px}
+  }
+  @media (max-width:480px){
+    .receipt{grid-template-columns:1fr;row-gap:2px}
+    .receipt .k{margin-top:8px}
+  }
+  @media print{body{padding:0}.card,.stats{break-inside:avoid}.sample{background:none;color:var(--ink);border:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<div class="page">
+<div class="sample">Design sample. All companies, reports, and figures are fictional.</div>
+<header>
+  <div class="wordmark">Summation <span>/ Verify</span></div>
+  <div class="runmeta num">Verified August 23, 2026</div>
+</header>
+<div class="verdict">
+  <span class="chip safe">SAFE TO SHARE</span>
+  <h1>No errors found. All six claims were checked.</h1>
+  <p>The report makes six claims. Five match your evidence exactly, and the report&rsquo;s one total equals the sum of its rows.</p>
+  <div class="file">Report examined: <code>march-marketing-recap.html</code> (month ending March 31, 2026)</div>
+</div>
+<div class="stats" role="group" aria-label="Verification results">
+  <div class="stat gray"><div class="n num">0</div><div class="l">Errors found</div><div class="s">nothing to fix</div></div>
+  <div class="stat green"><div class="n num">6</div><div class="l">Confirmed</div><div class="s">checked and correct</div></div>
+  <div class="stat gray"><div class="n na">Not run</div><div class="l">Today&rsquo;s value differs</div><div class="s">no live source connected</div></div>
+  <div class="stat gray"><div class="n num">0</div><div class="l">Not checkable</div><div class="s">every claim had evidence</div></div>
+</div>
+<section>
+  <h2>Confirmed correct</h2>
+  <div class="card ok">
+    <span class="tag">CONFIRMED</span>
+    <h3>The paid clicks figure matches your evidence</h3>
+    <div class="where">Headline tile, Paid clicks</div>
+    <div class="receipt">
+      <div class="k">Report says</div><div class="q">&ldquo;128,441&rdquo;</div>
+      <div class="k">Evidence says</div><div class="q"><code>clicks-march.json</code> field <code>paid_clicks</code>&nbsp;=&nbsp;128,441</div>
+    </div>
+    <div class="machine">Checked by a program: the report quote and the evidence value match.</div>
+  </div>
+  <div class="card ok">
+    <span class="tag">CONFIRMED</span>
+    <h3>The spend total equals the sum of its rows</h3>
+    <div class="where">Table 1, Total row</div>
+    <div class="receipt">
+      <div class="k">Report total</div><div class="q">&ldquo;$96,410&rdquo;</div>
+      <div class="k">Rows sum to</div><div class="q">$96,410</div>
+    </div>
+    <div class="machine">Checked by a program: the total was recomputed from the report itself.</div>
+  </div>
+  <p class="sectionlede" style="margin-top:12px">The other four confirmed claims are listed under technical detail, with their&nbsp;receipts.</p>
+</section>
+<section>
+  <h2>What we could not check, and why</h2>
+  <ul class="plain">
+    <li><span class="w"><strong>Every claim had evidence.</strong></span></li>
+  </ul>
+</section>
+<section>
+  <h2>What ran</h2>
+  <div class="scope">
+    <div><b>Claims</b>Every headline figure, table total, and named metric counts as a claim; six found. All six were checked.</div>
+    <div><b>Document arithmetic</b>Ran on the report&rsquo;s one table. The total equals the sum of its rows.</div>
+    <div><b>Live source query</b>Did not run.</div>
+    <div><b>Evidence used</b><code style="font-size:12px">clicks-march.json</code>, <code style="font-size:12px">spend-march.csv</code>. The files do not record a retrieval date, so their age is unknown.</div>
+  </div>
+</section>
+<div class="next">
+  <b>Next:</b> connect this report to Summation to run these checks on a schedule with a live source&nbsp;query.
+</div>
+<details>
+  <summary>Technical detail</summary>
+  <p>Every result above carries a receipt: an exact quote, field, or recomputed sum that a program re-read from the report or an evidence file. A claim with no evidence to check against is reported under &ldquo;What we could not check, and why.&rdquo;</p>
+  <p>The other four confirmed claims:</p>
+  <ul>
+    <li>&ldquo;Email revenue was $61,240.&rdquo; <code>spend-march.csv</code> row <code>email_revenue</code>&nbsp;=&nbsp;61,240</li>
+    <li>&ldquo;CPC held at $0.84.&rdquo; <code>spend-march.csv</code> row <code>cpc</code>&nbsp;=&nbsp;0.84</li>
+    <li>&ldquo;New subscribers: 4,118.&rdquo; <code>clicks-march.json</code> field <code>new_subscribers</code>&nbsp;=&nbsp;4,118</li>
+    <li>&ldquo;Unsubscribe rate was 0.31%.&rdquo; <code>clicks-march.json</code> field <code>unsub_rate</code>&nbsp;=&nbsp;0.31</li>
+  </ul>
+  <p>Full check-by-check receipts: <code>receipts.json</code> in the run folder next to the report.</p>
+</details>
+<footer>
+  <div>Checked automatically by Summation Verify</div>
+  <div class="num">Run sf-002 · August 23, 2026</div>
+</footer>
+</div>
+</body>
+</html>

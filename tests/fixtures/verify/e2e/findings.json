@@ -1,0 +1,57 @@
+{
+  "source": {
+    "path": "weekly-sales-snapshot.html",
+    "format": "html",
+    "sha256": "c908e569c7bdcf7b5bd3c7108677ad08d3401636ab4234ad8e2d7a3a8204a02b"
+  },
+  "coverage": {
+    "claims_in_ledger": 1,
+    "claims_reached_by_a_check": 1,
+    "extractor_checkable_fraction": 1.0,
+    "engine_checkable_fraction": 1.0,
+    "checks_registered": 1,
+    "checks_with_findings": 1,
+    "checks_found_nothing": 0,
+    "checks_errored": 0
+  },
+  "headline": {
+    "tier_d_defects": 1,
+    "tier_d_per_100_claims": 100.0
+  },
+  "findings": [
+    {
+      "check_id": "ari_total_footing",
+      "family": "internal_arithmetic",
+      "severity": "high",
+      "tier": "D",
+      "statement": "The \u201cTotal\u201d row in Revenue shows $359,490.34, but the rows above sum to 350490.34.",
+      "location": "table1/Total/Revenue",
+      "claim_ids": [
+        "t1c1"
+      ],
+      "detail": {
+        "stated": 359490.34,
+        "computed": 350490.34,
+        "discrepancy": 9000.0
+      }
+    }
+  ],
+  "findings_truncated": false,
+  "agentic_only": false,
+  "agentic_scan_completed": true,
+  "extraction_method": null,
+  "verification": {
+    "document": {
+      "status": "complete",
+      "detail": "Table footing ran on HTML."
+    },
+    "semantic": {
+      "status": "not_run",
+      "detail": "Semantic review is supplied separately by the host agent."
+    },
+    "live_source": {
+      "status": "not_run",
+      "detail": null
+    }
+  }
+}

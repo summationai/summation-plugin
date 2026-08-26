@@ -1,0 +1,5 @@
+{"checks": [
+ {"id":"C1","claim_id":"L1","type":"semantic","basis":"evidence","verdict":"confirmed","importance":"material","report_quote":"10,481","evidence_file":"q3.json","evidence_json":[{"pointer":"/units","value":10481}],"explanation":"The units tile matches the evidence file."},
+ {"id":"C2","claim_id":"L1","type":"staleness","basis":"evidence","verdict":"changed_since_report","importance":"supporting","report_quote":"10,481","report_value":10481,"evidence_file":"live-units.json","evidence_json":[{"pointer":"/units_now","value":10613}],"reconstruction_attempt":"The source was re-queried with the week ending April 4 as the filter; the units source has no date column, so the April 4 value could not be rebuilt.","current_value":10613,"current_as_of":"2026-08-23","explanation":"Only the current value was available and it does not match."},
+ {"id":"C3","claim_id":"L2","type":"semantic","basis":"evidence","verdict":"not_checkable","importance":"supporting","report_quote":"Revenue is down 4.6% against the same week last year.","explanation":"No evidence file covers the prior-year comparison."}
+]}

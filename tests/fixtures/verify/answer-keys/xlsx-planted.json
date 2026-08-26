@@ -1,0 +1,19 @@
+{
+  "fixture": "xlsx-margin-twin",
+  "format": "xlsx",
+  "expected_verdict": "fix_first",
+  "planted_defects": [
+    {
+      "id": "X1",
+      "shown": "Note: gross margin improved 3% week over week.",
+      "public_evidence": {
+        "report": "Note: gross margin improved 3% week over week.",
+        "prior": "40.0%",
+        "current": "43.0%",
+        "calculation": "43.0% - 40.0% = 3.0 percentage points",
+        "explanation": "This is a 3.0 percentage-point increase, not a 3% relative increase.",
+        "location": "Weekly Margin sheet, note (cell A9)"
+      }
+    }
+  ]
+}

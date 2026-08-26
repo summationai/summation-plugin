@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "summation",
   "version": "1.1.1",
-  "description": "Summation's AI data analyst: ask data questions, search the catalog, run bounded SQL, generate and validate reports, export PDF/DOCX/Markdown. CLI-first via sumcli when a shell is available, hosted MCP otherwise; host-managed auth.",
+  "description": "Summation's AI data analyst: ask data questions, search the catalog, run bounded SQL, generate and verify reports, export PDF/DOCX/Markdown. CLI-first via sumcli when a shell is available, hosted MCP otherwise; host-managed auth.",
   "author": {
     "name": "Summation",
     "url": "https://summation.com"
@@ -26,7 +26,7 @@
     "com.openai.codex": {
       "displayName": "Summation",
       "shortDescription": "Ask Summation data questions from Codex.",
-      "longDescription": "The Summation plugin brings the analyst into Codex for governed data questions, catalog discovery, SQL, reports, validation, and scheduling. Skills orchestrate the hosted Summation MCP server; auth is browser OAuth on first use (same product as Claude).",
+      "longDescription": "The Summation plugin brings the analyst into Codex for governed data questions, catalog discovery, SQL, reports, verification, and scheduling. Skills orchestrate the hosted Summation MCP server; auth is browser OAuth on first use (same product as Claude).",
       "developerName": "Summation",
       "category": "Data",
       "capabilities": [

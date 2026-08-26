@@ -17,7 +17,7 @@ Execute via **sumcli** when a shell is available (see `../api/references/sumcli.
    - Follow status until complete (or a clear failure).  
 4. **Verify:** `export_report` (or get content) and confirm it’s **non-empty** and looks like the real report.  
 5. **Export format:** default **markdown** unless they asked pdf/docx. No internal cite markup.  
-6. **Hand back:** title, short summary, offer the `validate` skill before external share.
+6. **Hand back:** title, short summary, offer the `verify` skill before external share.
 
 ## Rules
 

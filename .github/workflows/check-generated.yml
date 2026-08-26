@@ -21,6 +21,12 @@ jobs:
       - name: Test sumcli ensure hook
         run: python3 tests/test_ensure_sumcli.py
 
+      - name: Install jsonschema for verify renderer
+        run: python3 -m pip install --user jsonschema
+
+      - name: Test verify skill scripts
+        run: python3 -m unittest discover -s tests -p 'test_verify*'
+
       - name: Fail if generated package drifts from skills/ + packaging/
         run: |
           find plugins -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true

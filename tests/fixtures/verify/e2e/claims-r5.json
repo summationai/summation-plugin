@@ -1,0 +1,21 @@
+{
+  "claims": [
+    {
+      "id": "L1",
+      "quote": "10,481",
+      "importance": "material"
+    },
+    {
+      "id": "L2",
+      "quote": "Revenue is down 4.6% against the same week last year.",
+      "importance": "supporting"
+    },
+    {
+      "id": "L3",
+      "quote": "$218,385.67",
+      "importance": "supporting"
+    }
+  ],
+  "report_period": "week ending April 4, 2026",
+  "report_date": "2026-04-04"
+}

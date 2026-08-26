@@ -401,7 +401,7 @@ def _skills_for(theme_id: str) -> list[str]:
         "metrics_kpi": ["query", "report"],
         "sql_warehouse": ["catalog", "query", "connect"],
         "files_csv": ["connect", "catalog", "query"],
-        "reports_narrative": ["report", "validate"],
+        "reports_narrative": ["report", "verify"],
         "recurring": ["schedule", "report"],
         "data_quality": ["catalog", "query", "diagnose"],
         "connect_source": ["connect", "start"],

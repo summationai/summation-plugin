@@ -95,7 +95,7 @@ Claude Code invokes a skill as `/summation:<name>`; Codex invokes it as `$summat
 | `signout` | disconnect Summation (`logout` is an alias) |
 | `diagnose` | check connectivity and what data is visible (`doctor` is an alias) |
 | `report` | generate a report → export markdown/PDF/DOCX |
-| `validate` | verify a report before sharing |
+| `verify` | grade a disk file or a report that lives in Summation (`validate` is an alias) |
 | `query` | read-only query or open-ended analysis |
 | `catalog` | search tables, views, catalog |
 | `connect` | add a data source (secrets stay in the Summation web app) |
@@ -105,7 +105,7 @@ Credentials for the happy path live in the host MCP client, not in this repo. Do
 
 ## Org announcement template
 
-> **Summation is now in Claude.** Open a new chat and type **/summation:start** — it walks you through connecting, shows a map of your data, introduces the analyst, and runs your first report. Already connected? Just ask data questions, or use /summation:report, /summation:query, /summation:catalog, /summation:validate.
+> **Summation is now in Claude.** Open a new chat and type **/summation:start** — it walks you through connecting, shows a map of your data, introduces the analyst, and runs your first report. Already connected? Just ask data questions, or use /summation:report, /summation:query, /summation:catalog, /summation:verify.
 
 ## For agent harnesses (customer `AGENTS.md` snippet)
 
@@ -113,7 +113,7 @@ Credentials for the happy path live in the host MCP client, not in this repo. Do
 When working on data analysis, metrics, or report commentary, use the Summation
 plugin first (catalog discovery before SQL; never guess table names). Prefer
 exported report content over raw internals, cite request_ids on failures, and
-run the `validate` skill before any report is shared externally. Drafts need explicit
+run the `verify` skill before any report is shared externally. Drafts need explicit
 user approval before publishing anywhere.
 ```
 

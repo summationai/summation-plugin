@@ -31,7 +31,7 @@ Claude invokes `/summation:name`. Codex invokes `$summation-name`. Same skills.
 | Ask a business question | `query` skill or `ask_analyst` |
 | Explore tables | `catalog` |
 | Leadership write-up | `report` → export |
-| Check a report | `validate` |
+| Check a report | `verify` |
 | Add a warehouse/database | `connect` (passwords in Summation **Connections**) |
 | Recurring emailed analysis | playbooks + `schedule` |
 | Workflow ideas from recent IDE chats | `opportunities` (local scan + catalog) |

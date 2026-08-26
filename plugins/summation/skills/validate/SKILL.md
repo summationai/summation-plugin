@@ -1,24 +1,14 @@
 ---
 name: validate
-description: Verify a Summation report against its sources before sharing. Use before external or executive distribution, or when the user asks if a report is solid.
+description: Alias for verify — grade a report before sharing. Use when they ask to validate a report or run /summation:validate. Prefer verify.
 ---
 
-# Summation Validate
+# Validate → verify
 
-Execute via **sumcli** when a shell is available (see `../api/references/sumcli.md`); the MCP tools below are the shell-less fallback. Validation can take a while — tell the user it’s running; don’t give up at ~2 minutes if still in progress.
+This skill was **renamed to `verify`**.
 
-## Flow
+## What to do
 
-1. Resolve project and report (list tools / files if list_reports is empty).  
-2. **`validate_report`**. Progress language while waiting.  
-3. Verdict panel in plain language:  
-   - How many claims checked / flagged  
-   - Flagged items with why  
-   - Overall: safe to share / share with caveats / fix first  
+Follow the **`verify`** skill. `verify` picks the local file route or the connected path from what they handed you.
 
-## Rules
-
-- Never soften flags.  
-- Don’t call a report valid if validation failed.  
-- After the `report` skill, offer this proactively.  
-- No REST helper.
+Invoke the `verify` skill (`validate` is an alias if the host still registers it).

@@ -52,7 +52,7 @@ After the gate is open **or** after a clear “no data yet” path, offer **once
 
 ### Step 4 — First report
 
-Numbered ideas (from catalog and/or opportunities). On yes → **report** skill (markdown) → offer **validate**. Next steps in plain language.
+Numbered ideas (from catalog and/or opportunities). On yes → **report** skill (markdown) → offer **verify**. Next steps in plain language.
 
 ## Voice
 
