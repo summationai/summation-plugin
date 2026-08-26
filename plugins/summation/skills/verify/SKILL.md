@@ -108,7 +108,7 @@ Grade from the report, the evidence, and this skill. Write `grade.json`. Run `pa
 
 ## After the page
 
-Open `artifact/grade-artifact.html`. Read `verdict` from `grade-artifact.json`. Say that in plain language. If the page names a next step, repeat that step. If they want this in Summation, go to **Connected path**.
+Open `artifact/grade-artifact.html`. Read `verdict` from `grade-artifact.json`. Say that in plain language. If the page names a next step, repeat that step. If they want this in Summation, go to **Connected path**. Do not start that path during the local grade.
 
 ## Laws
 
@@ -117,6 +117,32 @@ Open `artifact/grade-artifact.html`. Read `verdict` from `grade-artifact.json`. 
 - No letter grade. No “Layer 1” / “Layer 2”.
 - Accept the file they have. If you cannot obtain the report text, say so and stop.
 - Zero Summation login for the local grade.
+
+### Optional local source wrapper
+
+When an authenticated local SDK, CLI, or API profile can already read a source but no MCP tool exposes it, a direct read-only API or CLI call remains valid and is usually simpler. You may offer to generate a local read-only FastMCP wrapper for the current host workflow. Explain the bounded scope and generate it only after explicit consent.
+
+If they consent, the wrapper must:
+
+- expose source-specific typed functions rather than arbitrary SQL or shell input;
+- reuse the existing credential provider or profile without copying secrets into code, chat, logs, or evidence;
+- mark every tool read-only, non-destructive, and idempotent;
+- save the raw result under the run `evidence/` folder; and
+- make one test call and retain its raw result before using the wrapper for a grade.
+
+The wrapper lasts only for the current host workflow. A recurring Summation workflow still needs the equivalent source connection inside Summation. Keep this fallback optional: add no backend, relay, default-grade dependency, or mandatory wrapper step.
+
+## Run directory
+
+```text
+run/
+  report/               original file
+  report-visible.txt    extract.py writes this
+  evidence/             unchanged tool results and user files
+  findings.json         extract.py writes this
+  grade.json            you write this
+  artifact/             page.py writes grade-artifact.html + .json
+```
 
 ## Connected path
 
