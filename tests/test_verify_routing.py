@@ -97,6 +97,11 @@ class RoutingTests(unittest.TestCase):
         self.assertIn("one Next that names a supported file type", text)
         self.assertIn("If extract exits non-zero and `findings.json` exists, keep going", text)
 
+    def test_changed_since_report_needs_reconstruction_attempt(self) -> None:
+        text = skill("verify")
+        local, _, _ = text.partition("## Connected path")
+        self.assertIn("`changed_since_report` card needs `reconstruction_attempt`", local)
+
     def test_live_tool_is_declared_in_grade_json(self) -> None:
         text = skill("verify")
         local, _, _ = text.partition("## Connected path")

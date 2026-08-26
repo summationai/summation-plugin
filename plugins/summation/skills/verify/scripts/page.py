@@ -192,6 +192,12 @@ def _card_to_check(card: dict, source_ids: set[str]) -> dict:
         }
     if source_id:
         receipt["source_id"] = source_id
+    reconstruction = card.get("reconstruction_attempt")
+    if reconstruction is not None:
+        receipt["reconstruction_attempt"] = _close(reconstruction)
+    elif verdict == "changed_since_report":
+        raise SystemExit(
+            f"page: card {card_id} changed_since_report needs reconstruction_attempt")
     check_type = "arithmetic" if calculation is not None else "semantic"
     return {
         "id": card_id,

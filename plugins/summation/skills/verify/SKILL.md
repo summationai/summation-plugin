@@ -79,7 +79,7 @@ Write one object:
 }
 ```
 
-Card `verdict` is `confirmed`, `contradicted`, `not_checkable`, or `changed_since_report`. If extract cannot read the file, also set top-level `"verdict": "unable_to_grade"`.
+Card `verdict` is `confirmed`, `contradicted`, `not_checkable`, or `changed_since_report`. If extract cannot read the file, also set top-level `"verdict": "unable_to_grade"`. A `changed_since_report` card needs `reconstruction_attempt`: one sentence that names the replacement.
 
 If the report states a period, put that visible string in `report_period`. If it states a calendar date, put ISO `YYYY-MM-DD` in `report_date`. Those fields are not customer cards. `page.py` copies them onto the file line. Leave them out only when the report does not state them.
 

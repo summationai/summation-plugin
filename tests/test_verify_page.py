@@ -378,6 +378,99 @@ class PageUtilityTests(unittest.TestCase):
                 row["kind"] == "supplied_file"
                 for row in silent_art["sources"]))
 
+    def test_page_keeps_changed_since_report_reconstruction(self) -> None:
+        evidence = {
+            "as_of_dt": "2026-08-25",
+            "vendor_count": 198,
+            "retrieved_at": "2026-08-26T21:28:47Z",
+        }
+        grade = {
+            "summary": "The live vendor table has moved since August 17.",
+            "report_period": "August 17, 2026",
+            "report_date": "2026-08-17",
+            "cards": [{
+                "id": "C-LATEST",
+                "label": "Last as-of snapshot",
+                "quote": "last as-of is August 11, 105 vendors, 0 breaches",
+                "verdict": "changed_since_report",
+                "explanation": (
+                    "The live table latest as-of is now August 25, with 198 vendors."
+                ),
+                "location": "Status now",
+                "report_value": "August 11, 105 vendors, 0 breaches",
+                "source_id": "SRC-get_dropship_vendor_sla_latest",
+                "reconstruction_attempt": (
+                    "Replace last as-of August 11, 105 vendors, 0 breaches "
+                    "with August 25, 198 vendors."
+                ),
+                "operands": [{
+                    "label": "Latest as-of date in the live table",
+                    "value": "2026-08-25",
+                    "location": "as_of_dt in get_dropship_vendor_sla_latest.json",
+                }],
+            }],
+            "next": [{
+                "kind": "review_before_share",
+                "text": "Refresh the last-as-of line from the live table before sharing.",
+                "quote": "last as-of is August 11, 105 vendors, 0 breaches",
+                "card_ids": ["C-LATEST"],
+            }],
+            "sources": [{
+                "id": "SRC-get_dropship_vendor_sla_latest",
+                "kind": "live_tool",
+                "label": "dropship_vendor_sla_daily latest",
+                "evidence_file": "get_dropship_vendor_sla_latest.json",
+                "retrieval": {
+                    "retrieved_at": "2026-08-26T21:28:47Z",
+                    "tool": "get_dropship_vendor_sla_latest",
+                    "arguments": {},
+                },
+            }],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            visible = tmp_path / "report-visible.txt"
+            findings = tmp_path / "findings.json"
+            grade_path = tmp_path / "grade.json"
+            evidence_dir = tmp_path / "evidence"
+            evidence_dir.mkdir()
+            (evidence_dir / "get_dropship_vendor_sla_latest.json").write_text(
+                json.dumps(evidence) + "\n")
+            out_dir = tmp_path / "artifact"
+            self.assertEqual(_run([
+                sys.executable, str(EXTRACT),
+                "--report", str(REPORT),
+                "--visible", str(visible),
+                "--out", str(findings),
+            ]).returncode, 0)
+            grade_path.write_text(json.dumps(grade) + "\n")
+            proc = _run([
+                sys.executable, str(PAGE),
+                "--findings", str(findings),
+                "--grade", str(grade_path),
+                "--evidence-dir", str(evidence_dir),
+                "--out-dir", str(out_dir),
+            ])
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            html = (out_dir / "grade-artifact.html").read_text()
+            self.assertIn("SHARE WITH CAVEATS", html)
+            self.assertIn("<b>Live source</b>Ran", html)
+            self.assertIn("August 25, 198 vendors", html)
+            self.assertIn("Reconstruction attempt", html)
+            missing = dict(grade)
+            missing["cards"] = [dict(grade["cards"][0])]
+            missing["cards"][0].pop("reconstruction_attempt")
+            grade_path.write_text(json.dumps(missing) + "\n")
+            proc = _run([
+                sys.executable, str(PAGE),
+                "--findings", str(findings),
+                "--grade", str(grade_path),
+                "--evidence-dir", str(evidence_dir),
+                "--out-dir", str(tmp_path / "artifact-missing"),
+            ])
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("reconstruction_attempt", proc.stderr)
+
     def test_page_rejects_live_tool_without_the_evidence_file(self) -> None:
         grade = {
             "summary": "The GBP rate matches.",
