@@ -90,6 +90,15 @@ class RoutingTests(unittest.TestCase):
         text = skill("verify")
         self.assertIn("`report_value` must be the visible report operand", text)
 
+    def test_rate_delta_uses_percentage_points(self) -> None:
+        text = skill("verify")
+        local, _, _ = text.partition("## Connected path")
+        self.assertIn("percentage points (`pp`)", local)
+        self.assertIn("result `3 pp`", local)
+        self.assertIn("Say `3 pp` in the Next step", local)
+        self.assertIn("relative 7.5%", local)
+        self.assertIn("improved 3 pp week over week", local)
+
     def test_role_contract_wires_coordinator_v6_and_identical_routes(self) -> None:
         verify = skill("verify")
         roles = (SKILLS / "verify" / "references" / "roles.md").read_text()

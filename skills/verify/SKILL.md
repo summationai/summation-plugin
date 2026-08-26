@@ -37,6 +37,8 @@ You own meaning. Python owns file names, hashes, declared arithmetic, privacy st
 - A displayed total that does not match the table is an error. Name the replacement and every place it appears.
 - A year-over-year percentage that matches the corrected arithmetic after the report’s declared rounding is confirmed. One decimal on this planted weekly-sales report turns 4.574… into 4.6%. That match is not an error.
 - Do not treat a contradicted displayed total as true when you grade a dependent percentage.
+- When two rates sit in one table (40.0% then 43.0%), the move is percentage points (`pp`). Write `43.0 - 40.0` with result `3 pp`. Say `3 pp` in the Next step. A relative 7.5% is the wrong customer correction unless the report itself claims that relative form.
+- If the report writes “improved 3%” for that table, contradict it. The Next step is: write “improved 3 pp week over week.”
 - Write one Next step the customer can do.
 
 The page uses the Verify exemplar skin: FIX FIRST or SAFE TO SHARE, a scoreboard, a math table on numeric cards, and one Next step.

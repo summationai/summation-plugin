@@ -25,6 +25,7 @@ SCRIPTS = pathlib.Path(__file__).resolve().parent
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+import receipt_math  # noqa: E402
 import render  # noqa: E402
 
 _OPS = {
@@ -115,12 +116,10 @@ def _card_to_check(card: dict, source_ids: set[str]) -> dict:
         expression = str(calculation.get("expression") or "")
         declared = calculation.get("result")
         actual = recompute(expression)
-        declared_text = str(declared).replace(",", "").replace("$", "").replace("%", "")
-        try:
-            declared_num = float(declared_text)
-        except (TypeError, ValueError) as exc:
-            raise SystemExit(f"page: card {card_id} calculation result is not numeric") from exc
-        if abs(actual - declared_num) > 1e-6:
+        declared_num = receipt_math.public_number(declared)
+        if declared_num is None:
+            raise SystemExit(f"page: card {card_id} calculation result is not numeric")
+        if abs(actual - float(declared_num)) > 1e-6:
             raise SystemExit(
                 f"page: card {card_id} calculation {actual} does not match {declared}"
             )

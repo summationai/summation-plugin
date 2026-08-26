@@ -9,7 +9,7 @@ import re
 
 _RESULT = re.compile(
     r"^\s*\$?\s*(?P<number>-?\d[\d,]*(?:\.\d+)?)\s*"
-    r"(?:%|percent(?:age)?(?:\s+points?)?|points?|bps|basis\s+points?)?\s*$",
+    r"(?:%|pp|percent(?:age)?(?:\s+points?)?|points?|bps|basis\s+points?)?\s*$",
     re.I,
 )
 _ALLOWED = re.compile(r"^[\d\s.,()+\-*/]+$")

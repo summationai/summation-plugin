@@ -84,6 +84,70 @@ class PageUtilityTests(unittest.TestCase):
             self.assertNotEqual(proc.returncode, 0)
             self.assertIn("calculation", proc.stderr)
 
+    def test_page_keeps_percentage_point_unit_on_rate_delta(self) -> None:
+        grade = {
+            "summary": "Change the margin note from 3% to 3 pp.",
+            "report_period": "Week ending 2026-08-15",
+            "report_date": "2026-08-15",
+            "cards": [{
+                "id": "C-WOW",
+                "label": "Week-over-week gross margin change",
+                "quote": "Note: gross margin improved 3% week over week.",
+                "verdict": "contradicted",
+                "explanation": "40.0% to 43.0% is 3 pp, not a 3% relative change.",
+                "location": "Note below the table",
+                "report_value": "3%",
+                "operands": [
+                    {
+                        "label": "Gross margin, prior week",
+                        "value": "40.0%",
+                        "location": "Prior-week gross margin cell",
+                    },
+                    {
+                        "label": "Gross margin, current week",
+                        "value": "43.0%",
+                        "location": "Current-week gross margin cell",
+                    },
+                ],
+                "calculation": {"expression": "43.0 - 40.0", "result": "3 pp"},
+            }],
+            "next": [{
+                "kind": "correct_report",
+                "text": (
+                    "Change the note from “gross margin improved 3% week over week” "
+                    "to “gross margin improved 3 pp week over week.”"
+                ),
+                "quote": "3%",
+                "card_ids": ["C-WOW"],
+            }],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            visible = tmp_path / "report-visible.txt"
+            findings = tmp_path / "findings.json"
+            grade_path = tmp_path / "grade.json"
+            out_dir = tmp_path / "artifact"
+            self.assertEqual(_run([
+                sys.executable, str(EXTRACT),
+                "--report", str(REPORT),
+                "--visible", str(visible),
+                "--out", str(findings),
+            ]).returncode, 0)
+            grade_path.write_text(json.dumps(grade) + "\n")
+            proc = _run([
+                sys.executable, str(PAGE),
+                "--findings", str(findings),
+                "--grade", str(grade_path),
+                "--out-dir", str(out_dir),
+            ])
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            html = (out_dir / "grade-artifact.html").read_text()
+            self.assertIn("FIX FIRST", html)
+            self.assertIn("3 pp", html)
+            self.assertIn("43.0 - 40.0 = 3 pp", html)
+            self.assertIn("improved 3 pp week over week", html)
+            self.assertNotIn("7.5%", html)
+
     def test_packaged_plugin_copy_matches(self) -> None:
         self.assertEqual(PAGE.read_bytes(), PACKAGED.read_bytes())
         render = ROOT / "skills/verify/scripts/render.py"
