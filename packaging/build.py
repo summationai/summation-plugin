@@ -194,6 +194,10 @@ def main() -> None:
     DST.mkdir(parents=True)
 
     copytree(SKILLS, DST / "skills")
+    # Overlay helpers stay in source skills/ for unit tests. They are not a
+    # customer host path. Do not ship them in the packaged plugin.
+    for helper in (DST / "skills" / "verify" / "scripts").glob("write_*.py"):
+        helper.unlink()
     # Root hooks/ is what Claude Code auto-discovers today. Spec copy stays
     # under the Claude extension namespace.
     copytree(hooks_src, DST / "hooks")
