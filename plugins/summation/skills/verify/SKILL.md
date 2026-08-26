@@ -21,7 +21,7 @@ If they named a report that already lives in Summation and there is no disk file
    - Also using connections already in this session: about 10–15 minutes.
 7. Then stay quiet except for brief progress. Do not narrate layers, error codes, tenant IDs, or check names.
 
-After extract exists, run `write_claim_taker_inputs.py` to materialize one read-only input file per inventory kind. Then, for each of those files, read only the Claim-taker section of [references/roles.md](references/roles.md), classify that partition, and write the result with `write_role_output.py`. Do not read `accept.py` or `role-contracts.json` until at least one file exists in `run/role-outputs/`. After those files exist, run `write_coordinator_input.py`, then `write_claims_json.py`. That script copies claim-taker classifications into `claims.json`. It does not invent title/claim labels. Do not read all of `accept.py` before `claims.json` exists. After `claims.json` exists, run `write_verifier_inputs.py` and author first-wave assessments. Do not paste role bundles into chat.
+After extract exists, run `write_claim_taker_inputs.py` to materialize one read-only input file per inventory kind. Then, for each of those files, read only the Claim-taker section of [references/roles.md](references/roles.md), classify that partition, and write the result with `write_role_output.py`. Do not read `accept.py` or `role-contracts.json` until at least one file exists in `run/role-outputs/`. After those files exist, run `write_coordinator_input.py`, then `write_claims_json.py`. That script copies claim-taker classifications into `claims.json` and writes a temporary `checks.json` (canonical sources, empty `checks` array). It does not invent title/claim labels. Do not read all of `accept.py` before `claims.json` exists. After those two files exist, run semantic-plan preflight, then `write_verifier_inputs.py`, then author first-wave assessments. Do not paste role bundles into chat.
 
 A host or runner prompt that forbids questions cannot prove this first-two-minutes route. It must allow the file, nearby-evidence, connected-source consent, and duration questions above.
 
@@ -95,15 +95,16 @@ python3 "$VERIFY/scripts/write_coordinator_input.py" \
   --out "$RUN/role-inputs/coordinator-semantic-plan.json"
 ```
 
-After the coordinator input exists, write `claims.json` from claim-taker files. This copies classifications; it does not invent them:
+After the coordinator input exists, write `claims.json` from claim-taker files. This copies classifications; it does not invent them. It also writes a temporary `checks.json` with sources and an empty `checks` array:
 
 ```bash
 python3 "$VERIFY/scripts/write_claims_json.py" \
   --plan "$RUN/role-inputs/coordinator-semantic-plan.json" \
-  --out "$RUN/claims.json"
+  --out "$RUN/claims.json" \
+  --checks "$RUN/checks.json"
 ```
 
-After `claims.json` exists, write first-wave verifier inputs. This does not author verdicts:
+After `claims.json` and that temporary `checks.json` exist, run semantic-plan preflight. Then write first-wave verifier inputs. This does not author verdicts:
 
 ```bash
 python3 "$VERIFY/scripts/write_verifier_inputs.py" \

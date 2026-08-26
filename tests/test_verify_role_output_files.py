@@ -25,6 +25,7 @@ NEEDLE_NO_ACCEPT_UNTIL_ROLE_FILE = (
 NEEDLE_CLAIM_TAKER_INPUTS = "run `write_claim_taker_inputs.py`"
 NEEDLE_COORDINATOR_INPUT = "run `write_coordinator_input.py`"
 NEEDLE_CLAIMS_JSON = "`write_claims_json.py`"
+NEEDLE_TEMP_CHECKS = "writes a temporary `checks.json`"
 NEEDLE_VERIFIER_INPUTS = "`write_verifier_inputs.py`"
 
 
@@ -43,6 +44,7 @@ class RoleOutputFileInstructionTests(unittest.TestCase):
         self.assertIn(NEEDLE_CLAIM_TAKER_INPUTS, first)
         self.assertIn(NEEDLE_COORDINATOR_INPUT, first)
         self.assertIn(NEEDLE_CLAIMS_JSON, first)
+        self.assertIn(NEEDLE_TEMP_CHECKS, first)
         self.assertIn(NEEDLE_VERIFIER_INPUTS, first)
         self.assertNotIn("nine-stage private", first)
 
