@@ -1,58 +1,33 @@
-"""Skill text must tell each role to write a JSON file and stop."""
+"""Customer-path skill text is a direct analyst skill, not a role DAG."""
 from __future__ import annotations
 
 import pathlib
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-NEEDLE_SKILL = (
-    "Each role writes its entire output as one JSON file under `run/role-outputs/`"
+NEEDLE_EXTRACT = "`extract.py`"
+NEEDLE_PAGE = "`page.py`"
+NEEDLE_NO_DISK = "Do not search the disk."
+NEEDLE_GRADE = "Write `run/grade.json`."
+BANNED = (
+    "write_claim_taker_inputs.py",
+    "write_coordinator_input.py",
+    "write_claims_json.py",
+    "write_verifier_inputs.py",
+    "coordinator-v6",
 )
-NEEDLE_STOP = "Do not paste the bundle into chat."
-NEEDLE_ROLES = (
-    "The output JSON is a file under `run/role-outputs/`. Write it with `write_role_output.py`, then stop."
-)
-NEEDLE_CLAIM = (
-    "Write that object with `write_role_output.py` to `run/role-outputs/` named for this partition, then stop."
-)
-NEEDLE_EXTRACT_FIRST = (
-    "Run `extract.py` now. Do not read `accept.py`, `render.py`, or `role-contracts.json` before `findings.json`"
-)
-NEEDLE_NO_DISK_SEARCH = "Do not search the disk."
-NEEDLE_NO_ACCEPT_UNTIL_ROLE_FILE = (
-    "Do not read `accept.py` or `role-contracts.json` until at least one file exists in `run/role-outputs/`"
-)
-NEEDLE_CLAIM_TAKER_INPUTS = "run `write_claim_taker_inputs.py`"
-NEEDLE_COORDINATOR_INPUT = "run `write_coordinator_input.py`"
-NEEDLE_CLAIMS_JSON = "`write_claims_json.py`"
-NEEDLE_TEMP_CHECKS = "writes a temporary `checks.json`"
-NEEDLE_VERIFIER_INPUTS = "`write_verifier_inputs.py`"
 
 
-class RoleOutputFileInstructionTests(unittest.TestCase):
-    def test_shipped_skill_requires_role_output_files_not_chat(self) -> None:
+class AnalystSkillInstructionTests(unittest.TestCase):
+    def test_local_grade_is_extract_then_grade_then_page(self) -> None:
         skill = (ROOT / "skills/verify/SKILL.md").read_text()
-        self.assertIn(NEEDLE_SKILL, skill)
-        self.assertIn(NEEDLE_STOP, skill)
-
-    def test_first_two_minutes_run_extract_before_reading_accept(self) -> None:
-        skill = (ROOT / "skills/verify/SKILL.md").read_text()
-        first = skill.split("## Run directory", 1)[0]
-        self.assertIn(NEEDLE_EXTRACT_FIRST, first)
-        self.assertIn(NEEDLE_NO_DISK_SEARCH, first)
-        self.assertIn(NEEDLE_NO_ACCEPT_UNTIL_ROLE_FILE, first)
-        self.assertIn(NEEDLE_CLAIM_TAKER_INPUTS, first)
-        self.assertIn(NEEDLE_COORDINATOR_INPUT, first)
-        self.assertIn(NEEDLE_CLAIMS_JSON, first)
-        self.assertIn(NEEDLE_TEMP_CHECKS, first)
-        self.assertIn(NEEDLE_VERIFIER_INPUTS, first)
-        self.assertNotIn("nine-stage private", first)
-
-    def test_shipped_roles_require_write_file_then_stop(self) -> None:
-        roles = (ROOT / "skills/verify/references/roles.md").read_text()
-        self.assertIn(NEEDLE_ROLES, roles)
-        self.assertIn(NEEDLE_CLAIM, roles)
-        self.assertIn(NEEDLE_STOP, roles)
+        local = skill.split("## Connected path", 1)[0]
+        self.assertIn(NEEDLE_EXTRACT, local)
+        self.assertIn(NEEDLE_PAGE, local)
+        self.assertIn(NEEDLE_NO_DISK, local)
+        self.assertIn(NEEDLE_GRADE, local)
+        for banned in BANNED:
+            self.assertNotIn(banned, local)
 
     def test_packaged_plugin_copy_matches_canonical_skill_text(self) -> None:
         for rel in (

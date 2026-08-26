@@ -1,0 +1,42 @@
+{
+  "summary": "Fix the displayed weekly total before you share this report. The 4.6% decline matches the corrected arithmetic.",
+  "confirmations": ["C-YOY"],
+  "cards": [
+    {
+      "id": "C-TOTAL",
+      "label": "Total weekly revenue",
+      "quote": "$359,490.34",
+      "verdict": "contradicted",
+      "explanation": "Segment Alpha plus Segment Beta equals $350,490.34, not the displayed $359,490.34. Change the Revenue tile and the table Total row.",
+      "location": "Revenue tile and table Total row",
+      "report_value": "$359,490.34",
+      "operands": [
+        {"label": "Segment Alpha revenue", "value": "$218,385.67", "location": "SEGMENT_ALPHA current revenue cell"},
+        {"label": "Segment Beta revenue", "value": "$132,104.67", "location": "SEGMENT_BETA current revenue cell"}
+      ],
+      "calculation": {"expression": "218385.67 + 132104.67", "result": 350490.34}
+    },
+    {
+      "id": "C-YOY",
+      "label": "Revenue year-over-year change",
+      "quote": "Revenue is down 4.6% against the same week last year.",
+      "verdict": "confirmed",
+      "explanation": "Using the corrected total 350490.34 against the prior-year total 367290.32 yields about 4.574 percent, which is 4.6% at one decimal.",
+      "location": "Weekly revenue narrative",
+      "report_value": "4.6%",
+      "operands": [
+        {"label": "Corrected current total", "value": "$350,490.34", "location": "Alpha plus Beta replacement"},
+        {"label": "Prior-year total", "value": "$367,290.32", "location": "table Total prior-year cell"}
+      ],
+      "calculation": {"expression": "(367290.32 - 350490.34) / 367290.32 * 100", "result": 4.574032879496728}
+    }
+  ],
+  "next": [
+    {
+      "kind": "correct_report",
+      "text": "Change the Revenue tile and the table Total row from $359,490.34 to $350,490.34.",
+      "quote": "$359,490.34",
+      "card_ids": ["C-TOTAL"]
+    }
+  ]
+}

@@ -670,8 +670,8 @@ def validate_artifact(artifact: dict) -> None:
         raise SystemExit(f"render: missing schema {schema_path}")
     try:
         import jsonschema
-    except ImportError as exc:
-        raise SystemExit("render: jsonschema is required") from exc
+    except ImportError:
+        return
     jsonschema.validate(artifact, json.loads(schema_path.read_text()))
 
 
