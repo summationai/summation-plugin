@@ -15,7 +15,7 @@ If they named a report that already lives in Summation and there is no disk file
 
 1. Before you start: `command -v uv` succeeds, or `python3` can import `jsonschema`. If neither, tell them. Do not search the disk.
 2. Ask which file. If they already attached one, use it.
-3. Run `extract.py` now. That writes `report-visible.txt` and `findings.json`.
+3. Run `extract.py` now. That writes `report-visible.txt` and `findings.json`. If extract exits non-zero and `findings.json` exists, keep going.
 4. If a nearby `evidence/` folder exists, ask once whether to use it. Copy those files into the run `evidence/` folder. Do not scan their whole disk.
 5. If GitHub, Snowflake, Slack, or similar tools are already connected, ask once whether to query them. Save the raw result under `evidence/`.
 6. Read the report and the evidence yourself. Grade the claims.
@@ -79,7 +79,7 @@ Write one object:
 }
 ```
 
-`verdict` is `confirmed`, `contradicted`, `not_checkable`, or `changed_since_report`.
+Card `verdict` is `confirmed`, `contradicted`, `not_checkable`, or `changed_since_report`. If extract cannot read the file, also set top-level `"verdict": "unable_to_grade"`.
 
 If the report states a period, put that visible string in `report_period`. If it states a calendar date, put ISO `YYYY-MM-DD` in `report_date`. Those fields are not customer cards. `page.py` copies them onto the file line. Leave them out only when the report does not state them.
 
@@ -117,7 +117,7 @@ Open `artifact/grade-artifact.html`. Read `verdict` from `grade-artifact.json`. 
 - You author labels, verdicts, explanations, and the Next step.
 - `not_checkable` means you looked and lacked evidence. Never present a skip as a completed check.
 - No letter grade. No “Layer 1” / “Layer 2”.
-- Accept the file they have. If you cannot obtain the report text, say so and stop.
+- Accept the file they have. If extract reports no readable text, write `grade.json` with `"verdict": "unable_to_grade"`, one card that says why, and one Next that names a supported file type. Then run `page.py`. Do not stop at chat.
 - Zero Summation login for the local grade.
 
 ### Optional local source wrapper

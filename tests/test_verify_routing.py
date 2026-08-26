@@ -90,6 +90,13 @@ class RoutingTests(unittest.TestCase):
         text = skill("verify")
         self.assertIn("`report_value` must be the visible report operand", text)
 
+    def test_unread_file_still_writes_unable_to_grade_page(self) -> None:
+        text = skill("verify")
+        self.assertIn('"verdict": "unable_to_grade"', text)
+        self.assertIn("Do not stop at chat", text)
+        self.assertIn("one Next that names a supported file type", text)
+        self.assertIn("If extract exits non-zero and `findings.json` exists, keep going", text)
+
     def test_rate_delta_uses_percentage_points(self) -> None:
         text = skill("verify")
         local, _, _ = text.partition("## Connected path")

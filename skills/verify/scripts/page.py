@@ -205,10 +205,16 @@ def grade_to_artifact(findings: dict, grade: dict, *, sources: list[dict],
         "semantic": {"status": "complete", "detail": None},
         "live_source": {"status": "not_run", "detail": None},
     }
+    if str(findings.get("intake_error") or "").strip():
+        raw["verification"]["document"] = {
+            "status": "not_available", "detail": None,
+        }
     artifact = render.artifact_from_findings(
         raw, run_id=run_id, generated_at=generated_at,
         layer2=checks, guidance=guidance,
     )
+    if str(grade.get("verdict") or "").strip() == "unable_to_grade":
+        artifact["verdict"] = "unable_to_grade"
     page = render.html_of(artifact, render_context=None)
     return artifact, page
 

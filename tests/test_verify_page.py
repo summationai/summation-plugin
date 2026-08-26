@@ -148,6 +148,68 @@ class PageUtilityTests(unittest.TestCase):
             self.assertIn("improved 3 pp week over week", html)
             self.assertNotIn("7.5%", html)
 
+    def test_page_writes_unable_to_grade_when_extract_has_no_text(self) -> None:
+        png = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+            b"\x00\x00\x00\nIDATx\x9cc`\x00\x00\x00\x02\x00\x01"
+            b"\xe5'\xde\xfc\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        grade = {
+            "summary": "This file is a logo, not a readable report.",
+            "verdict": "unable_to_grade",
+            "cards": [{
+                "id": "C-INTAKE",
+                "label": "Readable report text",
+                "quote": "logo.png",
+                "verdict": "not_checkable",
+                "explanation": "No visible-text reader for png.",
+                "location": "Uploaded file",
+                "report_value": "logo.png",
+            }],
+            "next": [{
+                "kind": "review_before_share",
+                "text": (
+                    "Send an HTML, PDF, Excel, PowerPoint, or Markdown report."
+                ),
+                "quote": "logo.png",
+                "card_ids": ["C-INTAKE"],
+            }],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            report = tmp_path / "logo.png"
+            report.write_bytes(png)
+            visible = tmp_path / "report-visible.txt"
+            findings = tmp_path / "findings.json"
+            grade_path = tmp_path / "grade.json"
+            out_dir = tmp_path / "artifact"
+            extract = _run([
+                sys.executable, str(EXTRACT),
+                "--report", str(report),
+                "--visible", str(visible),
+                "--out", str(findings),
+            ])
+            self.assertEqual(extract.returncode, 2, extract.stderr)
+            self.assertTrue(findings.is_file())
+            payload = json.loads(findings.read_text())
+            self.assertTrue(payload.get("intake_error"))
+            grade_path.write_text(json.dumps(grade) + "\n")
+            proc = _run([
+                sys.executable, str(PAGE),
+                "--findings", str(findings),
+                "--grade", str(grade_path),
+                "--out-dir", str(out_dir),
+            ])
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            html = (out_dir / "grade-artifact.html").read_text()
+            artifact = json.loads((out_dir / "grade-artifact.json").read_text())
+            self.assertIn("UNABLE TO GRADE", html)
+            self.assertEqual(artifact["verdict"], "unable_to_grade")
+            self.assertIn("Send an HTML, PDF, Excel, PowerPoint, or Markdown report", html)
+            self.assertNotIn("SAFE TO SHARE", html)
+            self.assertNotIn("SHARE WITH CAVEATS", html)
+
     def test_packaged_plugin_copy_matches(self) -> None:
         self.assertEqual(PAGE.read_bytes(), PACKAGED.read_bytes())
         render = ROOT / "skills/verify/scripts/render.py"
