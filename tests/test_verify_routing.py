@@ -119,6 +119,16 @@ class RoutingTests(unittest.TestCase):
         self.assertIn("relative 7.5%", local)
         self.assertIn("improved 3 pp week over week", local)
 
+    def test_summary_count_must_match_cards(self) -> None:
+        text = skill("verify")
+        local, _, _ = text.partition("## Connected path")
+        self.assertIn(
+            "The summary count of material outcomes must match the `cards` array.",
+            local,
+        )
+        self.assertIn("If you wrote two cards, do not write four metrics", local)
+        self.assertIn("The lead sentence count must match the number of cards", text)
+
     def test_role_contract_wires_coordinator_v6_and_identical_routes(self) -> None:
         verify = skill("verify")
         roles = (SKILLS / "verify" / "references" / "roles.md").read_text()

@@ -10,6 +10,7 @@ NEEDLE_PAGE = "`page.py`"
 NEEDLE_NO_DISK = "Do not search the disk."
 NEEDLE_GRADE = "Write `run/grade.json`."
 NEEDLE_PERIOD = "`report_period`"
+NEEDLE_COUNT = "The summary count of material outcomes must match the `cards` array."
 BANNED = (
     "write_claim_taker_inputs.py",
     "write_coordinator_input.py",
@@ -28,6 +29,9 @@ class AnalystSkillInstructionTests(unittest.TestCase):
         self.assertIn(NEEDLE_NO_DISK, local)
         self.assertIn(NEEDLE_GRADE, local)
         self.assertIn(NEEDLE_PERIOD, local)
+        self.assertIn(NEEDLE_COUNT, local)
+        self.assertIn("If you wrote two cards, do not write four metrics", local)
+        self.assertIn("The lead sentence count must match the number of cards", skill)
         for banned in BANNED:
             self.assertNotIn(banned, local)
 

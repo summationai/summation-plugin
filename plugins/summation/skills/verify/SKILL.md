@@ -40,6 +40,7 @@ You own meaning. Python owns file names, hashes, declared arithmetic, privacy st
 - When two rates sit in one table (40.0% then 43.0%), the move is percentage points (`pp`). Write `43.0 - 40.0` with result `3 pp`. Say `3 pp` in the Next step. A relative 7.5% is the wrong customer correction unless the report itself claims that relative form.
 - If the report writes “improved 3%” for that table, contradict it. The Next step is: write “improved 3 pp week over week.”
 - Write one Next step the customer can do.
+- The summary count of material outcomes must match the `cards` array. If you wrote two cards, do not write four metrics. The scoreboard prints one box per card.
 
 The page uses the Verify exemplar skin: FIX FIRST or SAFE TO SHARE, a scoreboard, a math table on numeric cards, and one Next step.
 
@@ -135,6 +136,7 @@ Open `artifact/grade-artifact.html`. Read `verdict` from `grade-artifact.json`. 
 ## Laws
 
 - You author labels, verdicts, explanations, and the Next step.
+- The lead sentence count must match the number of cards. Two cards means two outcomes, not four metrics.
 - `not_checkable` means you looked and lacked evidence. Never present a skip as a completed check.
 - No letter grade. No “Layer 1” / “Layer 2”.
 - Accept the file they have. If extract reports no readable text, write `grade.json` with `"verdict": "unable_to_grade"`, one card that says why, and one Next that names a supported file type. Then run `page.py`. Do not stop at chat.
