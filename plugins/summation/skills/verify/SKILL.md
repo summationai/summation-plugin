@@ -17,7 +17,7 @@ If they named a report that already lives in Summation and there is no disk file
 2. Ask which file. If they already attached one, use it.
 3. Run `extract.py` now. That writes `report-visible.txt` and `findings.json`. If extract exits non-zero and `findings.json` exists, keep going.
 4. If a nearby `evidence/` folder exists, ask once whether to use it. Copy those files into the run `evidence/` folder. Do not scan their whole disk.
-5. If GitHub, Snowflake, Slack, or similar tools are already connected, ask once whether to query them. Save the raw result under `evidence/`.
+5. If GitHub, Snowflake, Slack, or similar tools are already connected, ask once whether to query them. Save the raw result under `evidence/`. Name that file in `grade.json` `sources` with `"kind": "live_tool"`.
 6. Read the report and the evidence yourself. Grade the claims.
 7. Write `run/grade.json`. Then run `page.py`. Open `run/artifact/grade-artifact.html`.
 8. Say the verdict in plain language. Do not hand-write HTML.
@@ -84,6 +84,24 @@ Card `verdict` is `confirmed`, `contradicted`, `not_checkable`, or `changed_sinc
 If the report states a period, put that visible string in `report_period`. If it states a calendar date, put ISO `YYYY-MM-DD` in `report_date`. Those fields are not customer cards. `page.py` copies them onto the file line. Leave them out only when the report does not state them.
 
 A `not_checkable` card has an explanation and no operands. An `evidence` card names `source_id` matching `SRC-<filename-without-extension>`.
+
+When you queried a live tool in this run, add a top-level `sources` array. Each live row needs `"kind": "live_tool"`, `evidence_file` equal to the saved file name, and `retrieval` with `retrieved_at`, `tool`, and `arguments`. `page.py` hashes the file. The page prints `Live source Ran` only then. A nearby file you did not query stays a supplied file.
+
+```json
+"sources": [
+  {
+    "id": "SRC-get_currency_rates",
+    "kind": "live_tool",
+    "label": "currency_rates_input",
+    "evidence_file": "get_currency_rates.json",
+    "retrieval": {
+      "retrieved_at": "2026-08-26T20:57:25Z",
+      "tool": "get_currency_rates",
+      "arguments": {"period": "Jul-26"}
+    }
+  }
+]
+```
 
 If you declare `calculation`, Python recomputes the expression. If the numbers do not match, it refuses to write the page.
 

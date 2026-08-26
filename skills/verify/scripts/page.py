@@ -64,20 +64,83 @@ def _close(value) -> str:
     return text
 
 
-def _sources(evidence_dir: pathlib.Path | None) -> list[dict]:
+def _file_digest(path: pathlib.Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _evidence_files(evidence_dir: pathlib.Path | None) -> dict[str, pathlib.Path]:
+    files: dict[str, pathlib.Path] = {}
     if evidence_dir is None or not evidence_dir.is_dir():
-        return []
-    rows = []
+        return files
     for path in sorted(evidence_dir.iterdir()):
-        if not path.is_file() or path.name.startswith("."):
+        if path.is_file() and not path.name.startswith("."):
+            files[path.name] = path
+    return files
+
+
+def _live_tool_row(row: dict, files: dict[str, pathlib.Path]) -> dict:
+    evidence_file = str(row.get("evidence_file") or "").strip()
+    path = files.get(evidence_file)
+    if path is None:
+        raise SystemExit(
+            f"page: live_tool evidence_file {evidence_file!r} is missing")
+    digest = _file_digest(path)
+    host_hash = str(row.get("result_sha256") or "").strip()
+    if host_hash and host_hash != digest:
+        raise SystemExit("page: live_tool result_sha256 does not match the file")
+    source_id = str(row.get("id") or f"SRC-{path.stem}").strip()
+    if not _ID_RE.fullmatch(source_id):
+        raise SystemExit(f"page: live_tool id {source_id!r} is invalid")
+    retrieval = row.get("retrieval")
+    if not isinstance(retrieval, dict):
+        raise SystemExit("page: live_tool retrieval is missing")
+    return {
+        "id": source_id,
+        "kind": "live_tool",
+        "label": str(row.get("label") or evidence_file).strip(),
+        "evidence_file": evidence_file,
+        "result_sha256": digest,
+        "retrieval": {
+            "retrieved_at": retrieval.get("retrieved_at"),
+            "tool": retrieval.get("tool"),
+            "arguments": retrieval.get("arguments") if isinstance(
+                retrieval.get("arguments"), dict) else {},
+        },
+    }
+
+
+def _sources(evidence_dir: pathlib.Path | None, grade: dict | None = None) -> list[dict]:
+    files = _evidence_files(evidence_dir)
+    declared = (grade or {}).get("sources")
+    used: set[str] = set()
+    rows: list[dict] = []
+    if declared is None:
+        declared = []
+    if not isinstance(declared, list):
+        raise SystemExit("page: grade.json sources must be an array")
+    for row in declared:
+        if not isinstance(row, dict):
+            raise SystemExit("page: sources item is not an object")
+        kind = str(row.get("kind") or "").strip()
+        if kind == "live_tool":
+            live = _live_tool_row(row, files)
+            if live["evidence_file"] in used:
+                raise SystemExit("page: live_tool evidence_file is duplicated")
+            used.add(live["evidence_file"])
+            rows.append(live)
+        elif kind in ("", "supplied_file"):
             continue
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        else:
+            raise SystemExit(f"page: source kind {kind!r} is invalid")
+    for name, path in files.items():
+        if name in used:
+            continue
         rows.append({
             "id": f"SRC-{path.stem}",
             "kind": "supplied_file",
-            "label": path.name,
-            "evidence_file": path.name,
-            "result_sha256": digest,
+            "label": name,
+            "evidence_file": name,
+            "result_sha256": _file_digest(path),
         })
     return rows
 
@@ -244,7 +307,7 @@ def main() -> int:
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         artifact, page = grade_to_artifact(
-            findings, grade, sources=_sources(args.evidence_dir),
+            findings, grade, sources=_sources(args.evidence_dir, grade),
             run_id=run_id, generated_at=generated_at,
         )
     except (SystemExit, ValueError) as exc:

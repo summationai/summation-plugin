@@ -1,6 +1,7 @@
 """Drive shipped extract.py then page.py on the planted weekly-sales report."""
 from __future__ import annotations
 
+import hashlib
 import json
 import pathlib
 import subprocess
@@ -275,6 +276,162 @@ class PageUtilityTests(unittest.TestCase):
             self.assertIn("Send an HTML, PDF, Excel, PowerPoint, or Markdown report", html)
             self.assertNotIn("SAFE TO SHARE", html)
             self.assertNotIn("SHARE WITH CAVEATS", html)
+
+    def test_page_prints_live_source_ran_when_grade_declares_live_tool(self) -> None:
+        evidence = {
+            "period": "Jul-26",
+            "retrieved_at": "2026-08-26T20:57:25Z",
+            "rates": [{"from_currency": "GBP", "rate": "1.337612"}],
+        }
+        grade = {
+            "summary": "The July 2026 GBP planning rate matches currency_rates_input.",
+            "report_period": "July 2026",
+            "cards": [{
+                "id": "C-GBP",
+                "label": "GBP rate to USD",
+                "quote": "1.337612",
+                "verdict": "confirmed",
+                "explanation": "get_currency_rates for Jul-26 returns GBP 1.337612.",
+                "location": "GBP row",
+                "report_value": "1.337612",
+                "source_id": "SRC-get_currency_rates",
+                "inventory_ids": ["INV1"],
+                "operands": [{
+                    "label": "GBP to USD in currency_rates_input",
+                    "value": "1.337612",
+                    "location": "currency_rates_input period Jul-26 GBP",
+                }],
+            }],
+            "next": [{
+                "kind": "review_before_share",
+                "text": "Share the July 2026 FX note. The GBP rate matches.",
+                "quote": "1.337612",
+                "card_ids": ["C-GBP"],
+            }],
+            "sources": [{
+                "id": "SRC-get_currency_rates",
+                "kind": "live_tool",
+                "label": "currency_rates_input",
+                "evidence_file": "get_currency_rates.json",
+                "retrieval": {
+                    "retrieved_at": "2026-08-26T20:57:25Z",
+                    "tool": "get_currency_rates",
+                    "arguments": {"period": "Jul-26"},
+                },
+            }],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            visible = tmp_path / "report-visible.txt"
+            findings = tmp_path / "findings.json"
+            grade_path = tmp_path / "grade.json"
+            evidence_dir = tmp_path / "evidence"
+            evidence_dir.mkdir()
+            evidence_path = evidence_dir / "get_currency_rates.json"
+            evidence_path.write_text(json.dumps(evidence) + "\n")
+            out_dir = tmp_path / "artifact"
+            self.assertEqual(_run([
+                sys.executable, str(EXTRACT),
+                "--report", str(REPORT),
+                "--visible", str(visible),
+                "--out", str(findings),
+            ]).returncode, 0)
+            grade_path.write_text(json.dumps(grade) + "\n")
+            proc = _run([
+                sys.executable, str(PAGE),
+                "--findings", str(findings),
+                "--grade", str(grade_path),
+                "--evidence-dir", str(evidence_dir),
+                "--out-dir", str(out_dir),
+            ])
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            html = (out_dir / "grade-artifact.html").read_text()
+            artifact = json.loads((out_dir / "grade-artifact.json").read_text())
+            self.assertIn("<b>Live source</b>Ran", html)
+            self.assertIn("Live source", html)
+            sources = artifact["sources"]
+            live = [row for row in sources if row["kind"] == "live_tool"]
+            self.assertEqual(len(live), 1)
+            self.assertEqual(live[0]["evidence_file"], "get_currency_rates.json")
+            self.assertEqual(
+                live[0]["retrieval"]["tool"], "get_currency_rates")
+            self.assertEqual(
+                artifact["verification"]["live_source"]["status"], "complete")
+            digest = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            self.assertEqual(live[0]["result_sha256"], digest)
+
+            grade.pop("sources")
+            grade_path.write_text(json.dumps(grade) + "\n")
+            silent = tmp_path / "artifact-silent"
+            proc = _run([
+                sys.executable, str(PAGE),
+                "--findings", str(findings),
+                "--grade", str(grade_path),
+                "--evidence-dir", str(evidence_dir),
+                "--out-dir", str(silent),
+            ])
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            silent_html = (silent / "grade-artifact.html").read_text()
+            silent_art = json.loads((silent / "grade-artifact.json").read_text())
+            self.assertIn("<b>Live source</b>Did not run", silent_html)
+            self.assertTrue(all(
+                row["kind"] == "supplied_file"
+                for row in silent_art["sources"]))
+
+    def test_page_rejects_live_tool_without_the_evidence_file(self) -> None:
+        grade = {
+            "summary": "The GBP rate matches.",
+            "report_period": "July 2026",
+            "cards": [{
+                "id": "C-GBP",
+                "label": "GBP rate to USD",
+                "quote": "1.337612",
+                "verdict": "confirmed",
+                "explanation": "Live rate matches.",
+                "location": "GBP row",
+                "report_value": "1.337612",
+            }],
+            "next": [{
+                "kind": "review_before_share",
+                "text": "Share the FX note.",
+                "quote": "1.337612",
+                "card_ids": ["C-GBP"],
+            }],
+            "sources": [{
+                "id": "SRC-get_currency_rates",
+                "kind": "live_tool",
+                "label": "currency_rates_input",
+                "evidence_file": "get_currency_rates.json",
+                "retrieval": {
+                    "retrieved_at": "2026-08-26T20:57:25Z",
+                    "tool": "get_currency_rates",
+                    "arguments": {"period": "Jul-26"},
+                },
+            }],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            visible = tmp_path / "report-visible.txt"
+            findings = tmp_path / "findings.json"
+            grade_path = tmp_path / "grade.json"
+            evidence_dir = tmp_path / "evidence"
+            evidence_dir.mkdir()
+            self.assertEqual(_run([
+                sys.executable, str(EXTRACT),
+                "--report", str(REPORT),
+                "--visible", str(visible),
+                "--out", str(findings),
+            ]).returncode, 0)
+            grade_path.write_text(json.dumps(grade) + "\n")
+            proc = _run([
+                sys.executable, str(PAGE),
+                "--findings", str(findings),
+                "--grade", str(grade_path),
+                "--evidence-dir", str(evidence_dir),
+                "--out-dir", str(tmp_path / "artifact"),
+            ])
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("evidence_file", proc.stderr)
 
     def test_packaged_plugin_copy_matches(self) -> None:
         self.assertEqual(PAGE.read_bytes(), PACKAGED.read_bytes())
