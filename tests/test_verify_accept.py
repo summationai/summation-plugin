@@ -159,6 +159,163 @@ def not_checkable_check() -> dict:
     }
 
 
+def write_invalid_preflight_bundle(folder: pathlib.Path) -> dict[str, pathlib.Path]:
+    """Write one check with an invalid notice and missing evidence source link."""
+    report = folder / "report.md"
+    report_quote = (
+        "Revenue KPI $359,490.34 and segment table Total $359,490.34."
+    )
+    report.write_text(report_quote + "\n")
+    evidence = folder / "revenue.json"
+    evidence.write_text('{"segment_alpha":218385.67,"segment_beta":132104.67}\n')
+    findings = folder / "findings.json"
+    findings.write_text(json.dumps({
+        "inventory": {
+            "complete": True,
+            "items": [
+                {
+                    "id": "INV-KPI", "displayed": "$359,490.34",
+                    "quote": "$359,490.34", "location": "Revenue KPI tile",
+                    "importance": "unclassified",
+                },
+                {
+                    "id": "INV-TOTAL", "displayed": "$359,490.34",
+                    "quote": "$359,490.34", "location": "segment table Total row",
+                    "importance": "unclassified",
+                },
+            ],
+        },
+    }))
+    member_refs = [
+        {"partition_id": "kpi", "candidate_id": "K1", "clause_id": "TOTAL"},
+        {"partition_id": "table", "candidate_id": "T1", "clause_id": "TOTAL"},
+    ]
+    claims = folder / "claims.json"
+    claims.write_text(json.dumps({
+        "claims": [{
+            "id": "L1", "quote": report_quote,
+            "public_label": "Total weekly revenue", "importance": "material",
+            "classification": "material_claim",
+            "inventory_ids": ["INV-KPI", "INV-TOTAL"],
+            "member_refs": member_refs,
+        }],
+        "coordinator": {
+            "partition_results": [
+                {
+                    "partition_id": "kpi",
+                    "candidates": [{
+                        "id": "K1", "quote": "$359,490.34",
+                        "public_label": "Total weekly revenue",
+                        "importance": "material", "classification": "material_claim",
+                        "inventory_ids": ["INV-KPI"],
+                        "clauses": [{
+                            "id": "TOTAL", "quote": "$359,490.34",
+                            "public_label": "Total weekly revenue",
+                        }],
+                    }],
+                },
+                {
+                    "partition_id": "table",
+                    "candidates": [{
+                        "id": "T1", "quote": "$359,490.34",
+                        "public_label": "Total weekly revenue",
+                        "importance": "material", "classification": "material_claim",
+                        "inventory_ids": ["INV-TOTAL"],
+                        "clauses": [{
+                            "id": "TOTAL", "quote": "$359,490.34",
+                            "public_label": "Total weekly revenue",
+                        }],
+                    }],
+                },
+            ],
+            "membership": [
+                {**member_refs[0], "canonical_claim_id": "L1"},
+                {**member_refs[1], "canonical_claim_id": "L1"},
+            ],
+            "verifier_assignments": [{"verifier_id": "V1", "claim_ids": ["L1"]}],
+        },
+    }))
+    statement = (
+        "Both displayed totals must change from $359,490.34 to $350,490.34."
+    )
+    check = {
+        "id": "C1", "claim_id": "L1", "type": "arithmetic",
+        "basis": "evidence", "verdict": "contradicted",
+        "importance": "material", "severity": "high",
+        "report_quote": report_quote,
+        "addressed_clause_refs": member_refs,
+        "evidence_json": [
+            {"pointer": "/segment_alpha", "value": 218385.67},
+            {"pointer": "/segment_beta", "value": 132104.67},
+        ],
+        "correction_notice": {
+            "statement": statement,
+            "report_value": "$359,490.34",
+            "replacement_value": "$350,490.34",
+            "locations": ["Revenue KPI tile", "segment table Total row"],
+        },
+        "public_receipt": {
+            "report_operand": {
+                "label": "Total weekly revenue", "value": "$359,490.34",
+                "location": "Revenue KPI tile and segment table Total row",
+            },
+            "decisive_operands": [
+                {
+                    "label": "Segment Alpha revenue", "value": "$218,385.67",
+                    "location": "segment table, Segment Alpha row",
+                },
+                {
+                    "label": "Segment Beta revenue", "value": "$132,104.67",
+                    "location": "segment table, Segment Beta row",
+                },
+            ],
+            "calculation": {
+                "expression": "218385.67 + 132104.67",
+                "result": "$350,490.34",
+            },
+            "explanation": (
+                "The two segment values total $350,490.34, not $359,490.34. "
+                + statement
+            ),
+        },
+    }
+    checks = folder / "checks.json"
+    checks.write_text(json.dumps({
+        "sources": [source_for(evidence, source_id="revenue-source")],
+        "checks": [check],
+        "presentation": {
+            "summary": "The accepted result requires the displayed total to be corrected.",
+            "check_ids": ["C1"],
+            "actions": [{
+                "id": "A1", "kind": "correct_report", "text": statement,
+                "report_quote": report_quote, "check_ids": ["C1"],
+            }],
+            "limits": [],
+        },
+    }))
+    return {
+        "report": report, "claims": claims, "checks": checks,
+        "findings": findings, "evidence_dir": folder,
+    }
+
+
+def run_cli_bundle(paths: dict[str, pathlib.Path], out: pathlib.Path, *,
+                   preflight: bool) -> int:
+    argv = sys.argv
+    sys.argv = [
+        "accept.py", "--report", str(paths["report"]),
+        "--claims", str(paths["claims"]), "--checks", str(paths["checks"]),
+        "--findings", str(paths["findings"]),
+        "--evidence-dir", str(paths["evidence_dir"]), "--out", str(out),
+    ]
+    if preflight:
+        sys.argv.insert(1, "--preflight-only")
+    try:
+        return accept.main()
+    finally:
+        sys.argv = argv
+
+
 class ExactGroundingTests(unittest.TestCase):
     def test_schema_is_the_only_verdict_source_and_load_failure_is_fatal(self) -> None:
         self.assertFalse(hasattr(accept, "FALLBACK_VERDICTS"))
@@ -1169,6 +1326,47 @@ class PresentationTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_preflight_returns_notice_and_source_link_reasons_in_first_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            paths = write_invalid_preflight_bundle(folder)
+            out = folder / "preflight.json"
+            self.assertEqual(run_cli_bundle(paths, out, preflight=True), 2)
+            reasons = json.loads(out.read_text())["repair_reasons"]
+            self.assertEqual(reasons, [
+                "evidence-verifier check 'C1' correction_notice.statement does not "
+                "contain locations[0]",
+                "evidence-verifier check 'C1' correction_notice.statement does not "
+                "contain locations[1]",
+                "evidence-verifier check 'C1' public_receipt.source_id is required "
+                "for evidence basis",
+                "evidence-verifier check 'C1' "
+                "public_receipt.decisive_operands[0].value is not grounded",
+                "evidence-verifier check 'C1' "
+                "public_receipt.decisive_operands[1].value is not grounded",
+                "presentation.summary references unknown check id 'C1'",
+                "presentation.actions[0] references unknown check id 'C1'",
+                "presentation.actions has no accepted action",
+                "inventory occurrence 'INV-KPI' assigned to 'L1': material inventory "
+                "item has no completed outcome",
+                "inventory occurrence 'INV-TOTAL' assigned to 'L1': material inventory "
+                "item has no completed outcome",
+            ])
+
+    def test_preflight_and_acceptance_reject_same_unchanged_invalid_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            folder = pathlib.Path(raw)
+            paths = write_invalid_preflight_bundle(folder)
+            preflight_out = folder / "preflight.json"
+            acceptance_out = folder / "receipts.json"
+            self.assertEqual(
+                run_cli_bundle(paths, preflight_out, preflight=True), 2)
+            self.assertEqual(
+                run_cli_bundle(paths, acceptance_out, preflight=False), 2)
+            preflight = json.loads(preflight_out.read_text())
+            acceptance = json.loads(acceptance_out.read_text())
+            self.assertEqual(preflight["repair_reasons"], acceptance["repair_reasons"])
+
     def test_cli_preflight_returns_exact_repair_reasons_before_acceptance(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             folder = pathlib.Path(raw)
@@ -1200,6 +1398,11 @@ class CliTests(unittest.TestCase):
                 "coordinator handoff is missing or not an object",
                 "evidence-verifier check 'C1' "
                 "public_receipt.calculation.result is not a public numeric value",
+                "evidence-verifier check 'C1' public_receipt.calculation is not "
+                "allowed for not_checkable",
+                "presentation is missing",
+                "inventory occurrence 'INV1' assigned to 'L1': material inventory "
+                "item has no completed outcome",
             ])
 
     def test_cli_retains_public_label_and_exact_receipt(self) -> None:
@@ -1250,6 +1453,23 @@ class CliTests(unittest.TestCase):
             checks = folder / "checks.json"
             checks.write_text(json.dumps({
                 "sources": [source_for(evidence)], "checks": [evidence_check()],
+                "presentation": {
+                    "summary": (
+                        "The accepted receipt supports the displayed delivery rate."
+                    ),
+                    "check_ids": ["C1"],
+                    "actions": [{
+                        "id": "A1",
+                        "kind": "review_before_share",
+                        "text": (
+                            "Review the accepted delivery receipt before sharing "
+                            "the report."
+                        ),
+                        "report_quote": "On-time delivery was 94%.",
+                        "check_ids": ["C1"],
+                    }],
+                    "limits": [],
+                },
             }))
             out = folder / "receipts.json"
             argv = sys.argv
@@ -1290,9 +1510,13 @@ class CliTests(unittest.TestCase):
                 code = accept.main()
             finally:
                 sys.argv = argv
-            self.assertEqual(code, 0)
+            self.assertEqual(code, 2)
             doc = json.loads(out.read_text())
             self.assertEqual(doc["semantic_status"], "failed")
+            self.assertIn(
+                "coordinator handoff is missing or not an object",
+                doc["repair_reasons"],
+            )
             self.assertEqual(
                 doc["discarded_claims"][-1]["problems"],
                 ["coordinator handoff is missing or not an object"],

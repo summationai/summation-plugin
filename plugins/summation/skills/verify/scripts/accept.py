@@ -2,7 +2,7 @@
 """Keep or drop proposed checks by grounding them in the report and evidence.
 
 A check survives when its quotes and pointers resolve. A bad row is discarded.
-The run continues. Exit 0 when receipts.json was written.
+Preflight and acceptance use the same validation result and exact repair reasons.
 
 Usage:
     accept.py --report <file> --checks checks.json --claims claims.json
@@ -1423,14 +1423,16 @@ def _correction_notice_problems(check: dict, clause_refs: list[dict]) -> list[st
     receipt = check.get("public_receipt")
     calculation = receipt.get("calculation") if isinstance(receipt, dict) else None
     report_operand = receipt.get("report_operand") if isinstance(receipt, dict) else None
-    if not (
+    applicable = (
         check.get("verdict") == "contradicted"
-        and check.get("basis") == "report"
         and len(clause_refs) > 1
         and isinstance(calculation, dict)
         and isinstance(report_operand, dict)
         and not values_equal(report_operand.get("value"), calculation.get("result"))
-    ):
+    )
+    required = applicable and check.get("basis") == "report"
+    supplied = "correction_notice" in check
+    if not required and not (supplied and applicable):
         return []
     check_id = str(check.get("id") or "").strip() or "index"
     label = f"evidence-verifier check {check_id!r} correction_notice"
@@ -2219,6 +2221,154 @@ def _missing(path: pathlib.Path, label: str) -> int:
     return 2
 
 
+def _row_repair_reasons(rows: list[dict], label: str) -> list[str]:
+    reasons: list[str] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            reasons.append(f"{label} at index {index} is not an object")
+            continue
+        row_id = str(row.get("id") or "").strip()
+        prefix = f"{label} {row_id!r}" if row_id else f"{label} at index {index}"
+        for problem in row.get("problems") or []:
+            reasons.append(f"{prefix} {problem}")
+    return reasons
+
+
+def _inventory_repair_reasons(rows: list[dict]) -> list[str]:
+    """Serialize inventory reconciliation failures without leaking dict reprs."""
+    reasons: list[str] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            reasons.append(f"inventory reconciliation row at index {index} is invalid")
+            continue
+        inventory_id = str(row.get("id") or "").strip()
+        prefix = (
+            f"inventory occurrence {inventory_id!r}"
+            if inventory_id
+            else f"inventory reconciliation row at index {index}"
+        )
+        claim_id = str(row.get("claim_id") or "").strip()
+        if claim_id:
+            prefix += f" assigned to {claim_id!r}"
+        reason = str(row.get("reason") or "is uncovered").strip()
+        reasons.append(f"{prefix}: {reason}")
+    return reasons
+
+
+def validate_acceptance_bundle(*, text: str, sandbox: pathlib.Path,
+                               proposed: list, checks_doc: dict,
+                               proposed_claims: list, claims_meta: dict,
+                               inventory: dict, report_path: pathlib.Path,
+                               arithmetic_uses: list | None = None) -> dict:
+    """Run the one side-effect-free validation path used by both CLI modes."""
+    coordinator_handoff, coordinator_problems = coordinator_preflight(
+        proposed_claims, claims_meta.get("coordinator"), inventory, proposed,
+        presentation_doc=checks_doc)
+    proposed_sources = list((checks_doc or {}).get("sources") or [])
+    accepted_sources, discarded_sources = validate_sources(
+        sandbox, proposed_sources, report_path)
+    grounded_claims, discarded_claims = validate_claims(text, proposed_claims)
+    claim_ids = {row["id"] for row in grounded_claims}
+    validated, discarded = validate_receipts(
+        text, sandbox, proposed, claim_ids, report_path,
+        sources=accepted_sources,
+        claim_labels={row["id"]: row["public_label"] for row in grounded_claims},
+        report_date=claims_meta.get("report_date"),
+        report_period=claims_meta.get("report_period"))
+    ledger = attach_claim_outcomes(grounded_claims, validated)
+    ledger = apply_host_classifications(
+        ledger, discarded_claims, inventory,
+        structural_context=coordinator_handoff["structural_context"],
+        material_inventory_claim_ids=(
+            coordinator_handoff["material_inventory_claim_ids"]),
+    )
+    validated, ledger = attach_arithmetic_uses(
+        ledger, validated, list(arithmetic_uses or []))
+    inventory_cover = cover(
+        inventory, ledger,
+        structural_context=coordinator_handoff["structural_context"],
+        material_inventory_claim_ids=(
+            coordinator_handoff["material_inventory_claim_ids"]),
+    )
+    accepted_ids = {
+        str(row.get("id") or "").strip() for row in validated if row.get("id")}
+    presentation, presentation_problems = validate_presentation(
+        checks_doc, text, accepted_ids, accepted_checks=validated)
+    material_ledger = [
+        row for row in ledger
+        if row.get("classification") != "supporting_provenance"
+        and row.get("importance") != "supporting"
+    ]
+    material_claim_ids = {
+        str(row.get("id") or "") for row in material_ledger if row.get("id")
+    }
+    material_proposed = [
+        row for row in proposed
+        if str(row.get("claim_id") or "") in material_claim_ids
+    ]
+    material_validated = [
+        row for row in validated
+        if str(row.get("claim_id") or "") in material_claim_ids
+    ]
+
+    repair_reasons = list(coordinator_problems)
+    repair_reasons.extend(_row_repair_reasons(
+        discarded_sources, "retained source"))
+    repair_reasons.extend(_row_repair_reasons(
+        discarded_claims, "canonical claim"))
+    repair_reasons.extend(_row_repair_reasons(
+        discarded, "evidence-verifier check"))
+    repair_reasons.extend(presentation_problems)
+    repair_reasons.extend(sorted(
+        _inventory_repair_reasons(inventory_cover["missing"])
+    ))
+    repair_reasons = list(dict.fromkeys(repair_reasons))
+
+    payload = {
+        "status": "failed" if repair_reasons else "complete",
+        "repair_reasons": repair_reasons,
+        "checks": validated,
+        "validated": validated,
+        "discarded": discarded,
+        "sources": accepted_sources,
+        "discarded_sources": discarded_sources,
+        "proposed": len(material_proposed),
+        "grounded": len(material_validated),
+        "claims": ledger,
+        "discarded_claims": discarded_claims,
+        "claims_in_ledger": len(material_ledger),
+        "supporting_claims": len(ledger) - len(material_ledger),
+        "claims_reached_by_a_check": sum(
+            1 for row in material_ledger
+            if row.get("outcome") not in (None, "not_reached")
+        ),
+        "semantic_status": semantic_status(
+            ledger, validated,
+            error="acceptance validation failed" if repair_reasons else None,
+        ),
+        "presentation": presentation,
+        "presentation_problems": presentation_problems,
+        "report_period": claims_meta.get("report_period"),
+        "report_date": claims_meta.get("report_date"),
+        "inventory": inventory,
+        "inventory_missing": inventory_cover["missing"],
+        "extractor_checkable_fraction": inventory_cover["extractor_fraction"],
+        "engine_checkable_fraction": inventory_cover["engine_fraction"],
+        "coordinator": coordinator_handoff,
+        "structural_context_count": len(coordinator_handoff["structural_context"]),
+    }
+    if coordinator_problems:
+        payload["discarded_claims"].append({
+            "id": "coordinator",
+            "quote": "",
+            "public_label": "",
+            "importance": "supporting",
+            "classification": "structural_context",
+            "problems": coordinator_problems,
+        })
+    return payload
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--report", required=True, type=pathlib.Path)
@@ -2283,122 +2433,39 @@ def main() -> int:
     if not isinstance(inventory, dict):
         inventory = inventory_for(args.report)
 
-    coordinator_handoff, coordinator_problems = coordinator_preflight(
-        proposed_claims, claims_meta.get("coordinator"), inventory, proposed,
-        presentation_doc=checks_doc)
+    payload = validate_acceptance_bundle(
+        text=text, sandbox=sandbox, proposed=proposed, checks_doc=checks_doc,
+        proposed_claims=proposed_claims, claims_meta=claims_meta,
+        inventory=inventory, report_path=args.report,
+        arithmetic_uses=arithmetic_uses)
     if args.preflight_only:
         preflight = {
-            "status": "failed" if coordinator_problems else "complete",
-            "repair_reasons": coordinator_problems,
-            "coordinator": coordinator_handoff,
+            "status": payload["status"],
+            "repair_reasons": payload["repair_reasons"],
+            "coordinator": payload["coordinator"],
         }
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(preflight, indent=2) + "\n")
         print(
-            f"preflight: {len(coordinator_problems)} repair reason(s)"
+            f"preflight: {len(payload['repair_reasons'])} repair reason(s)"
         )
-        for reason in coordinator_problems:
+        for reason in payload["repair_reasons"]:
             print(f"  REPAIR {reason}")
-        return 2 if coordinator_problems else 0
-    proposed_sources = list((checks_doc or {}).get("sources") or [])
-    accepted_sources, discarded_sources = validate_sources(
-        sandbox, proposed_sources, args.report)
-    grounded_claims, discarded_claims = validate_claims(text, proposed_claims)
-    if coordinator_problems:
-        discarded_claims.append({
-            "id": "coordinator",
-            "quote": "",
-            "public_label": "",
-            "importance": "supporting",
-            "classification": "structural_context",
-            "problems": coordinator_problems,
-        })
-    claim_ids = {row["id"] for row in grounded_claims}
-    validated, discarded = validate_receipts(
-        text, sandbox, proposed, claim_ids, args.report,
-        sources=accepted_sources,
-        claim_labels={row["id"]: row["public_label"] for row in grounded_claims},
-        report_date=claims_meta.get("report_date"),
-        report_period=claims_meta.get("report_period"))
-    ledger = attach_claim_outcomes(grounded_claims, validated)
-    ledger = apply_host_classifications(
-        ledger, discarded_claims, inventory,
-        structural_context=coordinator_handoff["structural_context"],
-        material_inventory_claim_ids=(
-            coordinator_handoff["material_inventory_claim_ids"]),
-    )
-    validated, ledger = attach_arithmetic_uses(ledger, validated, arithmetic_uses)
-    inventory_cover = cover(
-        inventory, ledger,
-        structural_context=coordinator_handoff["structural_context"],
-        material_inventory_claim_ids=(
-            coordinator_handoff["material_inventory_claim_ids"]),
-    )
-    accepted_ids = {
-        str(row.get("id") or "").strip() for row in validated if row.get("id")}
-    presentation, presentation_problems = validate_presentation(
-        checks_doc, text, accepted_ids, accepted_checks=validated)
-    material_ledger = [
-        row for row in ledger
-        if row.get("classification") != "supporting_provenance"
-        and row.get("importance") != "supporting"
-    ]
-    material_claim_ids = {
-        str(row.get("id") or "") for row in material_ledger if row.get("id")
-    }
-    material_proposed = [
-        row for row in proposed
-        if str(row.get("claim_id") or "") in material_claim_ids
-    ]
-    material_validated = [
-        row for row in validated
-        if str(row.get("claim_id") or "") in material_claim_ids
-    ]
-    payload = {
-        "checks": validated,
-        "validated": validated,
-        "discarded": discarded,
-        "sources": accepted_sources,
-        "discarded_sources": discarded_sources,
-        "proposed": len(material_proposed),
-        "grounded": len(material_validated),
-        "claims": ledger,
-        "discarded_claims": discarded_claims,
-        "claims_in_ledger": len(material_ledger),
-        "supporting_claims": len(ledger) - len(material_ledger),
-        "claims_reached_by_a_check": sum(
-            1 for row in material_ledger
-            if row.get("outcome") not in (None, "not_reached")
-        ),
-        "semantic_status": semantic_status(
-            ledger, validated,
-            error="coordinator handoff is invalid" if coordinator_problems else None,
-        ),
-        "presentation": presentation,
-        "presentation_problems": presentation_problems,
-        "report_period": claims_meta.get("report_period"),
-        "report_date": claims_meta.get("report_date"),
-        "inventory": inventory,
-        "inventory_missing": inventory_cover["missing"],
-        "extractor_checkable_fraction": inventory_cover["extractor_fraction"],
-        "engine_checkable_fraction": inventory_cover["engine_fraction"],
-        "coordinator": coordinator_handoff,
-        "structural_context_count": len(coordinator_handoff["structural_context"]),
-    }
+        return 2 if payload["repair_reasons"] else 0
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(payload, indent=2) + "\n")
     print(
-        f"accept: {len(material_validated)} grounded, {len(discarded)} discarded "
-        f"of {len(material_proposed)}; "
+        f"accept: {payload['grounded']} grounded, {len(payload['discarded'])} discarded "
+        f"of {payload['proposed']}; "
         f"ledger {payload['claims_reached_by_a_check']} of {payload['claims_in_ledger']}"
     )
-    for row in discarded_claims:
+    for row in payload["discarded_claims"]:
         print(f"  DISCARDED CLAIM {row.get('id')}: {'; '.join(row.get('problems') or [])}")
-    for row in discarded_sources:
+    for row in payload["discarded_sources"]:
         print(f"  DISCARDED SOURCE {row.get('id')}: {'; '.join(row.get('problems') or [])}")
-    for row in discarded:
+    for row in payload["discarded"]:
         print(f"  DISCARDED {row.get('id')}: {'; '.join(row.get('problems') or [])}")
-    return 0
+    return 2 if payload["repair_reasons"] else 0
 
 
 if __name__ == "__main__":
