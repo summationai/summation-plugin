@@ -19,6 +19,9 @@ NEEDLE_EXTRACT_FIRST = (
     "Run `extract.py` now. Do not read `accept.py`, `render.py`, or `role-contracts.json` before `findings.json`"
 )
 NEEDLE_NO_DISK_SEARCH = "Do not search the disk."
+NEEDLE_NO_ACCEPT_UNTIL_ROLE_FILE = (
+    "Do not read `accept.py` or `role-contracts.json` until at least one file exists in `run/role-outputs/`"
+)
 
 
 class RoleOutputFileInstructionTests(unittest.TestCase):
@@ -32,6 +35,7 @@ class RoleOutputFileInstructionTests(unittest.TestCase):
         first = skill.split("## Run directory", 1)[0]
         self.assertIn(NEEDLE_EXTRACT_FIRST, first)
         self.assertIn(NEEDLE_NO_DISK_SEARCH, first)
+        self.assertIn(NEEDLE_NO_ACCEPT_UNTIL_ROLE_FILE, first)
         self.assertNotIn("nine-stage private", first)
 
     def test_shipped_roles_require_write_file_then_stop(self) -> None:
