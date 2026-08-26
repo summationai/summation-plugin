@@ -45,7 +45,7 @@ class PageUtilityTests(unittest.TestCase):
             self.assertIn("FIX FIRST", html)
             self.assertIn("4.6%", html)
             self.assertIn("350,490.34", html.replace("$", ""))
-            self.assertIn("Week ending 2026-04-04", html)
+            self.assertIn("Week ending April 4, 2026", html)
             self.assertNotIn("Period: Not stated", html)
             self.assertNotIn("Report date: Not stated", html)
             self.assertNotIn("data-card-id=\"C-TITLE\"", html)
@@ -525,6 +525,138 @@ class PageUtilityTests(unittest.TestCase):
             ])
             self.assertNotEqual(proc.returncode, 0)
             self.assertIn("evidence_file", proc.stderr)
+
+    def test_page_formats_live_numbers_and_american_dates(self) -> None:
+        evidence = {
+            "span_count": 39229,
+            "retrieved_at": "2026-08-26T22:20:21Z",
+        }
+        grade = {
+            "summary": "Spans match the live snapshot for 24 August 2026.",
+            "report_period": "Week ending 2026-08-24",
+            "report_date": "2026-08-24",
+            "cards": [
+                {
+                    "id": "C-SPANS",
+                    "label": "Span count",
+                    "quote": "39,229",
+                    "verdict": "confirmed",
+                    "explanation": (
+                        "The live Datadog snapshot for 24 August 2026 "
+                        "records 39229 spans."
+                    ),
+                    "location": "Spans row",
+                    "report_value": "39,229",
+                    "source_id": "SRC-get_llm_observability_activity",
+                    "operands": [{
+                        "label": "Live span count",
+                        "value": 39229,
+                        "location": (
+                            "Live Datadog metrics span_count for 24 August 2026"
+                        ),
+                    }],
+                },
+                {
+                    "id": "C-RATE",
+                    "label": "Events per session",
+                    "quote": "22.8",
+                    "verdict": "confirmed",
+                    "explanation": (
+                        "Events divided by sessions rounds to 22.8."
+                    ),
+                    "location": "Events per session row",
+                    "report_value": "22.8",
+                    "operands": [
+                        {
+                            "label": "Warehouse event count",
+                            "value": 37637,
+                            "location": "April 2026 warehouse query",
+                        },
+                        {
+                            "label": "Warehouse session count",
+                            "value": 1654,
+                            "location": "April 2026 warehouse query",
+                        },
+                    ],
+                    "calculation": {
+                        "expression": "37637 / 1654",
+                        "result": 22.755139056831922,
+                    },
+                },
+                {
+                    "id": "C-GBP",
+                    "label": "GBP rate to USD",
+                    "quote": "1.337612",
+                    "verdict": "confirmed",
+                    "explanation": "The July 2026 GBP planning rate is 1.337612.",
+                    "location": "GBP row",
+                    "report_value": "1.337612",
+                    "operands": [{
+                        "label": "Live GBP rate",
+                        "value": "1.337612",
+                        "location": "currency_rates_input period Jul-26 GBP",
+                    }],
+                },
+            ],
+            "next": [{
+                "kind": "review_before_share",
+                "text": "Share the 24 August 2026 report as written.",
+                "quote": "39,229",
+                "card_ids": ["C-SPANS"],
+            }],
+            "sources": [{
+                "id": "SRC-get_llm_observability_activity",
+                "kind": "live_tool",
+                "label": "Datadog LLM Observability",
+                "evidence_file": "get_llm_observability_activity.json",
+                "retrieval": {
+                    "retrieved_at": "2026-08-26T22:20:21Z",
+                    "tool": "get_llm_observability_activity",
+                    "arguments": {
+                        "start_date": "2026-08-24",
+                        "end_date": "2026-08-25",
+                    },
+                },
+            }],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            visible = tmp_path / "report-visible.txt"
+            findings = tmp_path / "findings.json"
+            grade_path = tmp_path / "grade.json"
+            evidence_dir = tmp_path / "evidence"
+            evidence_dir.mkdir()
+            (evidence_dir / "get_llm_observability_activity.json").write_text(
+                json.dumps(evidence) + "\n"
+            )
+            out_dir = tmp_path / "artifact"
+            self.assertEqual(_run([
+                sys.executable, str(EXTRACT),
+                "--report", str(REPORT),
+                "--visible", str(visible),
+                "--out", str(findings),
+            ]).returncode, 0)
+            grade_path.write_text(json.dumps(grade) + "\n")
+            proc = _run([
+                sys.executable, str(PAGE),
+                "--findings", str(findings),
+                "--grade", str(grade_path),
+                "--evidence-dir", str(evidence_dir),
+                "--out-dir", str(out_dir),
+            ])
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            html = (out_dir / "grade-artifact.html").read_text()
+            self.assertIn(">39,229<", html)
+            self.assertIn(">37,637<", html)
+            self.assertIn(">1,654<", html)
+            self.assertNotIn(">39229<", html)
+            self.assertNotIn(">37637<", html)
+            self.assertIn("22.8", html)
+            self.assertNotIn("22.755139056831922", html)
+            self.assertIn("August 24, 2026", html)
+            self.assertIn("Week ending August 24, 2026", html)
+            self.assertNotIn("24 August", html)
+            self.assertIn("1.337612", html)
 
     def test_packaged_plugin_copy_matches(self) -> None:
         self.assertEqual(PAGE.read_bytes(), PACKAGED.read_bytes())

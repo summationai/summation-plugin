@@ -255,7 +255,7 @@ class BrowserCustomerLawTests(unittest.TestCase):
                 self.assertTrue(result["cardInside"], result)
                 self.assertEqual(result["roundedCount"], 1)
                 for text in (
-                    "Calculated result\t4.574032879496728%",
+                    "Calculated result\t4.6%",
                     "Customer-rounded result\t4.6%",
                     "Report shows",
                 ):

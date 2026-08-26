@@ -759,7 +759,7 @@ class HtmlTests(unittest.TestCase):
         page = render.html_of(
             artifact, render_context=render_context([check]))
         self.assertIn("Calculated result", page)
-        self.assertIn("4.574032879496728%", page)
+        self.assertNotIn("4.574032879496728%", page)
         self.assertIn("Customer-rounded result", page)
         self.assertIn("4.6%", page)
         self.assertLess(page.index("Calculated result"), page.index(

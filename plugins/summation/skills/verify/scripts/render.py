@@ -10,6 +10,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+SCRIPTS = Path(__file__).resolve().parent
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+import receipt_math  # noqa: E402
+
 
 SCHEMA_VERSION = "grade-artifact/public-receipt-v1"
 DISPOSITIONS = frozenset({
@@ -675,10 +680,43 @@ def validate_artifact(artifact: dict) -> None:
     jsonschema.validate(artifact, json.loads(schema_path.read_text()))
 
 
-def _display(value) -> str:
+_DAY_MONTH = re.compile(
+    r"\b([0-3]?\d)\s+"
+    r"(January|February|March|April|May|June|July|August|September|"
+    r"October|November|December)\s+(\d{4})\b",
+    re.I,
+)
+_ISO_DATE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})(?!T)\b")
+
+
+def _customer_english(text: str) -> str:
+    """Rewrite day-month English and ISO calendar dates to month-day order."""
+
+    def day_month(match: re.Match[str]) -> str:
+        day = int(match.group(1))
+        if day < 1 or day > 31:
+            return match.group(0)
+        return f"{match.group(2).title()} {day}, {match.group(3)}"
+
+    def iso(match: re.Match[str]) -> str:
+        try:
+            parsed = datetime(
+                int(match.group(1)), int(match.group(2)), int(match.group(3)),
+            )
+        except ValueError:
+            return match.group(0)
+        return f"{parsed.strftime('%B')} {parsed.day}, {parsed.year}"
+
+    return _ISO_DATE.sub(iso, _DAY_MONTH.sub(day_month, text))
+
+
+def _display(value, *, places: int | None = None) -> str:
     if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
-    return str(value)
+    formatted = receipt_math.public_display(value, places=places)
+    if formatted is not None:
+        return formatted
+    return _customer_english(str(value))
 
 
 def _display_date(value: str, *, field: str) -> str:
@@ -772,6 +810,7 @@ def _card_html(check: dict, claim: dict, sources: dict[str, dict], *,
                prominence: str, numeric_comparison: dict | None = None) -> str:
     receipt = check["public_receipt"]
     report_operand = receipt["report_operand"]
+    report_places = receipt_math.decimal_places(report_operand["value"])
     disposition = _fixed_label(
         DISPOSITION_LABELS, str(check["verdict"]), "disposition")
     decisive = receipt.get("decisive_operands") or []
@@ -779,11 +818,12 @@ def _card_html(check: dict, claim: dict, sources: dict[str, dict], *,
     calculation = ""
     if receipt.get("calculation"):
         expression = html.escape(receipt["calculation"]["expression"])
-        result = html.escape(_display(receipt["calculation"]["result"]))
+        result = html.escape(
+            _display(receipt["calculation"]["result"], places=report_places))
         math_rows = "".join(
             '<tr data-operand-role="decisive"><td>'
             f'<strong>{html.escape(row["label"])}</strong>'
-            f'<span class="math-location">{html.escape(row["location"])}</span>'
+            f'<span class="math-location">{html.escape(_customer_english(row["location"]))}</span>'
             f'</td><td class="v">{html.escape(_display(row["value"]))}</td></tr>'
             for row in decisive
         )
@@ -803,7 +843,7 @@ def _card_html(check: dict, claim: dict, sources: dict[str, dict], *,
             + (
             '<tr class="report"><td>Report shows'
             f'<span class="math-location">{html.escape(report_operand["label"])} · '
-            f'{html.escape(report_operand["location"])}</span></td>'
+            f'{html.escape(_customer_english(report_operand["location"]))}</span></td>'
             f'<td class="v">{html.escape(_display(report_operand["value"]))}</td></tr>'
             '</tbody></table>'
             '<span class="receipt-key expression-key">Calculation expression</span>'
@@ -815,7 +855,7 @@ def _card_html(check: dict, claim: dict, sources: dict[str, dict], *,
             '<div class="operand receipt-row" data-operand-role="report">'
             f'<strong class="operand-label">{html.escape(report_operand["label"])}</strong>'
             f'<span class="value">{html.escape(_display(report_operand["value"]))}</span>'
-            f'<span class="location">{html.escape(report_operand["location"])}</span>'
+            f'<span class="location">{html.escape(_customer_english(report_operand["location"]))}</span>'
             "</div>"
         )
         for row in decisive:
@@ -823,7 +863,7 @@ def _card_html(check: dict, claim: dict, sources: dict[str, dict], *,
                 '<div class="operand receipt-row" data-operand-role="decisive">'
                 f'<strong class="operand-label">{html.escape(row["label"])}</strong>'
                 f'<span class="value">{html.escape(_display(row["value"]))}</span>'
-                f'<span class="location">{html.escape(row["location"])}</span>'
+                f'<span class="location">{html.escape(_customer_english(row["location"]))}</span>'
                 "</div>"
             )
     reconstruction = ""
@@ -831,7 +871,7 @@ def _card_html(check: dict, claim: dict, sources: dict[str, dict], *,
         reconstruction = (
             '<div class="reconstruction-attempt">'
             '<span class="receipt-key">Reconstruction attempt</span>'
-            f'<p>{html.escape(receipt["reconstruction_attempt"])}</p></div>'
+            f'<p>{html.escape(_customer_english(receipt["reconstruction_attempt"]))}</p></div>'
         )
     source_html = ""
     source_id = str(receipt.get("source_id") or "")
@@ -861,12 +901,12 @@ def _card_html(check: dict, claim: dict, sources: dict[str, dict], *,
         f'data-prominence="{html.escape(prominence)}">'
         f'<span class="tag">{html.escape(disposition)}</span>'
         f'<h3>{html.escape(report_operand["label"])}</h3>'
-        f'<div class="where">{html.escape(report_operand["location"])}</div>'
+        f'<div class="where">{html.escape(_customer_english(report_operand["location"]))}</div>'
         f'<blockquote class="claim-quote">{html.escape(claim["quote"])}</blockquote>'
         '<div class="receipt"><h4>Receipt</h4>'
         f'{"".join(operands)}{calculation}'
         '<div class="receipt-explanation"><span class="receipt-key">Explanation</span>'
-        f'<p>{html.escape(receipt["explanation"])}</p></div>'
+        f'<p>{html.escape(_customer_english(receipt["explanation"]))}</p></div>'
         f'{reconstruction}{source_html}</div>'
         "</article>"
     )
@@ -902,7 +942,7 @@ def _not_checkable_section(rows: list[tuple[dict, dict]]) -> str:
     items = "".join(
         '<li class="not-checkable-item"><span class="compact-claim">'
         f'<strong>{html.escape(claim["quote"])}</strong>'
-        f'<span>{html.escape(check["public_receipt"]["explanation"])}</span>'
+        f'<span>{html.escape(_customer_english(check["public_receipt"]["explanation"]))}</span>'
         '</span></li>'
         for check, claim in rows
     )
@@ -988,7 +1028,7 @@ def html_of(artifact: dict, *, render_context: dict | None = None) -> str:
     source = artifact["source"]
     filename = str(source["path"])
     generated = _display_date(artifact["generated_at"], field="generated_at")
-    period = str(source.get("period_label") or "Not stated")
+    period = _customer_english(str(source.get("period_label") or "Not stated"))
     report_date = (
         _display_date(str(source["report_date"]), field="source.report_date")
         if source.get("report_date") else "Not stated"
@@ -1040,10 +1080,11 @@ def html_of(artifact: dict, *, render_context: dict | None = None) -> str:
     if not actions:
         raise SystemExit("render: accepted customer action is missing")
     if len(actions) == 1:
-        next_content = html.escape(actions[0]["text"])
+        next_content = html.escape(_customer_english(actions[0]["text"]))
     else:
         next_content = "<ul>" + "".join(
-            f'<li>{html.escape(row["text"])}</li>' for row in actions
+            f'<li>{html.escape(_customer_english(row["text"]))}</li>'
+            for row in actions
         ) + "</ul>"
     receipt_noun = "receipt" if material_total == 1 else "receipts"
     css = """
@@ -1090,7 +1131,7 @@ footer{margin-top:52px;border-top:1px solid var(--line);padding-top:18px;display
         f'<span class="chip {html.escape(root_tone)}">'
         f'{html.escape(root_chip_label)}</span>'
         f'<h1>{html.escape(root_label)}</h1>'
-        f'<p class="verdict-summary">{html.escape(presentation["summary"])}</p>'
+        f'<p class="verdict-summary">{html.escape(_customer_english(presentation["summary"]))}</p>'
         f'<p class="count-summary">{html.escape(count_sentence)}</p>'
         '<div class="file">'
         f'<span>Report examined: <code>{html.escape(filename)}</code></span>'

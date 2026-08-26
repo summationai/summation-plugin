@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ast
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
 
 
@@ -13,6 +13,72 @@ _RESULT = re.compile(
     re.I,
 )
 _ALLOWED = re.compile(r"^[\d\s.,()+\-*/]+$")
+
+
+_AFFIX_STRIP = re.compile(
+    r"(?:pp|percent(?:age)?(?:\s+points?)?|points?|bps|basis\s+points?)\s*$",
+    re.I,
+)
+
+
+def decimal_places(value) -> int | None:
+    """Count decimal places in a public number, or None when it is not numeric."""
+    if public_number(value) is None:
+        return None
+    text = str(value).strip().replace("$", "").replace(",", "")
+    text = _AFFIX_STRIP.sub("", text).strip()
+    if text.endswith("%"):
+        text = text[:-1].strip()
+    if "." not in text:
+        return 0
+    frac = text.split(".", 1)[1]
+    frac = re.sub(r"[^0-9].*", "", frac)
+    return len(frac)
+
+
+def _affixes(value) -> tuple[str, str]:
+    if not isinstance(value, str):
+        return "", ""
+    text = value.strip()
+    prefix = "$" if text.startswith("$") else ""
+    lower = text.lower()
+    if re.search(r"\bpp\b", lower) or "percentage point" in lower:
+        return prefix, " pp"
+    if "%" in text or "percent" in lower:
+        return prefix, "%"
+    if re.search(r"\bbps\b", lower) or "basis point" in lower:
+        return prefix, " bps"
+    return prefix, ""
+
+
+def _comma_decimal(number: Decimal, places: int) -> str:
+    quant = Decimal("1") if places == 0 else Decimal("0." + "0" * (places - 1) + "1")
+    rounded = number.quantize(quant, rounding=ROUND_HALF_UP)
+    if places == 0:
+        return f"{int(rounded):,}"
+    formatted = f"{rounded:.{places}f}"
+    negative = formatted.startswith("-")
+    body = formatted[1:] if negative else formatted
+    whole, frac = body.split(".")
+    sign = "-" if negative else ""
+    return f"{sign}{int(whole):,}.{frac}"
+
+
+def public_display(value, *, places: int | None = None) -> str | None:
+    """Customer-facing form of a public number, or None when value is not numeric.
+
+    Integers get thousands separators. A caller that passes ``places`` (the
+    report value's decimal count) rounds a calculation result to that precision.
+    """
+    parsed = public_number(value)
+    if parsed is None:
+        return None
+    prefix, suffix = _affixes(value)
+    if places is None:
+        places = decimal_places(value)
+        if places is None:
+            places = 0
+    return f"{prefix}{_comma_decimal(parsed, places)}{suffix}"
 
 
 def public_number(value) -> Decimal | None:

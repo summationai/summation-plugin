@@ -83,6 +83,8 @@ Card `verdict` is `confirmed`, `contradicted`, `not_checkable`, or `changed_sinc
 
 If the report states a period, put that visible string in `report_period`. If it states a calendar date, put ISO `YYYY-MM-DD` in `report_date`. Those fields are not customer cards. `page.py` copies them onto the file line. Leave them out only when the report does not state them.
 
+`page.py` prints receipt numbers with thousands separators. A calculation result rounds to the same decimal places as the report value. Customer dates on the page use American month-day order (`August 24, 2026`). Write `August 24` in explanations. Do not write `24 August`.
+
 A `not_checkable` card has an explanation and no operands. An `evidence` card names `source_id` matching `SRC-<filename-without-extension>`.
 
 When you queried a live tool in this run, add a top-level `sources` array. Each live row needs `"kind": "live_tool"`, `evidence_file` equal to the saved file name, and `retrieval` with `retrieved_at`, `tool`, and `arguments`. `page.py` hashes the file. The page prints `Live source Ran` only then. A nearby file you did not query stays a supplied file.
