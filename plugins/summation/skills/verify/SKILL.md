@@ -21,7 +21,7 @@ If they named a report that already lives in Summation and there is no disk file
    - Also using connections already in this session: about 10–15 minutes.
 7. Then stay quiet except for brief progress. Do not narrate layers, error codes, tenant IDs, or check names.
 
-After extract exists, run `write_claim_taker_inputs.py` to materialize one read-only input file per inventory kind. Then, for each of those files, read only the Claim-taker section of [references/roles.md](references/roles.md), classify that partition, and write the result with `write_role_output.py`. Do not read `accept.py` or `role-contracts.json` until at least one file exists in `run/role-outputs/`. After those files exist, run `write_coordinator_input.py`, then author the coordinator semantic plan from [references/roles.md](references/roles.md) and write it with `write_role_output.py`. Do not read all of `accept.py` before `claims.json` exists. Do not paste role bundles into chat.
+After extract exists, run `write_claim_taker_inputs.py` to materialize one read-only input file per inventory kind. Then, for each of those files, read only the Claim-taker section of [references/roles.md](references/roles.md), classify that partition, and write the result with `write_role_output.py`. Do not read `accept.py` or `role-contracts.json` until at least one file exists in `run/role-outputs/`. After those files exist, run `write_coordinator_input.py`, then `write_claims_json.py`. That script copies claim-taker classifications into `claims.json`. It does not invent title/claim labels. Do not read all of `accept.py` before `claims.json` exists. Do not paste role bundles into chat.
 
 A host or runner prompt that forbids questions cannot prove this first-two-minutes route. It must allow the file, nearby-evidence, connected-source consent, and duration questions above.
 
@@ -93,6 +93,14 @@ python3 "$VERIFY/scripts/write_coordinator_input.py" \
   --role-outputs "$RUN/role-outputs" \
   --evidence "$RUN/evidence" \
   --out "$RUN/role-inputs/coordinator-semantic-plan.json"
+```
+
+After the coordinator input exists, write `claims.json` from claim-taker files. This copies classifications; it does not invent them:
+
+```bash
+python3 "$VERIFY/scripts/write_claims_json.py" \
+  --plan "$RUN/role-inputs/coordinator-semantic-plan.json" \
+  --out "$RUN/claims.json"
 ```
 
 Each role output is a file. Do not paste the bundle into chat. Write it with:
