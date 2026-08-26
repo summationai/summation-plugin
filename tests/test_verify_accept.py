@@ -66,6 +66,9 @@ def evidence_check(*, verdict: str = "confirmed") -> dict:
         "basis": "evidence",
         "verdict": verdict,
         "importance": "material",
+        "addressed_clause_refs": [{
+            "partition_id": "summary", "candidate_id": "K1", "clause_id": "C1",
+        }],
         "report_quote": "On-time delivery was 94%.",
         "evidence_json": [
             {"pointer": "/on_time", "value": 94},
@@ -106,6 +109,9 @@ def not_checkable_check() -> dict:
         "basis": "report",
         "verdict": "not_checkable",
         "importance": "material",
+        "addressed_clause_refs": [{
+            "partition_id": "summary", "candidate_id": "K1", "clause_id": "C1",
+        }],
         "report_quote": "On-time delivery was 94%.",
         "public_receipt": {
             "report_operand": {
@@ -705,10 +711,15 @@ class LedgerTests(unittest.TestCase):
             "classification": "material_claim",
             "importance": "material",
             "inventory_ids": ["INV5"],
+            "clauses": [{
+                "id": "C1", "quote": "Data is current through April 4, 2026.",
+                "public_label": "Reported data currency date",
+            }],
         })
         membership.append({
             "partition_id": "report-shell",
             "candidate_id": "M1",
+            "clause_id": "C1",
             "canonical_claim_id": "L1",
         })
         claims = [{
@@ -718,7 +729,10 @@ class LedgerTests(unittest.TestCase):
             "classification": "material_claim",
             "importance": "material",
             "inventory_ids": ["INV5"],
-            "member_refs": [{"partition_id": "report-shell", "candidate_id": "M1"}],
+            "member_refs": [{
+                "partition_id": "report-shell", "candidate_id": "M1",
+                "clause_id": "C1",
+            }],
         }]
         coordinator = {
             "partition_results": [{
@@ -769,13 +783,17 @@ class LedgerTests(unittest.TestCase):
                 "id": "L1", "quote": "Revenue was $10.",
                 "public_label": "Reported revenue", "importance": "material",
                 "classification": "material_claim", "inventory_ids": ["INV1"],
-                "member_refs": [{"partition_id": "p1", "candidate_id": "A"}],
+                "member_refs": [{
+                    "partition_id": "p1", "candidate_id": "A", "clause_id": "C1",
+                }],
             },
             {
                 "id": "L2", "quote": "Revenue was $10.",
                 "public_label": "Second reported revenue", "importance": "material",
                 "classification": "material_claim", "inventory_ids": ["INV1"],
-                "member_refs": [{"partition_id": "p2", "candidate_id": "B"}],
+                "member_refs": [{
+                    "partition_id": "p2", "candidate_id": "B", "clause_id": "C1",
+                }],
             },
         ]
         coordinator = {
@@ -784,16 +802,26 @@ class LedgerTests(unittest.TestCase):
                     "id": "A", "quote": "Revenue was $10.",
                     "public_label": "Reported revenue", "importance": "material",
                     "classification": "material_claim", "inventory_ids": ["INV1"],
+                    "clauses": [{
+                        "id": "C1", "quote": "Revenue was $10.",
+                        "public_label": "Reported revenue",
+                    }],
                 }]},
                 {"partition_id": "p2", "candidates": [{
                     "id": "B", "quote": "Revenue was $10.",
                     "public_label": "Second reported revenue", "importance": "material",
                     "classification": "material_claim", "inventory_ids": ["INV1"],
+                    "clauses": [{
+                        "id": "C1", "quote": "Revenue was $10.",
+                        "public_label": "Second reported revenue",
+                    }],
                 }]},
             ],
             "membership": [
-                {"partition_id": "p1", "candidate_id": "A", "canonical_claim_id": "L1"},
-                {"partition_id": "p2", "candidate_id": "B", "canonical_claim_id": "L2"},
+                {"partition_id": "p1", "candidate_id": "A", "clause_id": "C1",
+                 "canonical_claim_id": "L1"},
+                {"partition_id": "p2", "candidate_id": "B", "clause_id": "C1",
+                 "canonical_claim_id": "L2"},
             ],
             "verifier_assignments": [
                 {"verifier_id": "V1", "claim_ids": ["L1"]},
@@ -855,6 +883,42 @@ class PresentationTests(unittest.TestCase):
                 self.assertIsNone(accepted)
                 self.assertTrue(problems)
 
+    def test_repeated_correction_statement_must_be_in_receipt_and_next_action(self) -> None:
+        statement = (
+            "Both the Revenue KPI tile and the segment table Total row repeat "
+            "$359,490.34, and both must change to $350,490.34."
+        )
+        check = {
+            "id": "C-TOTAL",
+            "correction_notice": {
+                "statement": statement,
+                "report_value": "$359,490.34",
+                "replacement_value": "$350,490.34",
+                "locations": ["Revenue KPI tile", "segment table Total row"],
+            },
+        }
+        action = {
+            "id": "A1",
+            "text": statement + " Recheck the report before sharing it.",
+            "report_quote": "On-time delivery was 94%.",
+            "check_ids": ["C-TOTAL"],
+        }
+        accepted, problems = accept.validate_presentation(
+            {"presentation": {"summary": "", "actions": [action], "limits": []}},
+            REPORT, {"C-TOTAL"}, accepted_checks=[check],
+        )
+        self.assertEqual(problems, [])
+        self.assertEqual(accepted["actions"], [action])
+        action["text"] = "Correct the displayed total before sharing the report."
+        _accepted, problems = accept.validate_presentation(
+            {"presentation": {"summary": "", "actions": [action], "limits": []}},
+            REPORT, {"C-TOTAL"}, accepted_checks=[check],
+        )
+        self.assertEqual(problems, [
+            "presentation.actions does not include the exact correction statement "
+            "for check 'C-TOTAL'",
+        ])
+
 
 class CliTests(unittest.TestCase):
     def test_cli_preflight_returns_exact_repair_reasons_before_acceptance(self) -> None:
@@ -899,7 +963,10 @@ class CliTests(unittest.TestCase):
             evidence.write_text('{"on_time": 94, "total": 100}\n')
             claims = folder / "claims.json"
             canonical = claim() | {
-                "member_refs": [{"partition_id": "summary", "candidate_id": "K1"}],
+                "member_refs": [{
+                    "partition_id": "summary", "candidate_id": "K1",
+                    "clause_id": "C1",
+                }],
             }
             claims.write_text(json.dumps({
                 "claims": [canonical],
@@ -913,11 +980,17 @@ class CliTests(unittest.TestCase):
                             "importance": "material",
                             "classification": "material_claim",
                             "inventory_ids": ["INV1"],
+                            "clauses": [{
+                                "id": "C1",
+                                "quote": "On-time delivery was 94%.",
+                                "public_label": CLAIM_LABEL,
+                            }],
                         }],
                     }],
                     "membership": [{
                         "partition_id": "summary",
                         "candidate_id": "K1",
+                        "clause_id": "C1",
                         "canonical_claim_id": "L1",
                     }],
                     "verifier_assignments": [{

@@ -325,7 +325,11 @@ def _customer_html_problems(artifact: dict, page: str) -> list[str]:
     if "Summation <span>/ Verify</span>" not in page:
         problems.append("Summation / Verify header is missing")
     root_verdict = str(artifact.get("verdict") or "")
-    root_label = render.ROOT_LABELS.get(root_verdict)
+    try:
+        root_label = render._root_headline(
+            root_verdict, artifact.get("evidence_coverage"))
+    except SystemExit:
+        root_label = None
     if root_label is None or root_label not in visible:
         problems.append("plain-English root verdict is missing")
     root_chip = render.ROOT_CHIP_LABELS.get(root_verdict)

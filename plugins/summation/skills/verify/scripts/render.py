@@ -19,10 +19,9 @@ ROOT_VERDICTS = frozenset({
     "safe_to_share", "share_with_caveats", "fix_first", "unable_to_grade",
 })
 SOURCE_KINDS = frozenset({"supplied_file", "live_tool"})
-ROOT_LABELS = {
+ROOT_STATIC_HEADLINES = {
     "safe_to_share": "Safe to share",
     "share_with_caveats": "Share with caveats",
-    "fix_first": "Fix before sharing",
     "unable_to_grade": "Unable to grade",
 }
 ROOT_CHIP_LABELS = {
@@ -99,6 +98,19 @@ def _fixed_label(mapping: dict[str, str], value: str, kind: str) -> str:
         return mapping[value]
     except KeyError as exc:
         raise SystemExit(f"render: unsupported {kind} {value!r}") from exc
+
+
+def _root_headline(verdict: str, counts: dict) -> str:
+    """Map the exact verdict plus mechanical contradiction count to the heading."""
+    if verdict != "fix_first":
+        return _fixed_label(ROOT_STATIC_HEADLINES, verdict, "root verdict")
+    if not isinstance(counts, dict):
+        raise SystemExit("render: evidence coverage is missing for root headline")
+    errors = counts.get("contradicted")
+    if isinstance(errors, bool) or not isinstance(errors, int) or errors < 1:
+        raise SystemExit("render: fix_first headline requires contradicted count")
+    noun = "error" if errors == 1 else "errors"
+    return f"Fix {errors} {noun} before you share this report."
 
 
 def _valid_iso_time(value) -> bool:
@@ -790,7 +802,7 @@ def html_of(artifact: dict) -> str:
         if source.get("report_date") else "Not stated"
     )
     root_verdict = str(artifact["verdict"])
-    root_label = _fixed_label(ROOT_LABELS, root_verdict, "root verdict")
+    root_label = _root_headline(root_verdict, counts)
     root_chip_label = _fixed_label(
         ROOT_CHIP_LABELS, root_verdict, "root verdict chip")
     root_tone = _fixed_label(ROOT_TONES, root_verdict, "root tone")
@@ -937,15 +949,37 @@ def ungraded_reason(raw: dict, has_receipts: bool,
         str(row.get("id") or "") for row in inventory.get("items") or []
         if isinstance(row, dict) and row.get("importance") == "material"
     } - {""}
-    claimed_inventory_ids = [
-        str(value) for claim in claims for value in claim.get("inventory_ids") or []
-        if str(value)
-    ]
-    if (
-        set(claimed_inventory_ids) != material_inventory_ids
-        or len(claimed_inventory_ids) != len(set(claimed_inventory_ids))
-    ):
-        return "material inventory ids do not reconcile with claims"
+    claim_ids_by_inventory: dict[str, list[str]] = {}
+    for claim in claims:
+        claim_id = str(claim.get("id") or "")
+        for value in claim.get("inventory_ids") or []:
+            inventory_id = str(value or "")
+            if inventory_id:
+                claim_ids_by_inventory.setdefault(inventory_id, []).append(claim_id)
+    coordinator = raw.get("coordinator")
+    expected_by_inventory = (
+        coordinator.get("material_inventory_claim_ids")
+        if isinstance(coordinator, dict) else None
+    )
+    if isinstance(expected_by_inventory, dict) and expected_by_inventory:
+        expected = {
+            str(inventory_id): [str(claim_id) for claim_id in claim_ids]
+            for inventory_id, claim_ids in expected_by_inventory.items()
+            if isinstance(claim_ids, list)
+        }
+        if set(expected) != material_inventory_ids or any(
+            len(actual) != len(set(actual))
+            or set(actual) != set(expected.get(inventory_id) or [])
+            for inventory_id, actual in claim_ids_by_inventory.items()
+        ) or set(claim_ids_by_inventory) != set(expected):
+            return "material inventory clause membership does not reconcile with claims"
+    else:
+        if (
+            set(claim_ids_by_inventory) != material_inventory_ids
+            or any(len(values) != 1 for values in claim_ids_by_inventory.values())
+            or not claim_ids_by_inventory
+        ):
+            return "material inventory ids do not reconcile with claims"
     cov = coverage(raw)
     if material_inventory_ids and (
         cov.get("extractor_checkable_fraction") != 1
@@ -973,6 +1007,8 @@ def attach_receipts_ledger(raw: dict, receipts: dict) -> None:
         raw["claims"] = claims
     if isinstance(receipts.get("inventory"), dict):
         raw["inventory"] = receipts["inventory"]
+    if isinstance(receipts.get("coordinator"), dict):
+        raw["coordinator"] = receipts["coordinator"]
     raw["inventory_missing"] = list(receipts.get("inventory_missing") or [])
     cov = raw.setdefault("coverage", {})
     cov["claims_in_ledger"] = int(receipts.get("claims_in_ledger") or 0)

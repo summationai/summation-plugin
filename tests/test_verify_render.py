@@ -216,6 +216,15 @@ class PublicLayerTests(unittest.TestCase):
             "formula": "on-time / total semantic heuristic",
             "comparison": {"label": "row 9", "value": 999},
             "evidence_json": [{"pointer": "/private", "value": 1}],
+            "addressed_clause_refs": [{
+                "partition_id": "summary", "candidate_id": "K1",
+                "clause_id": "C1",
+            }],
+            "correction_notice": {
+                "statement": "Internal exact-copy enforcement only.",
+                "report_value": 1, "replacement_value": 2,
+                "locations": ["Summary", "Table total"],
+            },
         })
         first = render._public_layer2([check], sources=[retained_source()])
         check["formula"] = "changed prose that must have no effect"
@@ -224,6 +233,8 @@ class PublicLayerTests(unittest.TestCase):
         self.assertEqual(first[0]["public_receipt"], expected_receipt)
         self.assertEqual(set(first[0]), set(render.CHECK_PUBLIC_KEYS))
         self.assertNotIn("formula", json.dumps(first))
+        self.assertNotIn("addressed_clause_refs", json.dumps(first))
+        self.assertNotIn("correction_notice", json.dumps(first))
         self.assertNotIn("/private", json.dumps(first))
 
     def test_renderer_has_no_semantic_fallback_apis(self) -> None:
@@ -282,6 +293,39 @@ class PublicLayerTests(unittest.TestCase):
 
 
 class LedgerTests(unittest.TestCase):
+    def test_explicit_clause_membership_allows_two_claims_from_one_raw_occurrence(self) -> None:
+        checks = [accepted_check(1, "contradicted"), accepted_check(2, "confirmed")]
+        raw = raw_for(checks)
+        raw["inventory"]["items"] = [{
+            "id": "INV-SHARED", "kind": "html_text",
+            "displayed": "Clause one. Clause two.", "location": "text1",
+            "importance": "material", "classification": "material_claim",
+        }]
+        for claim in raw["claims"]:
+            claim["inventory_ids"] = ["INV-SHARED"]
+        receipts = {
+            "claims": raw["claims"],
+            "checks": checks,
+            "validated": checks,
+            "sources": raw["sources"],
+            "inventory": raw["inventory"],
+            "inventory_missing": [],
+            "claims_in_ledger": 2,
+            "claims_reached_by_a_check": 2,
+            "extractor_checkable_fraction": 1.0,
+            "engine_checkable_fraction": 1.0,
+            "semantic_status": "complete",
+            "presentation": guidance_for(checks),
+            "presentation_problems": [],
+            "coordinator": {
+                "material_inventory_claim_ids": {
+                    "INV-SHARED": ["L1", "L2"],
+                },
+            },
+        }
+        render.attach_receipts_ledger(raw, receipts)
+        self.assertIsNone(render.ungraded_reason(raw, True, receipts))
+
     def test_root_verdict_uses_one_material_ledger(self) -> None:
         cases = (
             ([accepted_check(1)], "safe_to_share"),
@@ -393,6 +437,10 @@ class HtmlTests(unittest.TestCase):
             page.replace("Summation", "safe_to_share Summation", 1),
             page.replace("Verification: report.md", "grade-artifact", 1),
             page.replace("FIX FIRST", "Verification result", 1),
+            page.replace(
+                "Fix 1 error before you share this report.",
+                "Fix before sharing", 1,
+            ),
             page.replace('class="tag"', 'class="missing-tag"', 1),
             page.replace('class="next"', 'class="not-next"', 1),
         ):
@@ -420,7 +468,8 @@ class HtmlTests(unittest.TestCase):
         ))
         self.assertIn("<title>Verification: report.md</title>", page)
         for text in (
-            "Summation <span>/ Verify</span>", "FIX FIRST", "Fix before sharing",
+            "Summation <span>/ Verify</span>", "FIX FIRST",
+            "Fix 1 error before you share this report.",
             "Verification results", "Contradicted", "Confirmed",
             "Changed since the report", "Not checkable",
             "Report examined:", "report.md", "Week ending April 4, 2026",
@@ -600,7 +649,8 @@ class HtmlTests(unittest.TestCase):
             " ", page, flags=re.I | re.S,
         ))
         for text in (
-            "Fix before sharing", "Confirmed", "Contradicted", "Not checkable",
+            "Fix 1 error before you share this report.",
+            "Confirmed", "Contradicted", "Not checkable",
             "Changed since the report", "Live source",
         ):
             self.assertIn(text, visible)
@@ -631,10 +681,9 @@ class HtmlTests(unittest.TestCase):
         self.assertNotIn("live_tool", visible)
 
     def test_fixed_label_maps_are_total_and_exact(self) -> None:
-        self.assertEqual(render.ROOT_LABELS, {
+        self.assertEqual(render.ROOT_STATIC_HEADLINES, {
             "safe_to_share": "Safe to share",
             "share_with_caveats": "Share with caveats",
-            "fix_first": "Fix before sharing",
             "unable_to_grade": "Unable to grade",
         })
         self.assertEqual(render.DISPOSITION_LABELS, {
@@ -653,13 +702,26 @@ class HtmlTests(unittest.TestCase):
             "unable_to_grade": "UNABLE TO GRADE",
         })
         for verdict, label in render.ROOT_CHIP_LABELS.items():
-            artifact = make_artifact([accepted_check(1)])
+            artifact = make_artifact([
+                accepted_check(1, "contradicted")
+                if verdict == "fix_first" else accepted_check(1)
+            ])
             artifact["verdict"] = verdict
             page = render.html_of(artifact)
             self.assertIn(f">{label}</span>", page)
             self.assertNotIn(">Verification result</span>", page)
         with self.assertRaises(SystemExit):
             render._fixed_label(render.DISPOSITION_LABELS, "unknown", "disposition")
+
+    def test_fix_first_headline_uses_only_the_mechanical_error_count(self) -> None:
+        checks = [
+            accepted_check(1, "contradicted"),
+            accepted_check(2, "contradicted"),
+            accepted_check(3, "confirmed", severity="high"),
+        ]
+        page = render.html_of(make_artifact(checks))
+        self.assertIn("<h1>Fix 2 errors before you share this report.</h1>", page)
+        self.assertNotIn("<h1>Fix before sharing</h1>", page)
 
     def test_static_source_cannot_be_retyped_live_without_live_metadata(self) -> None:
         source = retained_source()

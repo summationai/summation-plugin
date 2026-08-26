@@ -1,5 +1,5 @@
 {
-  "contract_version": "verify-role-handoff/coordinator-v2",
+  "contract_version": "verify-role-handoff/coordinator-v3",
   "classifications": [
     "material_claim",
     "supporting_provenance",
@@ -19,7 +19,8 @@
         "classification",
         "inventory_ids"
       ],
-      "material_claim_required": ["public_label"],
+      "material_claim_required": ["clauses"],
+      "material_clause_required": ["id", "quote", "public_label"],
       "supporting_provenance_required": ["public_label", "reason"],
       "structural_context_required": ["reason"]
     }
@@ -57,6 +58,8 @@
         "member_refs"
       ],
       "membership_required": ["partition_id", "candidate_id", "canonical_claim_id"],
+      "material_membership_required": ["clause_id"],
+      "material_member_ref_required": ["partition_id", "candidate_id", "clause_id"],
       "structural_context_required": [
         "id",
         "partition_id",
@@ -76,9 +79,12 @@
       "returns": ["status", "repair_reasons", "coordinator"],
       "validates": [
         "complete_unique_opaque_membership",
+        "complete_unique_material_clause_membership",
+        "receipt_addresses_every_canonical_clause",
         "substantive_supporting_provenance_reason",
         "substantive_structural_context_reason",
-        "public_numeric_calculation_result"
+        "public_numeric_calculation_result",
+        "repeated_occurrence_correction_statement"
       ]
     },
     "final_merge": {
@@ -88,7 +94,8 @@
       "output": {
         "required": ["sources", "checks", "presentation"],
         "presentation_required": ["actions"],
-        "action_required": ["id", "text", "report_quote", "check_ids"]
+        "action_required": ["id", "text", "report_quote", "check_ids"],
+        "repeated_correction_action": "copies the exact accepted correction_notice.statement"
       }
     }
   },
@@ -117,8 +124,26 @@
         "verdict",
         "importance",
         "severity",
+        "addressed_clause_refs",
         "public_receipt"
       ],
+      "addressed_clause_ref_required": [
+        "partition_id",
+        "candidate_id",
+        "clause_id"
+      ],
+      "repeated_occurrence_correction_notice": {
+        "required": [
+          "statement",
+          "report_value",
+          "replacement_value",
+          "locations"
+        ],
+        "statement_usage": [
+          "public_receipt.explanation",
+          "coordinator.final_merge.presentation.actions"
+        ]
+      },
       "public_receipt_required": [
         "report_operand",
         "decisive_operands",

@@ -109,9 +109,13 @@ class RoutingTests(unittest.TestCase):
         coordinator_output = contract["coordinator"]["output"]["claim_required"]
         self.assertEqual(claim_output, coordinator_input)
         self.assertEqual(coordinator_output, verifier_input)
-        self.assertIn(
-            "public_label",
+        self.assertEqual(
             contract["claim_taker"]["output"]["material_claim_required"],
+            ["clauses"],
+        )
+        self.assertEqual(
+            contract["claim_taker"]["output"]["material_clause_required"],
+            ["id", "quote", "public_label"],
         )
         self.assertIn(
             "reason",
@@ -141,6 +145,18 @@ class RoutingTests(unittest.TestCase):
             "severity",
             contract["evidence_verifier"]["output"]["check_required"],
         )
+        self.assertIn(
+            "addressed_clause_refs",
+            contract["evidence_verifier"]["output"]["check_required"],
+        )
+        self.assertIn(
+            "receipt_addresses_every_canonical_clause",
+            contract["coordinator"]["preflight"]["validates"],
+        )
+        self.assertEqual(
+            contract["coordinator"]["output"]["material_member_ref_required"],
+            ["partition_id", "candidate_id", "clause_id"],
+        )
         native = contract["routes"]["native_subagents"]
         sequential = contract["routes"]["sequential"]
         self.assertTrue(native["primary"])
@@ -167,7 +183,7 @@ class RoutingTests(unittest.TestCase):
             final_merge["output"]["action_required"],
             ["id", "text", "report_quote", "check_ids"],
         )
-        self.assertIn("`presentation.actions` in the final merge", roles)
+        self.assertIn("a cited `presentation.actions` row", roles)
         live_status = contract["mechanical_outputs"]["verification.live_source"]
         self.assertEqual(live_status["input"], "accepted sources[].kind")
         self.assertEqual(

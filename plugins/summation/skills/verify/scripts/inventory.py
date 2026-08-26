@@ -359,14 +359,20 @@ def claim_inventory_ids(claim: dict) -> list[str]:
 
 
 def cover(inventory: dict, claims: list, *,
-          structural_context: list[dict] | None = None) -> dict:
+          structural_context: list[dict] | None = None,
+          material_inventory_claim_ids: dict | None = None) -> dict:
     """Reconcile explicit host classifications by inventory id only."""
     items = [
         item for item in (inventory.get("items") or [])
         if isinstance(item, dict)
     ]
     by_id = {str(item.get("id") or ""): item for item in items if item.get("id")}
-    consumed: dict[str, dict] = {}
+    authorized = {
+        str(inventory_id): {str(claim_id) for claim_id in claim_ids}
+        for inventory_id, claim_ids in (material_inventory_claim_ids or {}).items()
+        if isinstance(claim_ids, list)
+    }
+    consumed: dict[str, list[dict]] = {}
     missing: list[dict] = []
     mapping: list[dict] = []
     assignments = list(claims) + list(structural_context or [])
@@ -387,16 +393,31 @@ def cover(inventory: dict, claims: list, *,
                     "reason": "inventory id is not present",
                 })
                 continue
-            if iid in consumed:
-                missing.append({
-                    "id": iid,
-                    "displayed": item.get("displayed"),
-                    "location": item.get("location"),
-                    "claim_id": assignment_id,
-                    "reason": "inventory id is consumed more than once",
-                })
-                continue
-            consumed[iid] = assignment
+            previous = consumed.get(iid) or []
+            if previous:
+                allowed = authorized.get(iid) or set()
+                previous_ids = {
+                    str(row.get("id") or row.get("candidate_id") or "")
+                    for row in previous
+                }
+                if not (
+                    classification == "material_claim"
+                    and all(
+                        row.get("classification") == "material_claim"
+                        for row in previous
+                    )
+                    and assignment_id in allowed
+                    and previous_ids <= allowed
+                ):
+                    missing.append({
+                        "id": iid,
+                        "displayed": item.get("displayed"),
+                        "location": item.get("location"),
+                        "claim_id": assignment_id,
+                        "reason": "inventory id is consumed more than once",
+                    })
+                    continue
+            consumed.setdefault(iid, []).append(assignment)
             if (
                 item.get("importance") == "unclassified"
                 or item.get("classification") != classification
@@ -423,20 +444,37 @@ def cover(inventory: dict, claims: list, *,
                 "location": item.get("location"),
                 "reason": "inventory item has no host classification",
             })
+    for iid, expected_claim_ids in authorized.items():
+        actual_claim_ids = {
+            str(row.get("id") or "") for row in consumed.get(iid) or []
+            if row.get("classification") == "material_claim"
+        }
+        if actual_claim_ids != expected_claim_ids and iid in by_id:
+            item = by_id[iid]
+            missing.append({
+                "id": iid,
+                "displayed": item.get("displayed"),
+                "location": item.get("location"),
+                "reason": "material clause claims do not match coordinator membership",
+            })
     material_items = [
         item for item in items
         if item.get("classification") == "material_claim"
         and item.get("importance") == "material"
     ]
     material_ids = {str(item.get("id") or "") for item in material_items}
-    accounted = sum(iid in consumed for iid in material_ids)
+    accounted = sum(bool(consumed.get(iid)) for iid in material_ids)
     completed = sum(
-        iid in consumed and consumed[iid].get("outcome") in COMPLETED
+        bool(consumed.get(iid)) and all(
+            row.get("outcome") in COMPLETED for row in consumed[iid]
+        )
         for iid in material_ids
     )
     for iid in material_ids:
-        assignment = consumed.get(iid)
-        if assignment is not None and assignment.get("outcome") not in COMPLETED:
+        assignments_for_item = consumed.get(iid) or []
+        for assignment in assignments_for_item:
+            if assignment.get("outcome") in COMPLETED:
+                continue
             item = by_id[iid]
             missing.append({
                 "id": iid,

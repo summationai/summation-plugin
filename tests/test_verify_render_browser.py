@@ -327,7 +327,8 @@ class BrowserCustomerLawTests(unittest.TestCase):
                     "returnByValue": True,
                 })["result"]["value"]
                 for label in (
-                    "Fix before sharing", "Confirmed", "Contradicted",
+                    "Fix 1 error before you share this report.",
+                    "Confirmed", "Contradicted",
                     "Not checkable", "Supplied file",
                 ):
                     self.assertIn(label, desktop["visible"])

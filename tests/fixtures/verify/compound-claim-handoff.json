@@ -1,0 +1,177 @@
+{
+  "inventory": {
+    "complete": true,
+    "items": [
+      {
+        "id": "INV-NARRATIVE",
+        "displayed": "Revenue is down 4.6% against the same week last year. Both segments moved in the same direction.",
+        "quote": "Revenue is down 4.6% against the same week last year. Both segments moved in the same direction.",
+        "location": "text7",
+        "importance": "unclassified"
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "L-RATE",
+      "quote": "Revenue is down 4.6% against the same week last year.",
+      "public_label": "Reported year-over-year revenue change",
+      "importance": "material",
+      "classification": "material_claim",
+      "inventory_ids": ["INV-NARRATIVE"],
+      "member_refs": [
+        {
+          "partition_id": "narrative",
+          "candidate_id": "N1",
+          "clause_id": "CL-RATE"
+        }
+      ]
+    },
+    {
+      "id": "L-DIRECTION",
+      "quote": "Both segments moved in the same direction.",
+      "public_label": "Direction of both segment revenue changes",
+      "importance": "material",
+      "classification": "material_claim",
+      "inventory_ids": ["INV-NARRATIVE"],
+      "member_refs": [
+        {
+          "partition_id": "narrative",
+          "candidate_id": "N1",
+          "clause_id": "CL-DIRECTION"
+        }
+      ]
+    }
+  ],
+  "coordinator": {
+    "partition_results": [
+      {
+        "partition_id": "narrative",
+        "candidates": [
+          {
+            "id": "N1",
+            "quote": "Revenue is down 4.6% against the same week last year. Both segments moved in the same direction.",
+            "importance": "material",
+            "classification": "material_claim",
+            "inventory_ids": ["INV-NARRATIVE"],
+            "clauses": [
+              {
+                "id": "CL-RATE",
+                "quote": "Revenue is down 4.6% against the same week last year.",
+                "public_label": "Reported year-over-year revenue change"
+              },
+              {
+                "id": "CL-DIRECTION",
+                "quote": "Both segments moved in the same direction.",
+                "public_label": "Direction of both segment revenue changes"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "membership": [
+      {
+        "partition_id": "narrative",
+        "candidate_id": "N1",
+        "clause_id": "CL-RATE",
+        "canonical_claim_id": "L-RATE"
+      },
+      {
+        "partition_id": "narrative",
+        "candidate_id": "N1",
+        "clause_id": "CL-DIRECTION",
+        "canonical_claim_id": "L-DIRECTION"
+      }
+    ],
+    "verifier_assignments": [
+      {
+        "verifier_id": "EV1",
+        "claim_ids": ["L-RATE", "L-DIRECTION"]
+      }
+    ]
+  },
+  "checks": [
+    {
+      "id": "C-RATE",
+      "claim_id": "L-RATE",
+      "type": "semantic",
+      "basis": "evidence",
+      "verdict": "contradicted",
+      "importance": "material",
+      "severity": "high",
+      "addressed_clause_refs": [
+        {
+          "partition_id": "narrative",
+          "candidate_id": "N1",
+          "clause_id": "CL-RATE"
+        }
+      ],
+      "public_receipt": {
+        "report_operand": {
+          "label": "Reported year-over-year revenue change",
+          "value": "4.6%",
+          "location": "Year-over-year narrative, first sentence"
+        },
+        "decisive_operands": [
+          {
+            "label": "Warehouse year-over-year revenue rate",
+            "value": 0.098,
+            "location": "Warehouse extract, revenue year-over-year rate"
+          }
+        ],
+        "calculation": {
+          "expression": "0.098 * 100",
+          "result": "9.8%"
+        },
+        "explanation": "The warehouse rate is a 9.8% increase, contradicting the report's 4.6% decline."
+      }
+    },
+    {
+      "id": "C-DIRECTION",
+      "claim_id": "L-DIRECTION",
+      "type": "arithmetic",
+      "basis": "report",
+      "verdict": "confirmed",
+      "importance": "material",
+      "severity": "medium",
+      "addressed_clause_refs": [
+        {
+          "partition_id": "narrative",
+          "candidate_id": "N1",
+          "clause_id": "CL-DIRECTION"
+        }
+      ],
+      "public_receipt": {
+        "report_operand": {
+          "label": "Direction of both segment revenue changes",
+          "value": "same direction",
+          "location": "Year-over-year narrative, second sentence"
+        },
+        "decisive_operands": [
+          {
+            "label": "SEGMENT_ALPHA current weekly revenue",
+            "value": "$218,385.67",
+            "location": "Segment table, SEGMENT_ALPHA current-revenue cell"
+          },
+          {
+            "label": "SEGMENT_ALPHA prior-year weekly revenue",
+            "value": "$228,436.55",
+            "location": "Segment table, SEGMENT_ALPHA prior-year cell"
+          },
+          {
+            "label": "SEGMENT_BETA current weekly revenue",
+            "value": "$132,104.67",
+            "location": "Segment table, SEGMENT_BETA current-revenue cell"
+          },
+          {
+            "label": "SEGMENT_BETA prior-year weekly revenue",
+            "value": "$138,853.77",
+            "location": "Segment table, SEGMENT_BETA prior-year cell"
+          }
+        ],
+        "explanation": "Each segment's current revenue is below its own prior-year value, so both segments moved down."
+      }
+    }
+  ]
+}
