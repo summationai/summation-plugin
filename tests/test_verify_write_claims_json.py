@@ -245,4 +245,4 @@ class WriteClaimsJsonTests(unittest.TestCase):
             self.assertEqual(result.get("repair_reasons") or [], [])
 
     def test_packaged_plugin_copy_matches(self) -> None:
-        self.assertEqual(SCRIPT.read_bytes(), PACKAGED.read_bytes())
+        self.assertFalse(PACKAGED.is_file())

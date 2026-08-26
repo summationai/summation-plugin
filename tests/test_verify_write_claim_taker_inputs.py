@@ -69,4 +69,4 @@ class WriteClaimTakerInputsTests(unittest.TestCase):
             self.assertEqual(len(seen), len(set(seen)))
 
     def test_packaged_plugin_copy_matches(self) -> None:
-        self.assertEqual(SCRIPT.read_bytes(), PACKAGED.read_bytes())
+        self.assertFalse(PACKAGED.is_file())

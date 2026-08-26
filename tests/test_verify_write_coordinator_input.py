@@ -83,4 +83,4 @@ class WriteCoordinatorInputTests(unittest.TestCase):
             self.assertNotIn("decision", bundle["approved_source_manifest"][0])
 
     def test_packaged_plugin_copy_matches(self) -> None:
-        self.assertEqual(SCRIPT.read_bytes(), PACKAGED.read_bytes())
+        self.assertFalse(PACKAGED.is_file())

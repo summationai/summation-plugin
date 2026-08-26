@@ -39,3 +39,16 @@ class AnalystSkillInstructionTests(unittest.TestCase):
             canonical = (ROOT / rel).read_bytes()
             packaged = (ROOT / "plugins/summation" / rel).read_bytes()
             self.assertEqual(canonical, packaged, rel)
+
+    def test_packaged_plugin_does_not_ship_overlay_helpers(self) -> None:
+        scripts = ROOT / "plugins/summation/skills/verify/scripts"
+        self.assertTrue((scripts / "page.py").is_file())
+        self.assertTrue((scripts / "extract.py").is_file())
+        for name in (
+            "write_claim_taker_inputs.py",
+            "write_coordinator_input.py",
+            "write_claims_json.py",
+            "write_role_output.py",
+            "write_verifier_inputs.py",
+        ):
+            self.assertFalse((scripts / name).is_file(), name)
