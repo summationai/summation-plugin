@@ -21,7 +21,7 @@ If they named a report that already lives in Summation and there is no disk file
    - Also using connections already in this session: about 10–15 minutes.
 7. Then stay quiet except for brief progress. Do not narrate layers, error codes, tenant IDs, or check names.
 
-After extract exists, follow [references/roles.md](references/roles.md). Each role writes its JSON under `run/role-outputs/` and stops. Do not paste role bundles into chat. Do not read all of `accept.py` to start grading.
+After extract exists, follow [references/roles.md](references/roles.md). Each role writes its JSON with `write_role_output.py` into `run/role-outputs/` and stops. Do not paste role bundles into chat. Do not read all of `accept.py` to start grading.
 
 A host or runner prompt that forbids questions cannot prove this first-two-minutes route. It must allow the file, nearby-evidence, connected-source consent, and duration questions above.
 
@@ -75,6 +75,17 @@ uv run "$VERIFY/scripts/extract.py" \
 ```
 
 If `uv` is missing, run `python3` on `extract.py` only when `pypdf`, `openpyxl`, and `python-pptx` already import. Do not `pip install` without asking. Do not call OfficeCLI or Poppler.
+
+Each role output is a file. Do not paste the bundle into chat. Write it with:
+
+```bash
+python3 "$VERIFY/scripts/write_role_output.py" \
+  --dir "$RUN/role-outputs" \
+  --name <role-or-partition> \
+  --json bundle.json
+```
+
+The script prints the written path. That path is the role output. Chat is not a role output.
 
 Then run the private workflow in [references/roles.md](references/roles.md) and materialize the exact stage bundles in [references/role-contracts.json](references/role-contracts.json). Every canonical material claim has one final resolution, one accepted outcome, and one customer card. Assessments are private evidence or report-consistency judgments; they are not extra claims or cards. A report-basis assessment may use explicit arithmetic, rank, percentage, or consistency operands selected by the host. Code recomputes only declared mechanics. A displayed value, machine candidate, or arithmetic-use marker never confirms a claim. Use `not_checkable` when no grounded assessment answers the claim, an aligned assessment conflict remains, a relevant source is unreconciled, or a dependency is unresolved. Do not leave `not_reached` rows. A material `not_checkable` claim prevents `safe_to_share`.
 

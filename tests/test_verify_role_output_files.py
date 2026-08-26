@@ -10,10 +10,10 @@ NEEDLE_SKILL = (
 )
 NEEDLE_STOP = "Do not paste the bundle into chat."
 NEEDLE_ROLES = (
-    "The output JSON is a file under `run/role-outputs/`. Write that file, then stop."
+    "The output JSON is a file under `run/role-outputs/`. Write it with `write_role_output.py`, then stop."
 )
 NEEDLE_CLAIM = (
-    "Write that object as one JSON file under `run/role-outputs/` named for this partition, then stop."
+    "Write that object with `write_role_output.py` to `run/role-outputs/` named for this partition, then stop."
 )
 NEEDLE_EXTRACT_FIRST = (
     "Run `extract.py` now. Do not read `accept.py`, `render.py`, or `role-contracts.json` before `findings.json`"
