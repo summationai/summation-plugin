@@ -70,8 +70,10 @@ class RoutingTests(unittest.TestCase):
         start = local.index("### Optional local source wrapper")
         end = local.index("## Run directory", start)
         wrapper = local[start:end]
+        self.assertIn("Prefer that wrapper over a direct API or CLI call", wrapper)
         self.assertIn("direct read-only API or CLI call remains valid", wrapper)
         self.assertIn("only after explicit consent", wrapper)
+        self.assertIn("Do not copy secrets into the host home", wrapper)
         self.assertIn("source-specific typed functions", wrapper)
         self.assertIn("rather than arbitrary SQL or shell input", wrapper)
         self.assertIn("without copying secrets", wrapper)

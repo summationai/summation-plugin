@@ -120,7 +120,9 @@ Open `artifact/grade-artifact.html`. Read `verdict` from `grade-artifact.json`. 
 
 ### Optional local source wrapper
 
-When an authenticated local SDK, CLI, or API profile can already read a source but no MCP tool exposes it, a direct read-only API or CLI call remains valid and is usually simpler. You may offer to generate a local read-only FastMCP wrapper for the current host workflow. Explain the bounded scope and generate it only after explicit consent.
+When an authenticated local SDK, CLI, or API profile can already read a source but no MCP tool exposes it, offer a local read-only FastMCP wrapper for the current host workflow. Explain the bounded scope and generate it only after explicit consent. Prefer that wrapper over a direct API or CLI call. Do not copy secrets into the host home.
+
+A direct read-only API or CLI call remains valid if they decline the wrapper.
 
 If they consent, the wrapper must:
 
