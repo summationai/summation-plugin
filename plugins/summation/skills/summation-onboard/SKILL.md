@@ -177,6 +177,10 @@ item and have them fill the template from it.
 - **Never make them choose something technical.** Decide it, do it, say it in one clause.
 - **Never describe the state of their workspace as though it were a finding.** An empty
   workspace is what a new account looks like. Just do the next thing.
+- **Never state anything you have not verified — existence, absence, or effect.** A
+  truncated listing is not evidence something is missing: check the exact path before
+  claiming absence. Exit code 0 is not evidence something happened: check the effect
+  before claiming it did. A wrong "it's broken" costs more trust than any wall of text.
 - **Never restate their own work back to them.**
 
 ## Always
