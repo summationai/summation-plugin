@@ -18,8 +18,9 @@ from the bold lines alone.
 
 ## The setup receipt
 
-Print it the first time **immediately after they choose a path** — rows for what is
-already in place (the plugin, its skills, sign-in state if any). Then reprint it,
+Print it the first time **in your first message, before anything else** — rows for
+what is already in place (the plugin and its version, its skills, sign-in state if
+any). Then reprint it,
 grown, as each later milestone lands: an install step, sign-in, the data connection
 testing green. The person watches rows accumulate as milestones land.
 
