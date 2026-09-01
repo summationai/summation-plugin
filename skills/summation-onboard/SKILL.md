@@ -60,8 +60,12 @@ Rules learned the hard way — treat these as hard:
   something is missing, say so rather than fetching it.
 - **Never hand-roll a substitute for the grade.** `grade.py` is the grade. Reading the
   report yourself and listing problems is not a grade.
-- **Never hand the person a path or URL and tell them to open it.** Run `open <path>`
-  yourself, then give a one-line summary.
+- **Never hand the person a path or URL and tell them to open it** — run `open <path>`
+  yourself, then give a one-line summary. **But never claim something opened unless you
+  know it did.** `open` can be absent, stubbed, or run on a machine with no display, and
+  exit 0 is not proof. Check its output; if it did not open, say so in one line and give
+  them the URL. Telling someone their browser opened when it did not is worse than
+  handing them a link.
 - **The terminal is the summary, the artifact is the detail.** Your closing message is
   short: the verdict, the two or three biggest findings one line each, and where the
   artifact is. Everything else lives in the HTML you already opened.
