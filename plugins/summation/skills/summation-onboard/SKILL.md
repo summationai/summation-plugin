@@ -1,7 +1,7 @@
 ---
 name: summation-onboard
 description: "Drive a new person's first session with Summation: say what it is, offer three paths, then carry the chosen path end to end — grade a document they already have, or connect data and build. Use this the moment someone says they want to get started with Summation, or arrives with a report and no account."
-allowed-tools: Bash(sumcli:*), Bash(uv:*), Bash(python3:*), Bash(sh:*), Bash(open:*), Bash(command:*), Bash(curl:*)
+allowed-tools: Bash(sumcli:*), Bash(uv:*), Bash(python3:*), Bash(sh:*), Bash(open:*), Bash(command:*), Bash(curl:*), Bash(claude:*), Bash(ls:*)
 ---
 
 # Summation onboarding
