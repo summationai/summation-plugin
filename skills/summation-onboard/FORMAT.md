@@ -18,9 +18,10 @@ from the bold lines alone.
 
 ## The setup receipt
 
-The moment setup lands, print a receipt table of exactly what reached their machine —
-and reprint it, grown, when the data connection tests green. The person watches rows
-accumulate as milestones land.
+Print it the first time **immediately after they choose a path** — rows for what is
+already in place (the plugin, its skills, sign-in state if any). Then reprint it,
+grown, as each later milestone lands: an install step, sign-in, the data connection
+testing green. The person watches rows accumulate as milestones land.
 
 | | What | Detail |
 |---|---|---|
