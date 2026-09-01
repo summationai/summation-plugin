@@ -16,11 +16,20 @@ already on disk beside this file. Below, `ROOT` means
 
 ## The contract, before any work
 
-1. **Open with the setup receipt** (FORMAT.md defines it): a table of what is already
-   in place — the plugin and its version, the skills that came with it, sign-in state.
-   You are running as an installed skill, so the person just installed something and
-   deserves one glance that says it worked. Verify every row with a command first
-   (`claude plugin list`); read versions and counts from output, never assume them.
+1. **Open with the setup receipt — a literal markdown table, before any prose.** The
+   person just installed something; the receipt is the one glance that says it worked.
+   Verify the rows first (`claude plugin list` — one command), then render exactly this
+   shape, with real values from that output:
+
+   | | What | Detail |
+   |---|---|---|
+   | ✓ | Summation plugin | `summation@summationai` v1.1.1 |
+   | ✓ | Skills | 16 installed with it — onboarding, connect, query, report… |
+   | ✓ | Signed in | their@email · workspace name — or "not yet; nothing needed for the grade" |
+
+   **Never send your first message without this table.** If another skill (such as
+   `start`) also claims onboarding, THIS contract governs first contact; `start` takes
+   over only after data is connected.
 2. Say what Summation is in one or two sentences, for a person who has never heard of
    it: an AI analyst that helps you monitor your business, get insights you can trust,
    and automate recurring work. It works from their data and their shared context —
