@@ -25,7 +25,7 @@ already on disk beside this file. Below, `ROOT` means
    |---|---|---|
    | ✓ | Summation plugin | `summation@summationai` v1.1.1 |
    | ✓ | Skills | 16 installed with it — onboarding, connect, query, report… |
-   | ✓ | Signed in | their@email · workspace name — or "not yet; nothing needed for the grade" |
+   | ✓ | Signed in | their@email · workspace name — or, when they are not: `— | Signed in | not yet` |
 
    **Never send your first message without this table.** If another skill (such as
    `start`) also claims onboarding, THIS contract governs first contact; `start` takes
@@ -53,9 +53,15 @@ already on disk beside this file. Below, `ROOT` means
    verified insights, automate recurring work** — each grounded in what they brought,
    with what it produces and what it costs them. If they brought a document, the free
    local grade is the concrete first step under verified insights: no account, no
-   credentials, nothing from them. Say so.
-4. Ask which one. Do no other work until they answer — the receipt's
-   verification commands are the only tool calls allowed before the ask.
+   credentials, nothing from them. Say so. Where an option needs an account, mark it
+   plainly inside the option — "**starts with your account (about two minutes)**" —
+   never as a separate warning block.
+4. Ask which one, and close with exactly this line after the question:
+   *"If it's 2 or 3, I'll open account setup first — about two minutes. If it's 1, I
+   can run the check now and have signup ready by the time it finishes."* (Renumber to
+   match your own list if the account-needing options sit elsewhere.) Do no other work
+   until they answer — the receipt's verification commands are the only tool calls
+   allowed before the ask.
 
 ## When they pick a path: declare the steps, then close them out
 
