@@ -26,6 +26,10 @@ already on disk beside this file. Below, `ROOT` means
    | ✓ | Summation plugin | `summation@summationai` v1.1.1 |
    | ✓ | Skills | 16 installed with it — onboarding, connect, query, report… |
    | ✓ | Signed in | their@email · workspace name — or, when they are not: `— | Signed in | not yet` |
+   | ✓ | Data sources | N connected — names — or, when none: `— | Data sources | not connected yet` |
+
+   The data-sources row is verified like every other: signed in → list the
+   connections; not signed in → it is always `not connected yet` (never guess).
 
    **Never send your first message without this table.** If another skill (such as
    `start`) also claims onboarding, THIS contract governs first contact; `start` takes
