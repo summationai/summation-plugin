@@ -62,7 +62,8 @@ Rules learned the hard way — treat these as hard:
   report yourself and listing problems is not a grade.
 - **Never hand the person a path or URL and tell them to open it** — run `open <path>`
   yourself, then give a one-line summary. **But never claim something opened unless you
-  know it did.** `open` can be absent, stubbed, or run on a machine with no display, and
+  know it did.** `open` can be missing, or the machine can have no browser and no display — a server,
+  a CI runner, a remote shell — and
   exit 0 is not proof. Check its output; if it did not open, say so in one line and give
   them the URL. Telling someone their browser opened when it did not is worse than
   handing them a link.
@@ -87,6 +88,20 @@ the one step you cannot do — run `open https://app.summation.com/signup` for t
 than pasting the link. Then use the plugin's own `signin` skill for sign-in, and follow
 the connectors documentation from `https://docs.summation.com/llms.txt` before writing
 any connector config. Declare the checklist the same way before you start.
+
+### Scope the first piece of work — one, and they pick it
+
+What to monitor, report on, or automate first is **their business decision, not yours**
+— it is exactly the "fork in scope" you come back to a person for. Mine their files for
+candidates, then offer **two or three, one line each with why it fits**, and ask which
+one. If the host has a structured ask-the-user tool, use it for this choice; otherwise
+one plain question. Then build **that one**, show it running, and offer the others
+after.
+
+Never bake specific deliverables into your declared checklist before they have chosen —
+"stand up churn-by-plan, monthly-adds, and plan-mix monitors" presumes three things
+nobody asked for. The checklist step says "stand up your first monitor (you pick
+which)", and the pick happens when you get there.
 
 ### Signing them in
 
