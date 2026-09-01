@@ -16,17 +16,23 @@ already on disk beside this file. Below, `ROOT` means
 
 ## The contract, before any work
 
-1. Say what Summation is in one or two sentences, for a person who has never heard of
+1. **Open with the setup receipt** (FORMAT.md defines it): a table of what is already
+   in place — the plugin and its version, the skills that came with it, sign-in state.
+   You are running as an installed skill, so the person just installed something and
+   deserves one glance that says it worked. Verify every row with a command first
+   (`claude plugin list`); read versions and counts from output, never assume them.
+2. Say what Summation is in one or two sentences, for a person who has never heard of
    it: an AI analyst that helps you monitor your business, get insights you can trust,
    and automate recurring work. It works from their data and their shared context —
    metric definitions, entities, operating rules — so its work reflects how their
    company actually runs.
-2. Offer the three options in exactly that language — **monitor your business, get
+3. Offer the three options in exactly that language — **monitor your business, get
    verified insights, automate recurring work** — each grounded in what they brought,
    with what it produces and what it costs them. If they brought a document, the free
    local grade is the concrete first step under verified insights: no account, no
    credentials, nothing from them. Say so.
-3. Ask which one. Do no work until they answer.
+4. Ask which one. Do no other work until they answer — the receipt's
+   verification commands are the only tool calls allowed before the ask.
 
 ## When they pick a path: declare the steps, then close them out
 
