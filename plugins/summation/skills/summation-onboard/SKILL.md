@@ -34,7 +34,16 @@ already on disk beside this file. Below, `ROOT` means
    it: an AI analyst that helps you monitor your business, get insights you can trust,
    and automate recurring work. It works from their data and their shared context —
    metric definitions, entities, operating rules — so its work reflects how their
-   company actually runs.
+   company actually runs. Then show **the whole house in one glance** — this second
+   table, right after that sentence, so they see the breadth before choosing a door:
+
+   | Once you're in | What it means |
+   |---|---|
+   | Invite your team | Multiplayer — teammates see the same workspace at app.summation.com, no agent needed on their side |
+   | Organize into projects | Each recurring piece of work lives in its own project with its data and history |
+   | Verify anything | Every figure in any document traced back to its source |
+   | Connect all your data | Postgres, BigQuery, Redshift, S3, spreadsheets — same few minutes each |
+   | Schedule everything | Anything built once re-runs on a cadence and delivers to email or Slack |
 3. Offer the three options **as a numbered list — 1., 2., 3., one line each, never
    bold paragraphs** — in exactly that language — **monitor your business, get
    verified insights, automate recurring work** — each grounded in what they brought,
