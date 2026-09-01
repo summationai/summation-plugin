@@ -16,6 +16,28 @@ from the bold lines alone.
   exact command or value. Your commands run through tools; do not echo them back
   as code blocks too.
 
+## The setup receipt
+
+The moment setup lands, print a receipt table of exactly what reached their machine —
+and reprint it, grown, when the data connection tests green. The person watches rows
+accumulate as milestones land.
+
+| | What | Detail |
+|---|---|---|
+| ✓ | Summation plugin | `summation@summationai` v1.1.1 |
+| ✓ | Skills | 16 installed with it — onboarding, connect, query, report, validate… |
+| ✓ | Signed in | their@email · workspace **name** |
+| ✓ | Live database | `connection-name` · connection test **green** · N tables attached: names |
+
+Rules:
+
+- **Verified rows only.** Every ✓ is backed by a command you just ran — `plugin list`
+  for the plugin and skills, `whoami` for sign-in, the connection test plus the attach
+  list for the database. A row you cannot evidence does not appear.
+- Rows appear only for what this session actually did. A grade-only session shows the
+  rows it earned, never a padded list.
+- Versions and counts are read from the command output, never assumed.
+
 ## Progress
 
 - Declare the numbered checklist before the first command.
