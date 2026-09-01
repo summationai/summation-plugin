@@ -35,7 +35,8 @@ already on disk beside this file. Below, `ROOT` means
    and automate recurring work. It works from their data and their shared context —
    metric definitions, entities, operating rules — so its work reflects how their
    company actually runs.
-3. Offer the three options in exactly that language — **monitor your business, get
+3. Offer the three options **as a numbered list — 1., 2., 3., one line each, never
+   bold paragraphs** — in exactly that language — **monitor your business, get
    verified insights, automate recurring work** — each grounded in what they brought,
    with what it produces and what it costs them. If they brought a document, the free
    local grade is the concrete first step under verified insights: no account, no
