@@ -225,49 +225,31 @@ Ask once whether their organization is on a dedicated host rather than the defau
 `api.summation.com` — the wrong base URL signs them into a tenant holding none of their
 data.
 
-### Credentials: found first, template second, never a paste
+### Connecting a database: the platform form is the path
 
-**Before asking for anything, look for credentials already on their machine** — `.env`
-at the project root, `config/database.yml`, a `DATABASE_URL` — the files their own
-scripts use. If you find one that matches the database they named, ask one line of
-consent: *"Your `.env` has the read-replica credentials — use those to connect?"* On
-yes, connect **automatically**: build the connection config from the file (write the
-config file with a script that reads the env — the secret never appears in a command
-argument or in your output), create and test the connection with the CLI, and delete
-the temp config once the test is green. The person never opens the product to type a
-password a file on their machine already holds.
-
-**Never ask someone to paste a password, key, or connection string into the
-conversation.** It puts the secret in a transcript, in your context, and in a tool
-argument. When no credential file exists:
-
-1. Write them a template beside their work and name the fields —
-   `./summation-connection.json`:
-   `{"config":{"pg_host":"","pg_port":5432,"pg_db":"","pg_user":"","pg_sslmode":"require"},"secrets":{"pg_pass":""}}`
-2. Say one line: *"Fill in the blanks and save it — I'll read it from there and delete
-   it once the connection is up."*
-3. Use it with `--config-file`. Never `cat` it, never echo a secret into a command
-   argument, never put one in a flag value.
-4. Delete it once `connections test` passes, and say that you did.
-
-If the credential lives in Keychain or a password manager, prefer that: name the exact
-item and have them fill the template from it.
-
-**When the sandbox blocks the credential plumbing, switch to the platform — immediately.**
-If reading the credential file or shipping the config is denied: do not chain hand-run
-commands at the person. You get at most ONE `!` handoff for the whole connect step, and
-any handoff command must fit on one short line (copy files to a short path like `~/c.json`
-BEFORE printing the command — long scratchpad paths wrap in the terminal and break).
-Past that one attempt, go to the product instead:
+Connecting means shipping a credential to Summation, and that is a thing the person does
+in the product, not something you plumb from a file. **Go straight to the Connectors
+form.** Do not read their `.env`, do not build a config file, do not try a CLI
+`connections create` first — those all move a secret through your context and the
+sandbox blocks them anyway; three dead attempts just burn the person's patience and trip
+the block circuit-breaker.
 
 1. `open https://app.summation.com/connectors` — the Connectors page (that is its name).
-2. Give them a fill table: every non-secret field verbatim (host, port, database, user,
-   SSL mode) and where the password lives on their machine ("the `PGPASSWORD` line in
-   your `.env`") — never the secret itself.
-3. They click **Test**, then save. The password goes straight from them to Summation —
-   the cleanest possible path for it.
-4. You verify with `connections list` + `connections test`, attach the tables, and carry
-   on. The person's part is one form, once.
+2. Give them a fill table: every non-secret field verbatim — host, port, database, user,
+   SSL mode — and **where the password lives on their machine** ("the `PGPASSWORD` line
+   in your `.env`, or your read-replica entry in 1Password"). Never the secret itself,
+   never asked for a paste into the chat.
+3. They fill it, click **Test**, save. The password goes straight from them to
+   Summation — it never touches your context, a file you wrote, or the transcript.
+4. Then you verify with `connections list` + `connections test`, attach the tables, and
+   carry on. Their part is one form, once.
+
+Why not read the `.env` yourself: even though their scripts use it, moving that secret
+through a config file you write is exactly the shape safety tooling stops — and rightly.
+The form is both the reliable path and the safer one. (If you are on a trusted machine
+with no sandbox and they explicitly ask you to wire it from a file, that is their call —
+but the form is the default and what you offer.)
+
 
 ## Confirm what the PERSON just did — before anything else
 
