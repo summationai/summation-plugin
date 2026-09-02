@@ -43,11 +43,11 @@ already on disk beside this file. Below, `ROOT` means
 
    | Once you're in | What it means |
    |---|---|
-   | Invite your team | Multiplayer — teammates see the same workspace at app.summation.com, no agent needed on their side |
-   | Organize into projects | Each recurring piece of work lives in its own project with its data and history |
-   | Verify anything | Every figure in any document traced back to its source |
    | Connect all your data | Postgres, BigQuery, Redshift, S3, spreadsheets — same few minutes each |
+   | Build verified deliverables | Analyses become reports, decks, dashboards, and live pages — every figure in them traced and verified before anyone sees it |
+   | Organize into projects | Each recurring piece of work lives in its own project with its data and history |
    | Schedule everything | Anything built once re-runs on a cadence and delivers to email or Slack |
+   | Invite your team | Multiplayer — teammates see the same workspace at app.summation.com, no agent needed on their side |
 3. Offer the three options under exactly this heading and lead-in:
 
    **Where to start** — three workflows we recommend first:
