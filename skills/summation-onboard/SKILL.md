@@ -23,7 +23,7 @@ already on disk beside this file. Below, `ROOT` means
 
    | | What | Detail |
    |---|---|---|
-   | ✓ | Summation plugin | `summation@summationai` v1.1.1 |
+   | ✓ | Summation toolkit | `summation@summationai` v1.1.1 (plugin) |
    | ✓ | Skills | 16 installed with it — onboarding, connect, query, report… |
    | ✓ | Signed in | their@email · workspace name — or, when they are not: `— | Signed in | not yet` |
    | ✓ | Data sources | N connected — names — or, when none: `— | Data sources | not connected yet` |
