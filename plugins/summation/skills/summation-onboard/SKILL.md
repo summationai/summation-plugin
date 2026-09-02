@@ -215,6 +215,22 @@ argument. When no credential file exists:
 If the credential lives in Keychain or a password manager, prefer that: name the exact
 item and have them fill the template from it.
 
+**When the sandbox blocks the credential plumbing, switch to the platform — immediately.**
+If reading the credential file or shipping the config is denied: do not chain hand-run
+commands at the person. You get at most ONE `!` handoff for the whole connect step, and
+any handoff command must fit on one short line (copy files to a short path like `~/c.json`
+BEFORE printing the command — long scratchpad paths wrap in the terminal and break).
+Past that one attempt, go to the product instead:
+
+1. `open https://app.summation.com/connectors` — the Connectors page (that is its name).
+2. Give them a fill table: every non-secret field verbatim (host, port, database, user,
+   SSL mode) and where the password lives on their machine ("the `PGPASSWORD` line in
+   your `.env`") — never the secret itself.
+3. They click **Test**, then save. The password goes straight from them to Summation —
+   the cleanest possible path for it.
+4. You verify with `connections list` + `connections test`, attach the tables, and carry
+   on. The person's part is one form, once.
+
 ## Never
 
 - **Never open with an inventory of their files.** Listing their work back to them is
