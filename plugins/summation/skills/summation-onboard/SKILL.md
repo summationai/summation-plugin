@@ -160,8 +160,18 @@ picked, one built, the others offered after.
 ### Signing them in
 
 Sign-in is the `signin` skill's job when this skill is running as a plugin — prefer it.
-For a shell login, **drive the device flow yourself**: run `sumcli auth login`, surface
-the short code, open the approval URL for them, and poll until it lands — this works
+For a shell login, **set the host first, always** — a fresh `sumcli` defaults to the
+WRONG environment (sandbox), so never run `auth login` before:
+
+```
+sumcli config set-profile work --base-url https://api.summation.com && sumcli config use work
+```
+
+Then **drive the device flow yourself**: run `sumcli auth login`, surface the short
+code, open the approval URL for them, and poll until it lands. Confirm the printed URL
+is `app.summation.com` before telling them to approve — if it says sandbox, the host is
+wrong; fix it, never wave them through. **The moment an activation code appears —
+whether you ran the login or they did via `!` — open the approval URL for them.** — this works
 and has been the smoothest sign-in in testing. Say one line first ("signing you in —
 your browser will ask you to approve code XXXX"). Only if running it is blocked, hand
 them the one command with the `!` prefix so its output lands in the session:
