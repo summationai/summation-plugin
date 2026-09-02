@@ -157,6 +157,29 @@ tier within a day"), plus a free option: "something else — tell me what you wa
 hand today." Candidates are earned from profiling, never guessed from file names. One
 picked, one built, the others offered after.
 
+### The intro ENDS at the first traced answer — everything past it is offered
+
+The monitor/report/automation paths all reach the aha the same fast way and stop there:
+
+1. **Ask Summation the picked question — a chat query, not a report.** `chats create`
+   returns the answer plus the SQL that produced it, in under a minute. Show the answer
+   and say the query is readable ("here's the query it ran — read it before you trust
+   the number"). This is the win: a traceable answer from their real data, fast.
+2. **Open it in their workspace and STOP.** "That's Summation working — your first
+   answer, from your data, with the query behind it, in your workspace." This is the end
+   of onboarding. They can stop here with a real result in hand.
+3. **Then offer the deeper commitments, one at a time, each declinable:**
+   - *"Want this as a saved, verified report?"* → only now `reports generate` (the slow
+     `.sdoc` build — say "usually a few minutes; complex runs up to 25, I'll tell you
+     when it lands"). This is where full claim-by-claim verification happens.
+   - *"Put it on a schedule — weekly to your inbox?"* → `schedules create`.
+   A "not now" to either means onboarding is **complete and successful**, not abandoned.
+
+Language honesty: at step 1 the promise is "the answer and the query behind it" — the
+figure came from their live connection and the SQL is visible. Save the stronger "every
+figure verified" for the report artifact in step 3, where claim-by-claim checking
+actually runs. Never call a chat answer "verified" — call it traced.
+
 ### Signing them in
 
 Sign-in is the `signin` skill's job when this skill is running as a plugin — prefer it.
