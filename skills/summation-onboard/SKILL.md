@@ -28,6 +28,10 @@ already on disk beside this file. Below, `ROOT` means
    | ✓ | Signed in | their@email · workspace name — or, when they are not: `— | Signed in | not yet` |
    | ✓ | Data sources | N connected — names — or, when none: `— | Data sources | not connected yet` |
 
+   If a permission block stops the install or a verification, the affected row shows
+   `?` with the honest reason and the one command that fixes it — and the REST of the
+   first message still arrives in full. Blocks change one row, never the structure.
+
    The data-sources row is verified like every other: signed in → list the
    connections; not signed in → it is always `not connected yet` (never guess).
 
@@ -45,7 +49,7 @@ already on disk beside this file. Below, `ROOT` means
    |---|---|
    | Connect all your data | Postgres, BigQuery, Redshift, S3, spreadsheets — same few minutes each |
    | Build verified deliverables | Analyses become reports, decks, dashboards, and live pages — every figure in them traced and verified before anyone sees it |
-   | Organize into projects | Each recurring piece of work lives in its own project with its data and history |
+   | Grow shared context | Metrics and operating knowledge used consistently across every workflow — and it sticks: context, corrections, and past work persist for the whole team and improve over time |
    | Schedule everything | Anything built once re-runs on a cadence and delivers to email or Slack |
    | Invite your team | Multiplayer — teammates see the same workspace at app.summation.com, no agent needed on their side |
 3. Offer the three options under exactly this heading and lead-in:
