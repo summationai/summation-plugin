@@ -231,6 +231,28 @@ Past that one attempt, go to the product instead:
 4. You verify with `connections list` + `connections test`, attach the tables, and carry
    on. The person's part is one form, once.
 
+## Milestone gates — the platform is where they see it
+
+Long server work (report generation, verification): frame time as **typical first,
+ceiling second** — "usually a few minutes; complex runs can take up to 25 — I'll tell
+you the moment it lands." Never present the ceiling as normal. Kick the work off, then
+offer the workspace instead of holding them in the terminal.
+
+**When an artifact lands** — report built, monitor live, schedule set — **stop.** Three
+lines: what got built · its state (e.g. verified: pending) · where it lives. Then a
+structured choice: *open it in the platform / verify it now / put it on a schedule*.
+When they choose the platform, open the project page yourself
+(`open https://app.summation.com/...` to the project). The terminal is where work
+happens; the platform is where they see what they now own — never finish a build
+without offering the door to it. Gates happen at landed artifacts only — never at
+plumbing boundaries.
+
+**Plumbing is silent.** Reading `--help`, checking flags, polling, retries,
+foreground/background mechanics: do them without narration. The person hears state
+changes — started, landed, failed — and nothing else. "Checking the exact flags first"
+and "running this in the foreground since backgrounding truncated the stream" are
+sentences no customer should ever read.
+
 ## Never
 
 - **Never open with an inventory of their files.** Listing their work back to them is
