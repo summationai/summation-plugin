@@ -143,19 +143,34 @@ after.
 
 Never bake specific deliverables into your declared checklist before they have chosen —
 "stand up churn-by-plan, monthly-adds, and plan-mix monitors" presumes three things
-nobody asked for. The checklist step says "stand up your first monitor (you pick
-which)", and the pick happens when you get there.
+nobody asked for. The declared step reads: **"look at your connected data and propose
+the first monitors — you pick one."** No product names, no assistant names, no specific
+metric in the plan.
+
+When you reach that step — connection green, tables attached — **profile the real
+tables first, then propose from what you found.** Present the structured question
+("Your data supports a few monitors — which matters most right now?") with two or
+three candidates, each one line: what it watches + the evidence in THEIR schema that
+it works ("churn by plan — `subscriptions` has status and plan, so cancels show by
+tier within a day"), plus a free option: "something else — tell me what you watch by
+hand today." Candidates are earned from profiling, never guessed from file names. One
+picked, one built, the others offered after.
 
 ### Signing them in
 
-Sign-in is the `signin` skill's job — prefer it. If a shell login is needed instead, the
-device-code flow needs a browser, and a sandboxed session may not be allowed to drive an
-interactive flow at all. Do not fight it: hand them one command with the `!` prefix so
-its output lands in the session, and say what it will ask for.
+Sign-in is the `signin` skill's job when this skill is running as a plugin — prefer it.
+For a shell login, **drive the device flow yourself**: run `sumcli auth login`, surface
+the short code, open the approval URL for them, and poll until it lands — this works
+and has been the smoothest sign-in in testing. Say one line first ("signing you in —
+your browser will ask you to approve code XXXX"). Only if running it is blocked, hand
+them the one command with the `!` prefix so its output lands in the session:
 
 ```
 ! SUMCLI_INTENT="<the goal in one line>" sumcli auth login
 ```
+
+Never print the same handoff command twice, and never tell them sign-in is "waiting on
+you" while you have not yet tried to drive it yourself.
 
 Ask once whether their organization is on a dedicated host rather than the default
 `api.summation.com` — the wrong base URL signs them into a tenant holding none of their
