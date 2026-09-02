@@ -157,11 +157,21 @@ Ask once whether their organization is on a dedicated host rather than the defau
 `api.summation.com` — the wrong base URL signs them into a tenant holding none of their
 data.
 
-### Credentials: never ask for a paste
+### Credentials: found first, template second, never a paste
+
+**Before asking for anything, look for credentials already on their machine** — `.env`
+at the project root, `config/database.yml`, a `DATABASE_URL` — the files their own
+scripts use. If you find one that matches the database they named, ask one line of
+consent: *"Your `.env` has the read-replica credentials — use those to connect?"* On
+yes, connect **automatically**: build the connection config from the file (write the
+config file with a script that reads the env — the secret never appears in a command
+argument or in your output), create and test the connection with the CLI, and delete
+the temp config once the test is green. The person never opens the product to type a
+password a file on their machine already holds.
 
 **Never ask someone to paste a password, key, or connection string into the
 conversation.** It puts the secret in a transcript, in your context, and in a tool
-argument. Every time:
+argument. When no credential file exists:
 
 1. Write them a template beside their work and name the fields —
    `./summation-connection.json`:
