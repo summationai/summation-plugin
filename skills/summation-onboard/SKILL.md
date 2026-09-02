@@ -269,6 +269,15 @@ Past that one attempt, go to the product instead:
 4. You verify with `connections list` + `connections test`, attach the tables, and carry
    on. The person's part is one form, once.
 
+## Confirm what the PERSON just did — before anything else
+
+When the person takes an action — approves a sign-in code, fills a template, clicks Test —
+the very next message acknowledges it: reprint the receipt with that row flipped, in one
+line ("signed in as you · workspace X"). Do this **before** any prep work — reading docs,
+listing connections, profiling files. They just did something with their own hands; making
+them wait through five silent tool calls to learn it worked is the opposite of a receipt.
+Prep is silent and comes after the acknowledgment, never before it.
+
 ## Milestone gates — the platform is where they see it
 
 Long server work (report generation, verification): frame time as **typical first,
