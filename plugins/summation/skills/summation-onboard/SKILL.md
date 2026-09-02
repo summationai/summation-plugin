@@ -183,20 +183,26 @@ actually runs. Never call a chat answer "verified" — call it traced.
 ### Signing them in
 
 Sign-in is the `signin` skill's job when this skill is running as a plugin — prefer it.
-**Device-code login is the ONE step you hand off, not drive.** `sumcli auth login`
-blocks while it streams a code and waits for browser approval — run it in a tool call
-and it either hangs to timeout (foreground) or the code vanishes into a logfile you
-fumble (background, observed thrash). The clean path is the `!` prefix: it streams the
-code live into the session. So for login, after setting the host, give them the one
-line and let them run it:
+**Drive the device login yourself — this exact pattern, which works:**
+
+```
+nohup sumcli auth login > "$LOG" 2>&1 &      # background it WITH a logfile
+# read $LOG until the activate URL and code appear (a few seconds)
+open "<the activate URL from the log>"        # open it for them, always
+# then poll: sumcli auth whoami until it returns signed-in
+```
+
+Say one line while it runs: *"Signing you in — your browser is asking you to approve
+code XXXX."* Do not make the person run a command for this; they only click Approve.
+
+Only if backgrounding or `open` is blocked do you hand it off, and then exactly once:
 
 ```
 ! PATH="$HOME/.local/bin:$PATH" SUMCLI_INTENT="<goal>" sumcli auth login
 ```
 
-Say "approve the code in your browser and I'll pick up." Then poll `sumcli auth whoami`
-until it returns signed-in. Do NOT background `auth login` yourself, do not retry it in
-a tool call, and do not chain more than this one handoff.
+Even then, the moment the code appears in the session, `open` the activate URL for
+them. Never print the handoff twice, and never leave a code on screen unopened.
 
 For a shell login, **set the host first, always** — a fresh `sumcli` defaults to the
 WRONG environment (sandbox), so never run `auth login` before:
