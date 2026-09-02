@@ -98,9 +98,10 @@ open ./grade-out/grade-artifact.html                            # step 4
 
 Rules learned the hard way — treat these as hard:
 
-- **Never pipe a remote script into a shell, and never run a downloaded installer.**
-  Safety classifiers block both shapes, correctly. Everything you need is bundled; if
-  something is missing, say so rather than fetching it.
+- **Install named packages only — never a piped remote script, never a downloaded
+  installer.** A named package the person can inspect, verify, and uninstall; a piped
+  script leaves no trail. Everything you need is bundled; if something is missing, say
+  so rather than fetching it.
 - **Never hand-roll a substitute for the grade.** `grade.py` is the grade. Reading the
   report yourself and listing problems is not a grade.
 - **Never hand the person a path or URL and tell them to open it** — run `open <path>`
